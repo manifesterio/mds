@@ -1,0 +1,5 @@
+.DS_Store
+/mdscontrolplane
+__pycache__/
+*.pyc
+/.tools/

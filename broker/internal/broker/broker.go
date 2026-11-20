@@ -1,0 +1,291 @@
+// Package broker is the Kafka broker state machine: stateless, pure and
+// deterministic (core.Machine), with S3 as the data plane and the control
+// plane assigning offsets. The simulator and the production loop (dst/live) drive the same code.
+//
+// Pipeline of a produce: the batch joins the open segment buffer; a flush
+// (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,
+// uploads it (ObjectPut) and commits it (CommitSegment); only then is the client
+// answered, with a "produce_acked" fact emitted right before the Send.
+// Commits go out strictly in segment order, so a partition's batches get
+// offsets in the order the broker admitted them. Every retry resends the
+// identical request under the same segment key, which both the object store and
+// the control plane treat idempotently.
+//
+// The broker is stateless cattle (decisions 41-44): no registration, epoch or
+// fencing, no idempotent producers, and it never proposes an offset. The
+// segment key is a random id drawn from the injected Environment (seg/<32 hex>).
+package broker
+
+import (
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
+)
+
+// Fixed timer ids; retry timers use the id of the segment or op they belong to
+// (ids >= firstID).
+const (
+	timerFlush = machine.TimerID(2)
+	firstID    = 16
+)
+
+// Broker is the machine. Build it with New.
+type Broker struct {
+	env    core.Environment
+	self   machine.NodeInstance
+	config Config
+	codec  kafkawire.Codec
+
+	started bool
+
+	nextRequestNumber machine.RequestID
+	nextID            uint64
+	timerGen          machine.TimerVersion
+	stopping          bool
+	exited            bool
+
+	conns  []*connection
+	dirty  []*connection        // connections whose queue head may be ready (drained at end of Step)
+	topics []contract.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
+	live   []core.BrokerAddr    // live brokers from LiveBrokers; nil means self only
+
+	now        machine.NodeTime // At of the event being stepped (set by Step; not state)
+	open       openSegment
+	segs       []*segment // sealed segments in commit order
+	ops        []*operation
+	bufBytes   int              // produce bytes admitted and not yet answered
+	pressure   bool             // above MaxBufferedBytes, until back at ResumeBufferedBytes
+	pressureAt machine.NodeTime // when pressure began (fact timing only, not state)
+	guess      uint64
+}
+
+// New returns the core.MachineFactory of the broker.
+func New(config Config) core.MachineFactory {
+	config = config.withDefaults()
+	return func(env core.Environment, self machine.NodeInstance) core.Machine {
+		return &Broker{env: env, self: self, config: config, nextID: firstID}
+	}
+}
+
+func (b *Broker) nextRequestID() machine.RequestID { b.nextRequestNumber++; return b.nextRequestNumber }
+func (b *Broker) id() uint64                       { b.nextID++; return b.nextID }
+
+func (b *Broker) backoff(n int) machine.Duration {
+	d := b.config.RetryBase
+	for ; n > 1 && d < b.config.RetryMax; n-- {
+		d *= 2
+	}
+	return min(d, b.config.RetryMax)
+}
+
+func (b *Broker) timer(id machine.TimerID, n int) (core.SetTimer, machine.TimerVersion) {
+	b.timerGen++
+	return core.SetTimer{ID: id, Gen: b.timerGen, After: b.backoff(n)}, b.timerGen
+}
+
+// Step implements core.StateMachine.
+func (b *Broker) Step(event core.Event) []core.Action {
+	if b.exited {
+		return nil
+	}
+	b.now = event.At
+	var acts []core.Action
+	switch e := event.Body.(type) {
+	case core.NodeStarted:
+		b.started = true
+	case core.StopRequest:
+		acts = b.stop()
+	case core.ConnOpened:
+		acts = b.onOpen(e)
+	case core.BytesReceived:
+		acts = b.onBytes(e)
+	case core.ConnClosed:
+		acts = b.onClosed(e)
+	case core.TimerFired:
+		acts = b.onTimer(e)
+	case core.ObjectDone:
+		acts = b.onObject(e.Result)
+	case core.ControlPlaneDone:
+		acts = b.onControlPlane(e)
+	case core.LiveBrokers:
+		b.live = e.Brokers
+	}
+	return b.finish(acts)
+}
+
+// finish drains ready responses, applies admission control and ends a graceful
+// stop.
+func (b *Broker) finish(acts []core.Action) []core.Action {
+	acts = b.drainDirty(acts)
+	acts = b.updatePressure(acts)
+	acts = b.syncReads(acts)
+	return b.maybeExit(acts)
+}
+
+// ---- stop ----
+
+// stop stops admission, flushes the open segment and lets in-flight work
+// finish; maybeExit emits ShutdownDone once everything is answered.
+func (b *Broker) stop() []core.Action {
+	if b.stopping {
+		return nil
+	}
+	b.stopping = true
+	acts := b.seal(closeOnStop)
+	b.endParked(func(*operation) bool { return true }) // parked Fetches answer now
+	return append(acts, b.failGroupCalls()...)
+}
+
+func (b *Broker) idle() bool {
+	if len(b.ops) > 0 || len(b.segs) > 0 || len(b.open.batches) > 0 {
+		return false
+	}
+	for _, c := range b.conns {
+		if len(c.q) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *Broker) maybeExit(acts []core.Action) []core.Action {
+	if !b.stopping || b.exited || !b.idle() {
+		return acts
+	}
+	b.exited = true
+	for _, c := range b.conns {
+		acts = append(acts, core.CloseConn{Conn: c.id})
+	}
+	b.conns = nil
+	return append(acts, recordFact("broker_exited"), core.ShutdownDone{})
+}
+
+// ---- admission control ----
+
+// updatePressure turns pressure on when the broker holds too many unacked
+// produce bytes and off once back at the low mark.
+func (b *Broker) updatePressure(acts []core.Action) []core.Action {
+	switch {
+	case !b.pressure && b.bufBytes >= b.config.MaxBufferedBytes:
+		b.pressure, b.pressureAt = true, b.now
+		b.env.Reachable(readsPausedByBackpressure)
+		acts = append(acts, recordFact("backpressure_on",
+			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)}))
+	case b.pressure && b.bufBytes <= b.config.ResumeBufferedBytes:
+		b.pressure = false
+		b.env.Reachable(readsResumedAfterBackpressure)
+		acts = append(acts, recordFact("backpressure_off",
+			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)},
+			machine.Field{Key: "paused_ns", Value: machine.Int64Value(b.now - b.pressureAt)}))
+	}
+	return acts
+}
+
+// syncReads pauses reads on every client connection under pressure or while
+// stopping, and resumes them otherwise.
+func (b *Broker) syncReads(acts []core.Action) []core.Action {
+	want := b.pressure || b.stopping
+	for _, c := range b.conns {
+		if c.closing || c.paused == want {
+			continue
+		}
+		c.paused = want
+		if want {
+			acts = append(acts, core.PauseReads{Conn: c.id})
+		} else {
+			acts = append(acts, core.ResumeReads{Conn: c.id})
+		}
+	}
+	return acts
+}
+
+// ---- timers ----
+
+func (b *Broker) onTimer(e core.TimerFired) []core.Action {
+	if e.ID == timerFlush {
+		return b.onFlushTimer(e)
+	}
+	if s := b.segmentByTimer(e.ID); s != nil {
+		return b.segmentTimer(s, e.Gen)
+	}
+	if o := b.opByTimer(e.ID); o != nil {
+		return b.opTimer(o, e.Gen)
+	}
+	return nil
+}
+
+func (b *Broker) onFlushTimer(e core.TimerFired) []core.Action {
+	if e.Gen != b.open.gen || b.open.gen == 0 {
+		return nil
+	}
+	return b.seal(closeOnTimer)
+}
+
+func (b *Broker) segmentByTimer(id machine.TimerID) *segment {
+	for _, s := range b.segs {
+		if machine.TimerID(s.id) == id {
+			return s
+		}
+	}
+	return nil
+}
+
+func (b *Broker) segmentByRequest(request machine.RequestID, st segmentState) *segment {
+	if request == 0 {
+		return nil
+	}
+	for _, s := range b.segs {
+		if s.request == request && s.state == st {
+			return s
+		}
+	}
+	return nil
+}
+
+// ---- completions ----
+
+func (b *Broker) onControlPlane(e core.ControlPlaneDone) []core.Action {
+	if s := b.segmentByRequest(e.Req, segmentCommit); s != nil {
+		return b.onCommit(s, e)
+	}
+	if o := b.findOp(e.Req); o != nil && o.state == opControlPlane {
+		return b.onOpCP(o, e)
+	}
+	return nil
+}
+
+// onObject routes an object store result. The broker sends only Put and Get, so a
+// DeleteDone or a ListDone is not expected and is ignored.
+func (b *Broker) onObject(result objectstore.Result) []core.Action {
+	switch r := result.(type) {
+	case objectstore.PutDone:
+		return b.onPut(r)
+	case objectstore.GetDone:
+		return b.onGet(r)
+	case objectstore.DeleteDone, objectstore.ListDone:
+		return nil
+	}
+	return nil
+}
+
+func (b *Broker) onPut(e objectstore.PutDone) []core.Action {
+	if s := b.segmentByRequest(e.Req, segmentUpload); s != nil {
+		return b.onPutDone(s, e)
+	}
+	return nil
+}
+
+func (b *Broker) onGet(e objectstore.GetDone) []core.Action {
+	if o := b.findOp(e.Req); o != nil && o.state == opGet {
+		return b.onFetchGet(o, e)
+	}
+	return nil
+}
+
+func recordFact(name string, fs ...machine.Field) core.RecordFact {
+	return core.RecordFact{Fact: machine.Fact{Name: name, Fields: fs}}
+}
+
+var _ core.Machine = (*Broker)(nil)

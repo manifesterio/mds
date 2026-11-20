@@ -1,0 +1,176 @@
+package rebalance
+
+import (
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
+)
+
+// CallID names one RPC. The host gives each call its own id, unique in one
+// run of the process. Every call gets one Reply, unless it is abandoned.
+type CallID uint64
+
+// The plain call types of the group protocol (Protocol, Member, Assignment) and
+// the answers JoinAnswer, SyncAnswer, LeaveAnswer, DescribeAnswer and
+// GroupDescription are generated from api/controlplane/v1/controlplane.proto
+// into wire_types_gen.go. The inputs below carry a call id, so they are written
+// by hand.
+
+// Input is the input of the machine: a sealed sum of the cases below (docs/architecture.md
+// section 3), TimerFired and the private drainLater. Every case has a Tag and a Fold method
+// (fold.go), so a new case without them does not compile.
+//
+//sumtype:decl
+type Input interface {
+	machine.Message
+	// Tag is the trace-hash number of the case.
+	Tag() uint64
+	isInput()
+}
+
+// Output is what the machine returns from a Step: a sealed sum of the cases below. The
+// host turns each case into real work. Every case has a Tag and a Fold method.
+//
+//sumtype:decl
+type Output interface {
+	machine.Message
+	// Tag is the trace-hash number of the case.
+	Tag() uint64
+	isOutput()
+}
+
+// The inputs (docs/architecture.md section 3).
+type (
+	// Join is a JoinGroup call. An empty MemberID asks for a new member.
+	// RebalanceTimeoutMs 0 means the session timeout.
+	Join struct {
+		Call               CallID
+		Group              string
+		MemberID           string
+		GroupInstanceID    string
+		ClientID           string
+		ClientHost         string
+		SessionTimeoutMs   int32
+		RebalanceTimeoutMs int32
+		ProtocolType       string
+		Protocols          []Protocol // in the member's order of preference
+	}
+	// Sync is a SyncGroup call. Only the leader's Assignments are used.
+	Sync struct {
+		Call        CallID
+		Group       string
+		MemberID    string
+		Generation  int32
+		Assignments []Assignment
+	}
+	// Heartbeat is a Heartbeat call.
+	Heartbeat struct {
+		Call       CallID
+		Group      string
+		MemberID   string
+		Generation int32
+	}
+	// Leave is a LeaveGroup call. The answer has one code per member.
+	Leave struct {
+		Call    CallID
+		Group   string
+		Members []string
+	}
+	// OffsetCommit is an OffsetCommit call. The machine sets Op.TimeMs.
+	OffsetCommit struct {
+		Call CallID
+		Op   contract.OffsetCommit
+	}
+	// Describe is a DescribeGroups call.
+	Describe struct {
+		Call   CallID
+		Groups []string
+	}
+	// List is a ListGroups call.
+	List struct {
+		Call CallID
+	}
+	// CallAbandoned says the RPC context of Call ended. The call gets no reply.
+	CallAbandoned struct {
+		Call CallID
+	}
+	// RoleChanged says whether the replica is now the active appender and Ready.
+	RoleChanged struct {
+		Active bool
+	}
+	// ReplicaReply is the replica's answer to a SubmitCommand or a SubmitRead.
+	ReplicaReply struct {
+		Req  machine.RequestID
+		Done runtime.ControlPlaneDone
+	}
+	// TimerFired says that the timer ID fired. The machine ignores it when Gen is not the
+	// current generation of that timer. The host makes it from a SetTimer.
+	TimerFired struct {
+		ID  machine.TimerID
+		Gen machine.TimerVersion
+	}
+)
+
+// The outputs.
+type (
+	// SetTimer asks the host for a TimerFired{ID, Gen} after After. A pending timer with the
+	// same ID is replaced.
+	SetTimer struct {
+		ID    machine.TimerID
+		Gen   machine.TimerVersion
+		After machine.Duration
+	}
+	// CancelTimer removes the pending timer ID. It is only an optimization: the machine
+	// ignores a TimerFired of an old Gen.
+	CancelTimer struct {
+		ID machine.TimerID
+	}
+	// SendSelf asks the host to give Msg back to the machine as a later input.
+	SendSelf struct {
+		Msg Input
+	}
+	// SubmitCommand asks the replica to log Op: GroupInstall, GroupAssign,
+	// GroupRemove or OffsetCommit. The answer comes back as a ReplicaReply.
+	SubmitCommand struct {
+		Req machine.RequestID
+		Op  runtime.ControlPlaneOperation
+	}
+	// SubmitRead asks the replica to read Op: ListGroups or DescribeGroup.
+	// Fresh false is a LocalRead. Fresh true is a read that waits for a fresh
+	// check of the log tail (a ControlPlaneDeliver read).
+	SubmitRead struct {
+		Req   machine.RequestID
+		Op    runtime.ControlPlaneOperation
+		Fresh bool
+	}
+	// Reply answers Call. Body is nil when Err is not OK, and for a heartbeat.
+	Reply struct {
+		Call CallID
+		Err  runtime.ErrCode
+		Body Answer
+	}
+)
+
+// Answer is the body of a Reply: JoinAnswer, SyncAnswer, LeaveAnswer,
+// CommitAnswer, DescribeAnswer or ListAnswer.
+//
+//sumtype:decl
+type Answer interface{ isAnswer() }
+
+type (
+	// CommitAnswer has one code per offset of the call, in order.
+	CommitAnswer struct {
+		contract.OffsetCommitResp
+	}
+	// ListAnswer has every group in memory, by name.
+	ListAnswer struct {
+		Groups []contract.GroupSummary
+	}
+)
+
+func (JoinAnswer) isAnswer()     {}
+func (SyncAnswer) isAnswer()     {}
+func (LeaveAnswer) isAnswer()    {}
+func (CommitAnswer) isAnswer()   {}
+func (DescribeAnswer) isAnswer() {}
+func (ListAnswer) isAnswer()     {}

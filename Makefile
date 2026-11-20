@@ -1,0 +1,91 @@
+# Root build of the monorepo. It only calls the Makefile of each module, in this order:
+#   dst, shared, controlplane, broker  (a module may import only the modules before it).
+# `make build` is the full gate. It ends by building the two binaries into bin/.
+# `make all` runs every root verification target (not install-hooks).
+# Toolchain and commit hook: `mise install` (pins in mise.toml; postinstall runs make install-hooks).
+# Rules shared by the modules (fmt-check, vet, lint, modernize, ascii-check) are in ops/make/common.mk.
+# The commit hook (ops/githooks/pre-commit) runs `make build`.
+# Bypass once: SKIP_BUILD_HOOK=1 git commit ...
+
+.PHONY: all build check-deps test-deps-guard check-modules-standalone generate test it sim sim-campaign determinism install-hooks image-cp image-broker image-all
+
+# Full verification: every root gate except install-hooks (one-time local setup).
+# Overlaps build on purpose so each named target is exercised.
+all: check-deps test-deps-guard generate check-modules-standalone build test sim sim-campaign determinism
+
+# The first step of build is the dependency order check (ops/scripts/check-module-deps.sh).
+# Its own test (test-deps-guard) runs right after it.
+# check-modules-standalone runs after the module builds so generated files exist
+# (controlplane build runs generate; the commit hook only runs make build).
+build:
+	$(MAKE) check-deps
+	$(MAKE) test-deps-guard
+	$(MAKE) -C dst build
+	$(MAKE) -C shared build
+	$(MAKE) -C controlplane build
+	$(MAKE) -C broker build
+	$(MAKE) check-modules-standalone
+	mkdir -p bin
+	cd controlplane && go build -o ../bin/mdscontrolplane ./cmd/mdscontrolplane
+	cd broker && go build -o ../bin/mdsbroker ./cmd/mdsbroker
+
+# Checks that no module requires a module to its right (dst <- shared <- controlplane <- broker).
+check-deps:
+	bash ops/scripts/check-module-deps.sh
+
+test-deps-guard:
+	bash ops/scripts/check-module-deps_test.sh
+
+# Each module must stay tidy and build with GOWORK=off (ops/scripts/check-modules-standalone.sh).
+check-modules-standalone:
+	bash ops/scripts/check-modules-standalone.sh
+
+# Only the control plane generates Go (the proto lives in controlplane/api). The broker imports it.
+generate:
+	$(MAKE) -C controlplane generate
+
+test:
+	$(MAKE) -C dst test
+	$(MAKE) -C shared test
+	$(MAKE) -C controlplane test
+	$(MAKE) -C broker test
+
+# Integration tests (Podman required): control plane then broker.
+# Also run from each module's make build (commit hook), so Podman must be up for commits.
+# Each module fails when Podman is down and never skips for a missing backend.
+it:
+	$(MAKE) -C controlplane it
+	$(MAKE) -C broker it
+
+# Targets a module does not have are left out on purpose (the list below names each module).
+# dst has no sim and no sim-campaign. broker has no determinism target: it runs its script.
+sim:
+	$(MAKE) -C controlplane sim
+	$(MAKE) -C broker sim
+
+sim-campaign:
+	$(MAKE) -C controlplane sim-campaign
+	$(MAKE) -C broker sim-campaign
+
+determinism:
+	$(MAKE) -C dst determinism
+	$(MAKE) -C controlplane determinism
+	bash ops/broker/scripts/ci-determinism.sh
+
+# Symlink the hook into .git/hooks so every commit runs `make build`.
+# Does not change git config.
+install-hooks:
+	@mkdir -p .git/hooks
+	@ln -sfn ../../ops/githooks/pre-commit .git/hooks/pre-commit
+	@chmod +x ops/githooks/pre-commit
+	@echo "installed .git/hooks/pre-commit -> ops/githooks/pre-commit"
+
+# Container images (Podman). Build context is the repo root; see deploy/container/README.md.
+image-cp:
+	podman build -f deploy/container/mdscontrolplane.Containerfile -t mdscontrolplane:dev .
+
+image-broker:
+	podman build -f deploy/container/mdsbroker.Containerfile -t mdsbroker:dev .
+
+image-all:
+	podman build -f deploy/container/mds-all.Containerfile -t mds-all:dev .
