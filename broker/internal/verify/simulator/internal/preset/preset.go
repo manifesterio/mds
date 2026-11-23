@@ -1,5 +1,5 @@
 // Package preset holds the default schedule and fault knobs, the swarm and the
-// fault coverage rule that the echo and kafka scenarios share.
+// fault coverage rule of the scenario.
 package preset
 
 import (
@@ -97,12 +97,8 @@ type FaultCoverage struct {
 	GracefulStop assert.Sometimes
 }
 
-// The fault coverage assertions of the two scenarios.
+// The fault coverage assertions of the scenario.
 var (
-	EchoFaultCoverage = FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
-		HardCrash:    assert.NewSometimes("echo: fault fired: hard crash"),
-		GracefulStop: assert.NewSometimes("echo: fault fired: graceful stop"),
-	}
 	KafkaFaultCoverage = FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
 		HardCrash:    assert.NewSometimes("kafka: fault fired: hard crash"),
 		GracefulStop: assert.NewSometimes("kafka: fault fired: graceful stop"),

@@ -4,15 +4,12 @@ import (
 	"fmt"
 	"go/parser"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
-	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
@@ -38,30 +35,12 @@ var objectCases = []string{
 	"list empty prefix", "list prefix with slash", "list prefix without slash", "list with keys", "list without keys",
 }
 
-var controlPlaneCases = []string{
-	"create topic accepted", "create topic invalid",
-	"commit fresh accepted", "commit replay accepted", "commit conflict", "commit new key same batches",
-	"commit many batches (40 or more)",
-	"commit invalid: empty key", "commit invalid: no batches", "commit invalid: records <= 0",
-	"commit invalid: negative partition", "commit invalid: empty topic",
-	"lookup accepted", "lookup with ranges", "lookup From = -1", "lookup From inside a run", "lookup MaxBytes cut",
-	"describe all topics", "describe known topic", "describe unknown topic",
-}
-
 func TestObjectCoverage(t *testing.T) {
 	table := map[string]map[string]int{}
 	for _, p := range InputProfiles() {
 		table[p.Name] = objectCoverage(p)
 	}
 	reportCoverage(t, "object store", objectCases, table)
-}
-
-func TestControlPlaneCoverage(t *testing.T) {
-	table := map[string]map[string]int{}
-	for _, p := range InputProfiles() {
-		table[p.Name] = controlPlaneCoverage(p)
-	}
-	reportCoverage(t, "control plane", controlPlaneCases, table)
 }
 
 // reportCoverage prints one table and fails for every case that a profile
@@ -174,118 +153,6 @@ func classifyList(operation objectstore.List, done objectstore.ListDone) []strin
 	return append(out, "list without keys")
 }
 
-func controlPlaneCoverage(p InputProfile) map[string]int {
-	hits := map[string]int{}
-	gen := ControlPlaneOps(p)
-	for seed := 1; seed <= coverageSeeds; seed++ {
-		spec, committed := specbridge.New(), map[string]bool{}
-		for _, operation := range sequence(gen, seed) {
-			for _, c := range classifyControlPlane(spec, committed, operation) {
-				hits[c]++
-			}
-		}
-	}
-	return hits
-}
-
-// classifyControlPlane runs op on the spec and names the cases that it
-// reached. The committed map holds the segment keys the spec has accepted.
-func classifyControlPlane(spec *specbridge.ControlPlane, committed map[string]bool, operation ControlPlaneTestStep) []string {
-	if operation.CreateTopic != nil {
-		if spec.CreateTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions) == core.OK {
-			return []string{"create topic accepted"}
-		}
-		return []string{"create topic invalid"}
-	}
-	done := spec.Exec(*operation.Call).(core.ControlPlaneDone)
-	switch o := operation.Call.Op.(type) {
-	case contract.CommitSegment:
-		return classifyCommit(committed, o, done)
-	case contract.FindSegments:
-		return classifyLookup(spec, o, done)
-	case contract.DescribeTopics:
-		return classifyDescribe(o, done.Resp.(contract.DescribeTopicsResp))
-	}
-	return nil
-}
-
-func classifyCommit(committed map[string]bool, o contract.CommitSegment, done core.ControlPlaneDone) []string {
-	switch done.Err {
-	case core.ErrConflict:
-		return []string{"commit conflict"}
-	case core.ErrInvalid:
-		return []string{invalidCommitCase(o)}
-	}
-	out := []string{"commit fresh accepted"}
-	if committed[o.SegmentKey] {
-		out = []string{"commit replay accepted"}
-	}
-	committed[o.SegmentKey] = true
-	if strings.HasPrefix(o.SegmentKey, "retry") {
-		out = append(out, "commit new key same batches")
-	}
-	if len(o.Batches) >= 40 {
-		out = append(out, "commit many batches (40 or more)")
-	}
-	return out
-}
-
-func invalidCommitCase(o contract.CommitSegment) string {
-	if o.SegmentKey == "" {
-		return "commit invalid: empty key"
-	}
-	if len(o.Batches) == 0 {
-		return "commit invalid: no batches"
-	}
-	for _, b := range o.Batches {
-		switch {
-		case b.Records <= 0:
-			return "commit invalid: records <= 0"
-		case b.TopicPartition.Partition < 0:
-			return "commit invalid: negative partition"
-		case b.TopicPartition.Topic == "":
-			return "commit invalid: empty topic"
-		}
-	}
-	return "commit invalid: other"
-}
-
-func classifyLookup(spec *specbridge.ControlPlane, o contract.FindSegments, done core.ControlPlaneDone) []string {
-	if done.Err != core.OK {
-		return []string{"lookup From = -1"}
-	}
-	out := []string{"lookup accepted"}
-	response := done.Resp.(contract.FindSegmentsResp)
-	if len(response.Ranges) == 0 {
-		return out
-	}
-	out = append(out, "lookup with ranges")
-	if response.Ranges[0].Base < o.From {
-		out = append(out, "lookup From inside a run")
-	}
-	uncut := spec.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: o.TopicPartition, From: o.From}}).(core.ControlPlaneDone).Resp.(contract.FindSegmentsResp)
-	if len(response.Ranges) < len(uncut.Ranges) {
-		out = append(out, "lookup MaxBytes cut")
-	}
-	return out
-}
-
-func classifyDescribe(o contract.DescribeTopics, response contract.DescribeTopicsResp) []string {
-	if len(o.Topics) == 0 {
-		return []string{"describe all topics"}
-	}
-	var out []string
-	for _, name := range o.Topics {
-		known := slices.ContainsFunc(response.Topics, func(t contract.TopicInfo) bool { return t.Name == name })
-		if known {
-			out = append(out, "describe known topic")
-		} else {
-			out = append(out, "describe unknown topic")
-		}
-	}
-	return out
-}
-
 // The generators take all their numbers from rapid, so one seed must always
 // give one list. A hidden source of chance (a map order, the clock) would break
 // this and make a failure impossible to replay.
@@ -295,26 +162,11 @@ func TestSameSeedGivesSameSequence(t *testing.T) {
 		if !reflect.DeepEqual(objA, objB) {
 			t.Errorf("profile %s: two runs of the object generator with seed 7 gave different operations.", p.Name)
 		}
-		cpA, cpB := controlPlaneSequence(p, 7), controlPlaneSequence(p, 7)
-		if !reflect.DeepEqual(cpA, cpB) {
-			t.Errorf("profile %s: two runs of the control-plane generator with seed 7 gave different operations.", p.Name)
-		}
-		if reflect.DeepEqual(cpA, controlPlaneSequence(p, 8)) {
-			t.Errorf("profile %s: seeds 7 and 8 gave the same control-plane operations.", p.Name)
-		}
 	}
 }
 
 func objectSequence(p InputProfile, seed int) []objectstore.Call {
 	return sequence(ObjectOps(p), seed)
-}
-
-func controlPlaneSequence(p InputProfile, seed int) []string {
-	var out []string
-	for _, operation := range sequence(ControlPlaneOps(p), seed) {
-		out = append(out, FormatControlPlaneOp(operation))
-	}
-	return out
 }
 
 // recordingObject keeps the request number of every call it gets.
@@ -323,15 +175,6 @@ type recordingObject struct{ reqs []machine.RequestID }
 func (r *recordingObject) Apply(operation objectstore.Call) (ObjectResult, error) {
 	r.reqs = append(r.reqs, operation.RequestID())
 	return ObjectResult{}, nil
-}
-
-type recordingControlPlane struct{ reqs []machine.RequestID }
-
-func (r *recordingControlPlane) Apply(operation ControlPlaneTestStep) (ControlPlaneResult, error) {
-	if operation.Call != nil {
-		r.reqs = append(r.reqs, operation.Call.Req)
-	}
-	return ControlPlaneResult{}, nil
 }
 
 // The generators make operations with no request id. The pair of the suite
@@ -349,49 +192,15 @@ func TestRequestIDsFollowPosition(t *testing.T) {
 			t.Fatalf("object operation %d has request id %d, want %d.", i, got, i+1)
 		}
 	}
-	plane := &recordingControlPlane{}
-	cpPair := &ControlPlanePair{mirror: NewSpecControlPlaneSubject(), subject: plane, model: newCPModel()}
-	var callPositions []machine.RequestID
-	for i, operation := range sequence(ControlPlaneOps(Default()), 3)[:50] {
-		if _, err := cpPair.Apply(operation); err != nil {
-			t.Fatal(err)
-		}
-		if operation.Call != nil {
-			callPositions = append(callPositions, machine.RequestID(i+1))
-		}
-	}
-	if !slices.Equal(plane.reqs, callPositions) {
-		t.Fatalf("the request ids of the control-plane calls are %v, want %v.", plane.reqs, callPositions)
-	}
-}
-
-func TestBatchesReplayAndConflict(t *testing.T) {
-	p := Default()
-	for _, key := range []string{"seg0", "seg1", "retry77", "x"} {
-		first, again := Batches(p, key, key, 0), Batches(p, key, key, 0)
-		if !reflect.DeepEqual(first, again) {
-			t.Errorf("key %q: two calls with variant 0 gave different batches.", key)
-		}
-		for variant := 1; variant <= 4; variant++ {
-			if reflect.DeepEqual(first, Batches(p, key, key, variant)) {
-				t.Errorf("key %q: variant %d gave the same batches as variant 0.", key, variant)
-			}
-		}
-		moved := Batches(p, key, "other", 0)
-		if len(moved) != len(first) || moved[0].TopicPartition != first[0].TopicPartition || moved[0].Records != first[0].Records {
-			t.Errorf("key %q: the same shape under a new key changed the batches.", key)
-		}
-	}
 }
 
 func TestFormatIsAGoExpression(t *testing.T) {
 	for _, p := range InputProfiles() {
-		objects, plane := objectSequence(p, 9), sequence(ControlPlaneOps(p), 9)
+		objects := objectSequence(p, 9)
 		for i := range coverageOps {
-			for _, text := range []string{FormatObjectOp(objects[i]), FormatControlPlaneOp(plane[i])} {
-				if _, err := parser.ParseExpr(text); err != nil {
-					t.Fatalf("the text %q is not a Go expression: %v", text, err)
-				}
+			text := FormatObjectOp(objects[i])
+			if _, err := parser.ParseExpr(text); err != nil {
+				t.Fatalf("the text %q is not a Go expression: %v", text, err)
 			}
 		}
 	}
@@ -402,23 +211,11 @@ func TestFormatExamples(t *testing.T) {
 		{FormatObjectOp(objectstore.Put{Key: "a", Data: []byte("hi")}), `objectstore.Put{Key: "a", Data: []byte("hi")}`},
 		{FormatObjectOp(objectstore.Put{Key: "", Data: []byte{}}), `objectstore.Put{Key: "", Data: []byte{}}`},
 		{FormatObjectOp(objectstore.List{Prefix: "a/"}), `objectstore.List{Prefix: "a/"}`},
-		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `conformance.NewCreateTopic("t1", 2)`},
-		{
-			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
-			`conformance.NewCall(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})`,
-		},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
 			t.Errorf("the format gave %s, want %s.", c.got, c.want)
 		}
-	}
-}
-
-func TestDescribeNamesTheOperation(t *testing.T) {
-	operation := NewCall(core.ControlPlaneCall{Req: 5, Op: contract.CommitSegment{SegmentKey: "s", Batches: make([]contract.PendingBatch, 2)}})
-	if got, want := operation.Describe(), `request 5: commit segment "s" with 2 batches`; got != want {
-		t.Errorf("Describe gave %q, want %q.", got, want)
 	}
 }
 

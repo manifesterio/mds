@@ -3,9 +3,8 @@
 // rebalance machine on dst/live. Brokers call the gRPC API
 // (api/controlplane/v1) with their own client.
 //
-// Tests sit next to the code they test. Two exceptions: the model conformance
-// tests are in test/conformance, and the end-to-end tests of the real binary are
-// in test/integration (build tag integration, run by make it).
+// Tests sit next to the code they test. The exception: the end-to-end tests of
+// the real binary are in test/integration (build tag integration, run by make it).
 //
 // # Generated files
 //

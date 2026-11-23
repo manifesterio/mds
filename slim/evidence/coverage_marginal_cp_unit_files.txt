@@ -1,0 +1,57 @@
+controlplane/internal/controlplane/domain/rebalance: full covers 797; not covered by other layers: 5
+coordinator_test.go                  119 lines  tests=  5  marginal-vs-world=   0 stmts   marginal-vs-pkg=   5
+fold_test.go                         181 lines  tests=  3  marginal-vs-world=   0 stmts   marginal-vs-pkg= 127
+harness_test.go                      442 lines  (helpers only)
+kafka_test.go                        147 lines  tests=  5  marginal-vs-world=   5 stmts   marginal-vs-pkg=   6
+rules_test.go                        299 lines  tests=  9  marginal-vs-world=   0 stmts   marginal-vs-pkg=  26
+sites_test.go                         92 lines  tests=  2  marginal-vs-world=   0 stmts   marginal-vs-pkg=  12
+term_test.go                         188 lines  tests=  9  marginal-vs-world=   0 stmts   marginal-vs-pkg=  66
+waitjoin_test.go                      56 lines  tests=  3  marginal-vs-world=   0 stmts   marginal-vs-pkg=  19
+controlplane/internal/controlplane/domain/group: full covers 482; not covered by other layers: 10
+codec_test.go                         68 lines  tests=  2  marginal-vs-world=   0 stmts   marginal-vs-pkg=   0
+decide_test.go                       310 lines  tests=  5  marginal-vs-world=   1 stmts   marginal-vs-pkg=   1
+fuzz_test.go                          85 lines  tests=  3  marginal-vs-world=   0 stmts   marginal-vs-pkg=   0
+group_test.go                        386 lines  tests=  9  marginal-vs-world=   0 stmts   marginal-vs-pkg= 148
+tables_test.go                       135 lines  tests=  4  marginal-vs-world=   1 stmts   marginal-vs-pkg=   1
+controlplane/internal/controlplane/domain/topic: full covers 375; not covered by other layers: 13
+codec_test.go                         43 lines  tests=  2  marginal-vs-world=   4 stmts   marginal-vs-pkg=   8
+decide_test.go                       139 lines  tests=  3  marginal-vs-world=   1 stmts   marginal-vs-pkg=   3
+fuzz_test.go                          52 lines  tests=  2  marginal-vs-world=   0 stmts   marginal-vs-pkg=   0
+tables_test.go                       127 lines  tests=  3  marginal-vs-world=   4 stmts   marginal-vs-pkg=   9
+topic_test.go                        170 lines  tests=  3  marginal-vs-world=   1 stmts   marginal-vs-pkg= 123
+controlplane/internal/controlplane/replica: full covers 963; not covered by other layers: 19
+checkpoint_test.go                   125 lines  tests=  2  marginal-vs-world=   0 stmts   marginal-vs-pkg= 149
+commit_test.go                       145 lines  tests=  4  marginal-vs-world=   1 stmts   marginal-vs-pkg= 107
+entrysize_test.go                    102 lines  tests=  2  marginal-vs-world=   1 stmts   marginal-vs-pkg=   3
+export_test.go                        30 lines  (helpers only)
+import_boundary_test.go               41 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=   0
+local_read_test.go                    81 lines  tests=  4  marginal-vs-world=   2 stmts   marginal-vs-pkg=  13
+openstore_test.go                     55 lines  tests=  1  marginal-vs-world=   7 stmts   marginal-vs-pkg=   7
+pendingkind_test.go                   19 lines  tests=  1  marginal-vs-world=   5 stmts   marginal-vs-pkg=   5
+reads_test.go                         64 lines  tests=  2  marginal-vs-world=   0 stmts   marginal-vs-pkg=  23
+replica_test.go                      104 lines  (helpers only)
+role_test.go                         117 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=  24
+trimmed_test.go                       33 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=  41
+controlplane/internal/controlplane/server: full covers 1241; not covered by other layers: 53
+brokers_handler_test.go              104 lines  tests=  4  marginal-vs-world=  18 stmts   marginal-vs-pkg=  39
+close_test.go                        112 lines  tests=  4  marginal-vs-world=   3 stmts   marginal-vs-pkg= 160
+groups_handler_test.go                39 lines  tests=  1  marginal-vs-world=   1 stmts   marginal-vs-pkg=  25
+host_test.go                         120 lines  tests=  4  marginal-vs-world=   2 stmts   marginal-vs-pkg=   6
+node_test.go                         195 lines  tests=  6  marginal-vs-world=  12 stmts   marginal-vs-pkg= 118
+toolarge_test.go                      43 lines  tests=  1  marginal-vs-world=   2 stmts   marginal-vs-pkg=   8
+controlplane/internal/controlplane/metadb: full covers 792; not covered by other layers: 14
+bench_test.go                         62 lines  (helpers only)
+determinism_test.go                  108 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=   0
+entry_test.go                        161 lines  tests=  8  marginal-vs-world=   5 stmts   marginal-vs-pkg=   6
+fuzz_test.go                          59 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=   0
+golden_test.go                        29 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=   1
+groups_test.go                       190 lines  tests=  5  marginal-vs-world=   0 stmts   marginal-vs-pkg= 269
+internal_test.go                      42 lines  tests=  1  marginal-vs-world=   1 stmts   marginal-vs-pkg=   4
+metadb_test.go                       223 lines  tests=  5  marginal-vs-world=   8 stmts   marginal-vs-pkg=  87
+schema_test.go                        46 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=   2
+controlplane/internal/controlplane/executor: full covers 232; not covered by other layers: 11
+exec_test.go                         150 lines  tests=  4  marginal-vs-world=   7 stmts   marginal-vs-pkg=  66
+fence_test.go                        134 lines  tests=  6  marginal-vs-world=   2 stmts   marginal-vs-pkg= 103
+controlplane/internal/runtime: full covers 169; not covered by other layers: 30
+fold_test.go                         216 lines  tests=  3  marginal-vs-world=  20 stmts   marginal-vs-pkg= 159
+logio_test.go                         46 lines  tests=  2  marginal-vs-world=  10 stmts   marginal-vs-pkg=  10

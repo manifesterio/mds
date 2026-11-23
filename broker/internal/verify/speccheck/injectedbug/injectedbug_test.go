@@ -15,19 +15,10 @@ func TestPlantedObjectBugsAreCaught(t *testing.T) {
 	injectedbug.ObjectBugsCaught(t, conformance.NewSpecObjectSubject, seedBudget)
 }
 
-func TestPlantedControlPlaneBugsAreCaught(t *testing.T) {
-	injectedbug.ControlPlaneBugsCaught(t, conformance.NewSpecControlPlaneSubject, seedBudget)
-}
-
 // A wrapper that changes nothing must never be flagged, on any profile.
 func TestNoFalseAlarmObject(t *testing.T) {
 	same := injectedbug.NewObjectBug("Identity", "Changes nothing.", func(s conformance.ObjectSubject) conformance.ObjectSubject { return s })
 	injectedbug.ObjectSuiteIsClean(t, func() conformance.ObjectSubject { return same.Wrap(conformance.NewSpecObjectSubject()) }, seedBudget)
-}
-
-func TestNoFalseAlarmControlPlane(t *testing.T) {
-	same := injectedbug.NewControlPlaneBug("Identity", "Changes nothing.", func(s conformance.ControlPlaneSubject) conformance.ControlPlaneSubject { return s })
-	injectedbug.ControlPlaneSuiteIsClean(t, func() conformance.ControlPlaneSubject { return same.Wrap(conformance.NewSpecControlPlaneSubject()) }, seedBudget)
 }
 
 func TestBugsHaveNamesAndDocs(t *testing.T) {
@@ -45,14 +36,8 @@ func TestBugsHaveNamesAndDocs(t *testing.T) {
 	for _, b := range injectedbug.ObjectBugs() {
 		check("object", b.Name(), b.Doc())
 	}
-	for _, b := range injectedbug.ControlPlaneBugs() {
-		check("control plane", b.Name(), b.Doc())
-	}
 	if n := len(injectedbug.ObjectBugs()); n < 7 {
 		t.Errorf("there are %d object bugs, but at least 7 are required.", n)
-	}
-	if n := len(injectedbug.ControlPlaneBugs()); n < 8 {
-		t.Errorf("there are %d control plane bugs, but at least 8 are required.", n)
 	}
 }
 
@@ -62,9 +47,6 @@ func TestBugsHaveNamesAndDocs(t *testing.T) {
 func TestPlantedBugsAreCaughtWithoutStateHash(t *testing.T) {
 	injectedbug.ObjectBugsCaught(t, func() conformance.ObjectSubject {
 		return conformance.WithoutStateHashObject(conformance.NewSpecObjectSubject())
-	}, seedBudget)
-	injectedbug.ControlPlaneBugsCaught(t, func() conformance.ControlPlaneSubject {
-		return conformance.WithoutStateHashControlPlane(conformance.NewSpecControlPlaneSubject())
 	}, seedBudget)
 }
 
@@ -88,21 +70,6 @@ func TestPlantedBugsShrinkToAShortList(t *testing.T) {
 			t.Errorf("the object bug %s was not caught on the default profile in %d seeds.", b.Name(), seedBudget)
 		}
 	}
-	for _, b := range injectedbug.ControlPlaneBugs() {
-		found := false
-		for seed := uint64(1); seed <= seedBudget && !found; seed++ {
-			l := conformance.ControlPlaneLockstep(conformance.Default(), func() conformance.ControlPlaneSubject { return b.Wrap(conformance.NewSpecControlPlaneSubject()) })
-			if f := l.RunSeed(seed); f != nil {
-				found = true
-				if len(f.Steps) > longest {
-					t.Errorf("the control plane bug %s shrank to %d steps, want %d or fewer:\n%s", b.Name(), len(f.Steps), longest, l.GoCode(f.Steps))
-				}
-			}
-		}
-		if !found {
-			t.Errorf("the control plane bug %s was not caught on the default profile in %d seeds.", b.Name(), seedBudget)
-		}
-	}
 }
 
 // A planted bug wraps a subject with a state hash into a subject with a state
@@ -115,14 +82,6 @@ func TestWrappersKeepTheStateHashOfTheSubject(t *testing.T) {
 		}
 		if hasHash(b.Wrap(conformance.WithoutStateHashObject(conformance.NewSpecObjectSubject()))) {
 			t.Errorf("the object bug %s makes up a state hash.", b.Name())
-		}
-	}
-	for _, b := range injectedbug.ControlPlaneBugs() {
-		if !hasHash(b.Wrap(conformance.NewSpecControlPlaneSubject())) {
-			t.Errorf("the control plane bug %s hides the state hash of the subject.", b.Name())
-		}
-		if hasHash(b.Wrap(conformance.WithoutStateHashControlPlane(conformance.NewSpecControlPlaneSubject()))) {
-			t.Errorf("the control plane bug %s makes up a state hash.", b.Name())
 		}
 	}
 }

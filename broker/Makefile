@@ -54,8 +54,8 @@ sim: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...
 	@$(MAKE) --no-print-directory sim-campaign
 
-# Seed campaigns through cmd/mdssimulator (the new tree, on dst/campaign). The echo scenario
-# runs with -scenario echo. More seeds: make sim-campaign SIM_SEEDS=2000
+# Seed campaigns through cmd/mdssimulator (the new tree, on dst/campaign).
+# More seeds: make sim-campaign SIM_SEEDS=2000
 sim-campaign:
 	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
 

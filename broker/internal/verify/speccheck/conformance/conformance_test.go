@@ -21,16 +21,6 @@ func TestObjectStoreSpecVsSpec(t *testing.T) {
 	}
 }
 
-func TestControlPlaneSpecVsSpec(t *testing.T) {
-	for _, p := range InputProfiles() {
-		t.Run(p.Name, func(t *testing.T) {
-			l := ControlPlaneLockstep(p, NewSpecControlPlaneSubject)
-			l.Checks = 60
-			l.Check(t)
-		})
-	}
-}
-
 // The spec with its hash hidden is a correct subject too. The run must not
 // fail for a subject that cannot give a hash.
 func TestSpecVsSpecWithoutStateHash(t *testing.T) {
@@ -38,9 +28,6 @@ func TestSpecVsSpecWithoutStateHash(t *testing.T) {
 	o := ObjectStoreLockstep(p, func() ObjectSubject { return WithoutStateHashObject(NewSpecObjectSubject()) })
 	o.Checks = 20
 	o.Check(t)
-	c := ControlPlaneLockstep(p, func() ControlPlaneSubject { return WithoutStateHashControlPlane(NewSpecControlPlaneSubject()) })
-	c.Checks = 20
-	c.Check(t)
 }
 
 // badObject answers a range outside the object with OK.

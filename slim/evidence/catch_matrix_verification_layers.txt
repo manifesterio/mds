@@ -1,0 +1,115 @@
+######## infra
+24 mutants, 2 did not compile, 22 evaluated
+killed by at least one layer: 19 ; survived all: 3
+layer                      kills  unique-kills  (of 19 killed)
+parity                       16      0  []
+fakeservices-unit            13      0  []
+faulty-unit                   4      0  []
+simkafka                     17      0  []
+echo+cluster                 12      0  []
+cp-sim                        0      0  []
+
+kill-set patterns:
+    5  ('parity', 'fakeservices-unit', 'simkafka', 'echo+cluster')
+    3  SURVIVED
+    2  ('parity', 'fakeservices-unit', 'faulty-unit', 'simkafka', 'echo+cluster')
+    2  ('parity', 'fakeservices-unit')
+    2  ('simkafka', 'echo+cluster')
+    2  ('parity', 'fakeservices-unit', 'simkafka')
+    2  ('parity', 'simkafka')
+    1  ('parity', 'fakeservices-unit', 'faulty-unit', 'simkafka')
+    1  ('parity', 'simkafka', 'echo+cluster')
+    1  ('fakeservices-unit', 'simkafka', 'echo+cluster')
+    1  ('parity', 'faulty-unit', 'simkafka', 'echo+cluster')
+
+fakeservices-unit: kills by package {'broker/internal/verify/simulator/fakeservices/fakenetwork': 9, 'broker/internal/verify/simulator/fakeservices': 4}; sole killer overall: {}
+
+echo+cluster: kills by package {'broker/internal/verify/simulator/cluster': 6, 'broker/internal/verify/simulator/echo': 9, 'broker/cmd/mdssimulator': 5}; sole killer overall: {}
+
+survivors:
+   infra14 >->>= broker/internal/verify/simulator/fakeservices/fakenetwork/netsim.go 437
+   infra23 <-><= broker/internal/verify/simulator/fakeservices/fakenetwork/netsim.go 359
+   infra02 <=->< broker/internal/verify/simulator/fakeservices/fakenetwork/netsim.go 247
+######## spec
+24 mutants, 0 did not compile, 24 evaluated
+killed by at least one layer: 22 ; survived all: 2
+layer                      kills  unique-kills  (of 22 killed)
+spec-unit                    22      3  ['spec02', 'spec11', 'spec10']
+rebalance-unit                3      0  []
+cp-conformance               19      0  []
+cp-sim                        7      0  []
+cp-cpsim                      7      0  []
+broker-unit                   3      0  []
+
+kill-set patterns:
+   11  ('spec-unit', 'cp-conformance')
+    3  ('spec-unit', 'rebalance-unit', 'cp-conformance', 'cp-sim', 'cp-cpsim')
+    3  ('spec-unit',)
+    2  SURVIVED
+    2  ('spec-unit', 'cp-conformance', 'cp-sim', 'cp-cpsim', 'broker-unit')
+    2  ('spec-unit', 'cp-conformance', 'cp-sim', 'cp-cpsim')
+    1  ('spec-unit', 'cp-conformance', 'broker-unit')
+
+survivors:
+   spec07 <-><= controlplane/spec/rebalance.go 368
+   spec03 delete-call controlplane/spec/hash.go 40
+######## dst
+28 mutants, 1 did not compile, 27 evaluated
+killed by at least one layer: 22 ; survived all: 5
+layer                      kills  unique-kills  (of 22 killed)
+dst-own(no examples)         21     11  ['dst13', 'dst14', 'dst15', 'dst19', 'dst21', 'dst07', 'dst11', 'dst01', 'dst06', 'dst08', 'dst24']
+dst-examples                  6      0  []
+simkafka                      8      0  []
+echo+cluster                  5      0  []
+cp-sim                        7      0  []
+cp-conformance                1      0  []
+
+kill-set patterns:
+   11  ('dst-own(no examples)',)
+    5  SURVIVED
+    2  ('dst-own(no examples)', 'dst-examples', 'simkafka', 'echo+cluster', 'cp-sim')
+    1  ('dst-own(no examples)', 'cp-conformance')
+    1  ('dst-examples', 'simkafka', 'cp-sim')
+    1  ('dst-own(no examples)', 'simkafka')
+    1  ('dst-own(no examples)', 'dst-examples', 'echo+cluster')
+    1  ('dst-own(no examples)', 'cp-sim')
+    1  ('dst-own(no examples)', 'dst-examples', 'simkafka', 'echo+cluster')
+    1  ('dst-own(no examples)', 'simkafka', 'cp-sim')
+    1  ('dst-own(no examples)', 'simkafka', 'echo+cluster', 'cp-sim')
+    1  ('dst-own(no examples)', 'dst-examples', 'simkafka', 'cp-sim')
+
+dst-own(no examples): kills by package {'dst/live': 1, 'dst/campaign': 3, 'dst/kernel': 7, 'dst/check/spectest': 4, 'dst/clock': 1, 'dst/sched': 1, 'dst/syncclock': 1, 'dst/fault': 1, 'dst/check/faulty': 3, 'dst/golden': 2, 'dst/machine': 1, 'dst/trace': 1}; sole killer overall: {'dst/campaign': 2, 'dst/kernel': 1, 'dst/check/spectest': 4, 'dst/fault': 1, 'dst/golden': 2}
+
+dst-examples: kills by package {'dst/examples/kv': 4, 'dst/examples/kvchaos': 5, 'dst/examples/kvsim': 4}; sole killer overall: {}
+
+echo+cluster: kills by package {'broker/cmd/mdssimulator': 3, 'broker/internal/verify/simulator/cluster': 3, 'broker/internal/verify/simulator/echo': 3}; sole killer overall: {}
+
+survivors:
+   dst20 delete-call dst/check/spectest/runner.go 115
+   dst25 !=->== dst/sched/sched.go 25
+   dst03 delete-call dst/kernel/node.go 241
+   dst16 delete-call dst/kernel/lifecycle.go 175
+   dst27 >->>= dst/kernel/lifecycle.go 127
+######## objspec
+10 mutants, 0 did not compile, 10 evaluated
+killed by at least one layer: 9 ; survived all: 1
+layer                      kills  unique-kills  (of 9 killed)
+objspec-unit                  9      3  ['objspec01', 'objspec02', 'objspec00']
+s3conform+conformance         5      0  []
+fakeservices                  6      0  []
+simkafka                      6      0  []
+broker-unit                   3      0  []
+
+kill-set patterns:
+    3  ('objspec-unit',)
+    3  ('objspec-unit', 's3conform+conformance', 'fakeservices', 'simkafka', 'broker-unit')
+    2  ('objspec-unit', 's3conform+conformance', 'fakeservices', 'simkafka')
+    1  ('objspec-unit', 'fakeservices', 'simkafka')
+    1  SURVIVED
+
+s3conform+conformance: kills by package {'broker/internal/verify/speccheck/conformance': 3, 'broker/internal/verify/speccheck/injectedbug': 5, 'broker/internal/verify/speccheck/s3conform': 5, 'broker/internal/verify/speccheck/specsystem': 4}; sole killer overall: {}
+
+fakeservices: kills by package {'broker/internal/verify/simulator/fakeservices': 5, 'broker/internal/verify/simulator/fakeservices/internal/servicetest': 6}; sole killer overall: {}
+
+survivors:
+   objspec04 >->>= shared/objectstore/spec.go 41

@@ -36,8 +36,8 @@
 //	    compare: the service IS the spec plus faults. Each fault kind has its
 //	    own test in dst/check/faulty and in internal/verify/simulator/fakeservices.
 //	C3  The real adapters are compared with the specs: the S3 object store
-//	    against the object store spec. Control-plane store conformance (mem,
-//	    gRPC, applier) lives in controlplane/test/conformance.
+//	    against the object store spec. The control plane is checked against
+//	    its spec by controlplane/internal/verify/simulator.
 //	    The S3 test needs MDS_S3_ENDPOINT.
 //	    Test: internal/verify/speccheck/s3conform/conform_test.go (the adapter is
 //	    shared/objectstore/s3).

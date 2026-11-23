@@ -68,7 +68,7 @@ The rules of each spec are in the comment above its type. Read that first.
 | --- | --- | --- | --- |
 | C1 | broker answers: produce, fetch, ListOffsets | `spec.Broker` | broker is real; storage and control plane are specs |
 | C2 | deleted: the simulated object store and control plane are `dst/check/faulty` around the spec itself, so there is nothing to compare | - | - |
-| C3 | S3 adapter (control-plane stores: `controlplane/test/conformance`) | `objectstore.Spec`, `spec.ControlPlane` | real |
+| C3 | S3 adapter (the control plane is checked by its simulator, `controlplane/internal/verify/simulator`) | `objectstore.Spec` | real |
 | C4 | the Kafka oracle in `internal/verify/simulator/kafka` | `spec.Broker`, `spec.ControlPlane` | simulation side |
 
 ## Run the tests
@@ -104,7 +104,7 @@ interface, result type, `Equal`), and a planted bug or two in `injectedbug/`.
 
 | Path | Purpose |
 | --- | --- |
-| `conformance/` | the suites (`spectest.Lockstep`) for each spec: generators and profiles, result values, subjects, the naive control plane model |
+| `conformance/` | the suites (`spectest.Lockstep`) for each spec: generators and profiles, result values, subjects |
 | `injectedbug/` | planted bugs that every suite must catch (`spectest.RequireCaught`) |
 | `s3conform/` | check C3: the S3 adapter against the object store spec |
 | `specbridge/` | the control plane spec behind `core.IOCall` |

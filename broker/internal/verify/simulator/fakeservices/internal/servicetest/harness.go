@@ -55,7 +55,6 @@ type Harness struct {
 	// Seed is the seed of the world.
 	Seed uint64
 
-	samples []string // for Transcript
 	names   []string
 	addrs   map[string]Addr
 	cmds    map[machine.TimerID]core.Action

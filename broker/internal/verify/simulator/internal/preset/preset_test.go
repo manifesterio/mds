@@ -78,7 +78,7 @@ func TestPhaseStart(t *testing.T) {
 
 func TestFaultCoverage(t *testing.T) {
 	t.Parallel()
-	rule := FaultCoverageCheck(EchoFaultCoverage)
+	rule := FaultCoverageCheck(KafkaFaultCoverage)
 	if rule.Name() != "FaultCoverage" {
 		t.Fatalf("Name = %q", rule.Name())
 	}

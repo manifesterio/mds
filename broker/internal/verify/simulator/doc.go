@@ -4,6 +4,6 @@
 // name "simulator" again (it was named "simulation" during T1.12).
 //
 // It holds the fake services (fakeservices), the cluster host (cluster), the history
-// and the truth views, and the two scenarios: kafka and echo. The command
-// cmd/mdssimulator runs both through dst/campaign and imports only this tree.
+// and the truth views, and the scenario: kafka. The command
+// cmd/mdssimulator runs it through dst/campaign and imports only this tree.
 package simulator

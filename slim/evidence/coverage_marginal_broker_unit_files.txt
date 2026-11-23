@@ -1,0 +1,17 @@
+broker/internal/broker: full covers 1468; not covered by other layers: 429
+broker_test.go                       845 lines  tests= 27  marginal-vs-world=  20 stmts   marginal-vs-pkg=  81
+compress_test.go                     198 lines  tests=  5  marginal-vs-world=   2 stmts   marginal-vs-pkg=  15
+configs_test.go                       49 lines  tests=  2  marginal-vs-world=  28 stmts   marginal-vs-pkg=  28
+conformance_rules_test.go             77 lines  tests=  1  marginal-vs-world=   0 stmts   marginal-vs-pkg=   0
+conformance_test.go                  578 lines  tests=  3  marginal-vs-world=   0 stmts   marginal-vs-pkg=  14
+coordinator_test.go                  178 lines  tests=  8  marginal-vs-world=  33 stmts   marginal-vs-pkg=  33
+create_test.go                       277 lines  tests=  8  marginal-vs-world=  28 stmts   marginal-vs-pkg=  28
+fetch_merge_test.go                  148 lines  tests=  3  marginal-vs-world=   0 stmts   marginal-vs-pkg=  43
+fetch_test.go                        222 lines  tests=  8  marginal-vs-world=   5 stmts   marginal-vs-pkg=   9
+flush_test.go                        250 lines  tests= 10  marginal-vs-world=   5 stmts   marginal-vs-pkg=  15
+groups_offsets_test.go               204 lines  tests= 10  marginal-vs-world= 142 stmts   marginal-vs-pkg= 142
+groups_park_test.go                   86 lines  tests=  3  marginal-vs-world=   3 stmts   marginal-vs-pkg=   5
+groups_test.go                       226 lines  tests=  9  marginal-vs-world=  44 stmts   marginal-vs-pkg=  44
+harness_test.go                      428 lines  (helpers only)
+hash_ops_test.go                      80 lines  tests=  1  marginal-vs-world=   4 stmts   marginal-vs-pkg=  26
+timing_test.go                        96 lines  tests=  3  marginal-vs-world=   0 stmts   marginal-vs-pkg=   7

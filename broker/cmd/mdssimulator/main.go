@@ -1,21 +1,18 @@
-// Command mdssimulator runs a scenario campaign (the Kafka broker by default, or
-// the echo smoke test) through the deterministic simulator. It is a thin main
-// over dst/campaign: the flags, the environment variables (MDS_SEEDS, MDS_SEED,
+// Command mdssimulator runs a scenario campaign (the Kafka broker) through the
+// deterministic simulator. It is a thin main over dst/campaign: the flags, the environment variables (MDS_SEEDS, MDS_SEED,
 // MDS_CAMPAIGN), the report and the determinism check come from there. It reads
 // flags and the clock and runs seeds on many goroutines, so it is not a
 // deterministic package.
 //
 //	go run ./cmd/mdssimulator -scenario kafka -seeds 300   # a campaign
-//	go run ./cmd/mdssimulator -scenario echo -seed 17      # one seed, with a step log
+//	go run ./cmd/mdssimulator -scenario kafka -seed 17     # one seed, with a step log
 package main
 
 import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/echo"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/dst/campaign"
 	"github.com/manifesterio/mds/dst/kernel"
@@ -49,27 +46,21 @@ func config() campaign.Config {
 	}
 }
 
-// registry has the two scenarios: kafka (the broker under a Kafka workload) and
-// echo (a small smoke test).
+// registry has one scenario: kafka (the broker under a Kafka workload).
 func registry() *campaign.Registry {
 	var reg campaign.Registry
-	add(&reg, "kafka", "the broker under a Kafka workload", ownsKafka,
+	add(&reg, "kafka", "the broker under a Kafka workload",
 		func(seed uint64, o campaign.RunOptions) kernel.Result {
 			return kafka.Run(kafka.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
-		})
-	add(&reg, "echo", "the echo smoke test", ownsEcho,
-		func(seed uint64, o campaign.RunOptions) kernel.Result {
-			return echo.Run(echo.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
 		})
 	return &reg
 }
 
 // add registers a scenario that runs one seed with run.
-func add(reg *campaign.Registry, name, detail string, owns func(string) bool, run func(uint64, campaign.RunOptions) kernel.Result) {
+func add(reg *campaign.Registry, name, detail string, run func(uint64, campaign.RunOptions) kernel.Result) {
 	reg.Add(campaign.Scenario{
 		Name:   name,
 		Detail: detail,
-		Owns:   owns,
 		Run: func(seed uint64, o campaign.RunOptions) campaign.Result {
 			return fromKernel(name, run(seed, o))
 		},
@@ -84,17 +75,4 @@ func fromKernel(scenario string, r kernel.Result) campaign.Result {
 	out.Counters["crashes"] = uint64(r.Crashes)
 	out.Counters["exits"] = uint64(r.Exits)
 	return out
-}
-
-// The assertion catalog is for the whole program, and the two scenarios are
-// linked into it together. Without a rule, a campaign of one scenario would
-// call the names of the other "never reached" or "never checked". A name that
-// starts with "echo: " belongs to echo; a name that starts with "kafka: " or
-// "broker: " belongs to kafka. The other names are the fake services (object
-// store, control plane, network), which both scenarios use.
-// TestEveryDeclaredNameHasAnOwner keeps these rules honest.
-func ownsKafka(name string) bool { return !strings.HasPrefix(name, "echo: ") }
-
-func ownsEcho(name string) bool {
-	return !strings.HasPrefix(name, "kafka: ") && !strings.HasPrefix(name, "broker: ")
 }

@@ -53,7 +53,7 @@ Go infers a type parameter from every argument, and the types must be the same. 
 a concrete case, convert it to the sum type: `kernel.Send(r, server, serverIn(putRequest(x)))`, or
 write the type: `kernel.Inject[tin](w, a, 0, note{"x"})`.
 
-`examples/kv` and `examples/kvchaos` are the two examples. `examples/kvsim` runs both through the campaign tool.
+`examples/kv` is the example: a small key-value store as a machine, with its own campaign test.
 
 Assertions and buggify sites are declared once, in package-level var blocks:
 `var oneWriter = assert.NewAlways("sim: one writer per epoch")`,
@@ -70,7 +70,7 @@ outside `../ops/dst/determinism-allow.txt`. `../ops/dst/scripts/ci-determinism.s
 ## How to run campaigns
 
 A product simulator command is a few lines. It registers its scenarios and calls `campaign.Main`.
-`examples/kvsim` is a full example (it runs `kv` and `kvchaos`).
+`broker/cmd/mdssimulator` is a full example (one scenario, `kafka`).
 
 ```go
 reg := &campaign.Registry{}
@@ -79,16 +79,16 @@ reg.Add(campaign.Scenario{Name: "kv", Detail: "a store with no faults",
         r := kv.RunWith(kernel.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst, Tail: 20})
         return campaign.FromKernel(r, "") // "": the replay command is made from Config.Tool
     }})
-cfg := campaign.Config{Tool: "kvsim", EnvPrefix: "MDS", Defaults: campaign.Options{CheckEvery: 10}}
+cfg := campaign.Config{Tool: "mysim", EnvPrefix: "MDS", Defaults: campaign.Options{CheckEvery: 10}}
 os.Exit(campaign.Main(cfg, reg, os.Args[1:], os.Stdout, os.Stderr))
 ```
 
 ```bash
-go run ./examples/kvsim -seeds 200 -report         # both scenarios, 200 seeds each, with the report
-go run ./examples/kvsim -scenario kvchaos -seed 7  # one seed, with its step log
-go run ./examples/kvsim -until-stable              # more seeds until no new assertion appears
-go run ./examples/kvsim -json                      # the report as JSON, nothing else
-MDS_CAMPAIGN=30s go run ./examples/kvsim           # seeds until 30 seconds have passed
+go run ./cmd/mysim -seeds 200 -report         # 200 seeds, with the report
+go run ./cmd/mysim -scenario kv -seed 7       # one seed, with its step log
+go run ./cmd/mysim -until-stable              # more seeds until no new assertion appears
+go run ./cmd/mysim -json                      # the report as JSON, nothing else
+MDS_CAMPAIGN=30s go run ./cmd/mysim           # seeds until 30 seconds have passed
 ```
 
 Flags: `-seeds`, `-first` (or `-start`), `-seed` (replay one seed), `-scenario` (a name, a list with
@@ -114,8 +114,6 @@ A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and t
 
 ```bash
 go test ./examples/kv -run TestCampaign -count=1
-go test ./examples/kvchaos -run TestCampaign -count=1
-go test ./examples/kvsim -count=1
 go test ./campaign ./check/... ./...
 ```
 

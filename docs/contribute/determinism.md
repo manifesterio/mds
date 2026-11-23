@@ -1,6 +1,6 @@
 # Determinism gates
 
-Run the import and construct checks that keep the sans-I/O core replayable. Package layout and how to write a machine live in `dst/README.md`. Examples live in `dst/examples/` (`kv`, `kvchaos`, `kvsim`).
+Run the import and construct checks that keep the sans-I/O core replayable. Package layout and how to write a machine live in `dst/README.md`. Example: `dst/examples/kv`.
 
 ## Run the gates
 
@@ -70,11 +70,8 @@ make -C controlplane sim-campaign
 make -C broker sim-campaign
 # or: go run ./cmd/mdssimulator -scenario kafka -seeds 300
 
-# dst library examples
-cd dst
-go run ./examples/kvsim -seeds 200 -report
-go run ./examples/kvsim -scenario kvchaos -seed 7
-MDS_CAMPAIGN=30s go run ./examples/kvsim
+# dst library example
+# see dst/examples/kv and dst/README.md
 ```
 
 See `dst/README.md` for more campaign flags and env vars.

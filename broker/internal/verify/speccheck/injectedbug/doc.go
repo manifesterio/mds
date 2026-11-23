@@ -7,7 +7,7 @@
 //
 // A suite that cannot fail proves nothing. The helpers in this package run
 // every planted bug through the same suite code that the real subjects use
-// (conformance.ObjectStoreLockstep and conformance.ControlPlaneLockstep). They
+// (conformance.ObjectStoreLockstep). They
 // use the planted-bug API of dst/check/spectest (Bug, RequireCaught,
 // RequireClean). They fail the test if a bug is not caught within the seed
 // budget, and they log the profile and the seed that caught each bug.

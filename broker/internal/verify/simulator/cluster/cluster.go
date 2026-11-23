@@ -1,7 +1,7 @@
 // Package cluster is the host of one broker simulation run on dst/kernel. It
 // builds the world of a seed: the three fake outside systems (object store,
 // control plane, network), the broker nodes, the workload node (a test client),
-// the phases, the node attrition and the quiesce task. A scenario (kafka, echo)
+// the phases, the node attrition and the quiesce task. A scenario (kafka)
 // gives it the machines and the rules.
 //
 // The broker machines and the workloads are core machines: they take one core.Event

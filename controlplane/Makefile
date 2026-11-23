@@ -14,7 +14,7 @@ PROTO_GRPC_VER  ?= v1.5.1
 SIM_SEEDS       ?= 300
 
 .PHONY: it build compile test proto proto-tools fmt-check vet lint modernize-check modernize \
-	ascii-check determinism sim sim-campaign spec-long test-race generate mutants fuzz
+	ascii-check determinism sim sim-campaign test-race generate mutants fuzz
 
 build: generate fmt-check ascii-check vet lint modernize-check compile test determinism sim sim-campaign it
 
@@ -87,13 +87,6 @@ sim:
 
 sim-campaign:
 	go run ./cmd/cpsim -seeds $(SIM_SEEDS) -scenario all
-
-# The conformance tests (test/conformance: the metadb, the replica with
-# crashes and failure injection, the gRPC stack) and the test doubles, with 2000
-# checks each (rapid default is 100). Not part of build. To replay one failure,
-# see spec/README.md.
-spec-long:
-	go test ./test/conformance -count=1 -timeout 60m -rapid.checks=2000
 
 # Plant each bug of ../ops/controlplane/mutants.txt in a copy of the tree and run its test
 # command. A bug the tests do not see fails the target, and so does a mutant whose

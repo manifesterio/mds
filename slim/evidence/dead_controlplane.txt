@@ -1,0 +1,6 @@
+client/brokers.go:13:18: unreachable func: Client.BrokerHeartbeat
+client/client.go:64:18: unreachable func: Client.Observe
+client/groups.go:41:18: unreachable func: Client.OffsetCommit
+client/groups.go:47:18: unreachable func: Client.OffsetFetch
+client/status.go:10:18: unreachable func: Client.GetStatus
+client/topics.go:41:18: unreachable func: Client.CreateTopic
