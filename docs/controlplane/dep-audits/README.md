@@ -1,22 +1,77 @@
 # Dependency audit records
 
-Every third-party module that the deterministic packages (`internal/runtime/`, `internal/verify/simulator/`)
-depend on needs a reviewed record here, at exactly
-`docs/controlplane/dep-audits/<module path>@<version>.md`. `ops/controlplane/scripts/ci-determinism.sh` fails
-CI when one is missing, so a version bump forces a re-audit.
+Reference for third-party modules that the controlplane determinism gate may reach.
 
-A module that only test code imports (`pgregory.net/rapid`, in `_test.go` files) needs no record: the gate follows the imports of the deterministic packages, and tests are not in it.
+## Gate
 
-Only modules that the deterministic packages really run are checked. The script does not
-follow imports into the generated API (`controlplane/api`: the shared, service and log packages), because that is
-the input/output edge. So grpc, genproto and golang.org/x/{net,sys,text} need no
-record here. Deterministic packages may use the generated API for type definitions only.
-protobuf is the one exception. Since T4.4 `metadb` encodes and decodes the log
-entries with it. The gate reaches `google.golang.org/protobuf` through `metadb`, and it has
-a record.
+`ops/controlplane/scripts/ci-determinism.sh` walks the import closure of:
 
-How to produce one: run `ops/broker/scripts/audit-dep.sh <module>@<version>` and follow
-`.claude/skills/audit-go-dependency/SKILL.md`. Use the template below.
+```
+./internal/runtime/...
+./contract/...
+./internal/controlplane/metadb/engine
+./internal/controlplane/domain/topic
+./internal/controlplane/domain/group
+./internal/controlplane/domain/broker
+./internal/controlplane/domain/rebalance
+./internal/controlplane/replica
+./spec
+./internal/verify/simulator
+```
+
+For every third-party module in that closure, CI requires a file at exactly:
+
+```
+docs/controlplane/dep-audits/<module path>@<version>.md
+```
+
+The version string must match `controlplane/go.mod`. A version bump without a
+matching record fails CI.
+
+First-party modules under `github.com/manifesterio/mds/` need no record.
+
+Test-only imports (`pgregory.net/rapid` in `_test.go`) are outside the gate.
+
+## Edge cut
+
+The walk stops at the generated API packages:
+
+```
+github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1
+github.com/manifesterio/mds/controlplane/api/controlplane/v1
+github.com/manifesterio/mds/controlplane/api/controlplane/log/v1
+```
+
+Imports only used through that edge (grpc, genproto, `golang.org/x/{net,sys,text}`)
+need no controlplane record. Deterministic packages may import the API for type
+definitions.
+
+Exception: `internal/controlplane/metadb` encodes and decodes log entries with
+`google.golang.org/protobuf`. The simulator imports `metadb`, so the gate reaches
+protobuf and requires a record.
+
+Allow-list: `ops/controlplane/determinism-allow.txt`.
+
+## Records in this directory
+
+| File | In `controlplane/go.mod` | In gate closure |
+|---|---|---|
+| `google.golang.org/protobuf@v1.35.2.md` | yes (`v1.35.2`) | yes |
+| `github.com/cockroachdb/pebble@v1.1.5.md` | yes (`v1.1.5`) | no (edge) |
+| `pebble-indirect-modules.md` | indirect of Pebble | no |
+| `github.com/prometheus/client_golang@v1.20.5.md` | yes (`v1.20.5`) | no (edge) |
+| `github.com/twmb/franz-go/pkg/kmsg@v1.14.0.md` | no | no |
+
+As of the current tree, the gate prints only
+`google.golang.org/protobuf@v1.35.2`.
+
+## New record
+
+```bash
+ops/broker/scripts/audit-dep.sh <module>@<version>
+```
+
+Follow `.claude/skills/audit-go-dependency/SKILL.md`. Template:
 
 ```markdown
 # <module>@<version>
