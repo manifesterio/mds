@@ -10,12 +10,11 @@ import (
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// createTopics answers CreateTopics (Kafka key 19, decision Q10). Each topic is
-// checked here first. A topic that passes needs the control plane: one
-// exclusive CreateTopic per topic. The control plane checks that the topic is
-// new and creates it in one step, so two creates of one new name cannot both
-// succeed. validateOnly only reads, so it asks DescribeTopics and creates
-// nothing.
+// createTopics answers CreateTopics (Kafka key 19). Each topic is checked here
+// first. A topic that passes needs the control plane. One exclusive CreateTopic
+// runs per topic. The control plane checks that the topic is new and creates it
+// in one step, so two creates of one new name cannot both succeed. validateOnly
+// only reads, so it asks DescribeTopics and creates nothing.
 //
 // Replication is ignored: object storage is the replication. Configs are
 // ignored, and one warning fact is logged per request that has any. Topic ids

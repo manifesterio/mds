@@ -323,8 +323,8 @@ func FuzzDecodeRequest(f *testing.F) {
 	})
 }
 
-// InitProducerId (key 22) is not served (decision 41): it is neither
-// advertised nor decodable, so idempotent clients fail at startup.
+// InitProducerId (key 22) is not served. It is neither advertised nor
+// decodable, so idempotent clients fail at startup.
 func TestInitProducerIDNotSupported(t *testing.T) {
 	if IsSupported(22, 0) {
 		t.Fatal("key 22 is supported")

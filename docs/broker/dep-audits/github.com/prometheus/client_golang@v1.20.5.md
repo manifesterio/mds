@@ -15,8 +15,8 @@
 | Transitive modules: `beorn7/perks`, `cespare/xxhash/v2`, `munnerz/goautoneg`, `prometheus/client_model`, `prometheus/common`, `prometheus/procfs`, `google.golang.org/protobuf` | No | Pulled in for exposition (protobuf model, procfs for the process collector). Outside the determinism closure; `ops/scripts/ci-determinism.sh` does not list them. |
 
 ## Rules for our code
-1. Import it only from `internal/system/production` and `cmd/` (the non-deterministic edge). The broker core emits facts
-   (decision 36); `prod.Metrics` turns them into collectors.
+1. Import it only from `internal/system/production` and `cmd/` (the non-deterministic edge). The broker core emits facts.
+   `prod.Metrics` turns them into collectors.
 2. No allow-list entry. If a deterministic package ever needs metrics, it emits a fact instead.
 
 ## Evidence

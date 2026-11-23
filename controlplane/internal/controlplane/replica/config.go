@@ -70,7 +70,7 @@ type Config struct {
 	OpenStore func() (engine.Engine, error)
 
 	// WindowSlots is the idempotency window length. Keys older than this many
-	// slots are forgotten at TrimStride boundaries (decision 48). Zero skips.
+	// slots are forgotten at TrimStride boundaries. Zero skips.
 	WindowSlots int64
 	// TrimStride is how often (in slots) the idempotency window is cut.
 	// Zero means 16 when WindowSlots > 0.

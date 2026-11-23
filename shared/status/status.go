@@ -24,7 +24,7 @@ const (
 	ErrUnavailable         // 503 / throttled / overloaded
 	ErrNotFound
 	ErrConflict   // idempotency-key mismatch (same SegmentKey, different request)
-	_             // retired: was ErrFenced (decision 44); keeps the numbers below stable
+	_             // retired slot. Was ErrFenced. Keeps the numbers below stable.
 	ErrConnClosed // connection lost
 	ErrTooLarge
 	ErrCorrupt

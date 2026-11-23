@@ -45,7 +45,6 @@ func TestTrimForgetsKeysNotOffsets(t *testing.T) {
 	if d := mustCommit(t, a, 6, commit("new", pb("a", 0, 5))); d.Resp.(contract.CommitSegmentResp).Assigned[0].Base != 5 {
 		t.Fatalf("window replay: %+v", d)
 	}
-	// "old" left the window: the same key commits again as a NEW segment (decision 48).
 	d := mustCommit(t, a, 7, commit("old", pb("a", 0, 5)))
 	if d.Err != runtime.OK || d.Resp.(contract.CommitSegmentResp).Assigned[0].Base != 10 {
 		t.Fatalf("after trim the key must commit again at 10: %+v", d)

@@ -16,11 +16,11 @@ import (
 // expectedLogChecker is the invariant that owns the reconstructed logs and every check
 // that reads them (AckedIsCommitted, at-least-once duplicates, NoPhantoms,
 // AckedOrder, ReadsMatchLog, AckedDurable, consumers caught up). Delivery is
-// at-least-once (decision 41): a retried batch may be committed more than once
-// (whole, in order, at most once per send and once per stored object), but an
-// acked record is at its acked offset and offsets never gap or overlap. One instance per seed so
-// the logs are rebuilt once, incrementally: committed ranges only ever append,
-// and Gen() skips steps where the control plane did not change. It reads
+// at-least-once. A retried batch may be committed more than once (whole, in
+// order, at most once per send and once per stored object), but an acked record
+// is at its acked offset and offsets never gap or overlap. One instance per seed
+// so the logs are rebuilt once, incrementally. Committed ranges only ever
+// append, and Gen() skips steps where the control plane did not change. It reads
 // ground truth only (the control plane and the object store as truth, facts,
 // history) and never imports the spec.
 type expectedLogChecker struct {

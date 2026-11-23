@@ -6,9 +6,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 )
 
-// FindCoordinator (Kafka key 10, decision Q3). A group is coordinated by one
-// live broker, picked by hashing its name. Only the connection moves: any
-// broker serves every group call, so a stale answer is harmless.
+// FindCoordinator (Kafka key 10). A group is coordinated by one live broker,
+// picked by hashing its name. Only the connection moves. Any broker serves
+// every group call, so a stale answer is harmless.
 
 // Key types of FindCoordinator.
 const (

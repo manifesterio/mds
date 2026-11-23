@@ -16,10 +16,10 @@ import (
 )
 
 // batch is one produce batch for one partition, retried unchanged until
-// resolved. Producers are not idempotent (decision 41): a retry after an
-// ambiguous answer may commit the batch twice. idem marks the rare batch that
-// deliberately claims a producer id: the broker must reject it with
-// INVALID_REQUEST, per partition, and never commit it.
+// resolved. Producers are not idempotent. A retry after an ambiguous answer may
+// commit the batch twice. idem marks the rare batch that deliberately claims a
+// producer id. The broker must reject it with INVALID_REQUEST, per partition,
+// and never commit it.
 type batch struct {
 	id        machine.ID
 	tpIdx     int

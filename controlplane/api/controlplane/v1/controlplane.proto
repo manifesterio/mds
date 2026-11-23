@@ -157,7 +157,7 @@ message BrokerInfo {
 }
 
 // BrokerHeartbeatRequest renews the lease of the calling broker. Only the
-// active control plane keeps the live set (decision Q4, Q7b).
+// active control plane keeps the live set.
 message BrokerHeartbeatRequest {
   option (controlplane.options.v1.go_struct) = "contract.BrokerHeartbeat";
   BrokerInfo broker = 1;
@@ -169,8 +169,8 @@ message BrokerHeartbeatResponse {
   repeated BrokerInfo brokers = 1;
 }
 
-// Group calls (classic protocol, decision Q9). Only the active control plane
-// serves them; a standby answers Unavailable. Business errors come as a
+// Group calls (classic protocol). Only the active control plane
+// serves them. A standby answers Unavailable. Business errors come as a
 // non-OK status with ErrorDetail, except LeaveGroup and OffsetCommit,
 // which return one code per member or partition.
 

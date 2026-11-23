@@ -33,8 +33,8 @@ import (
 var c1TPs = []core.TopicPartition{contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1),
 	contract.NewTopicPartition("u", 0), contract.NewTopicPartition("u", 1), contract.NewTopicPartition("u", 2)}
 
-// An Idem entry carries a producer id. The broker refuses these entries
-// (decision 41), so the test expects an error and no new record.
+// An Idem entry carries a producer id. The broker refuses these entries, so
+// the test expects an error and no new record.
 type c1ent struct {
 	TopicPartitionIndex, N int
 	Idem                   bool

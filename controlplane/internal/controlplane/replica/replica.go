@@ -392,8 +392,6 @@ func (m *Replica) trip(err error) []runtime.Action {
 	return []runtime.Action{runtime.StopForRestart{Cause: err.Error()}}
 }
 
-// stop marks the machine shutting down and emits ShutdownDone. With no in-flight work
-// yet that must drain, ShutdownDone is immediate (decision 8).
 func (m *Replica) stop() []runtime.Action {
 	if m.stopping {
 		return nil

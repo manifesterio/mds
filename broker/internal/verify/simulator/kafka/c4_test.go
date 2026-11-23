@@ -13,9 +13,9 @@ import (
 	"github.com/manifesterio/mds/dst/kernel"
 )
 
-// C4 (speccheck/doc.go): the at-least-once Kafka oracle against the broker spec
-// (broker/spec) and the control plane spec (controlplane/spec). The oracle never
-// imports a spec package (decision 21); this external test package may, because
+// C4 (speccheck/doc.go) is the at-least-once Kafka oracle against the broker
+// spec (broker/spec) and the control plane spec (controlplane/spec). The oracle
+// never imports a spec package. This external test package may, because
 // determinismcheck does not read _test.go files and only export_test.go
 // (package kafka, no spec) reaches into the oracle. The linter rule in
 // .golangci.yml (depguard, kafka-oracle-no-spec) says the same.

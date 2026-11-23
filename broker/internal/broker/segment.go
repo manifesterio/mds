@@ -89,7 +89,7 @@ func (s *segment) dataBytes() int {
 }
 
 // addBatch appends an admitted batch. The first batch arms a fixed
-// BatchWindow timer per decision 35, and a cap may seal earlier.
+// BatchWindow timer, and a cap may seal earlier.
 func (b *Broker) addBatch(pb *partitionBatch) []core.Action {
 	var acts []core.Action
 	before := b.open.bytes
@@ -334,7 +334,7 @@ func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
 // retryPut backs off and repeats the PUT under the same key.
 func (b *Broker) retryPut(s *segment) []core.Action {
 	if s.attempts++; s.attempts >= b.config.MaxAttempts {
-		// The write may still land later: unbounded MaybeApplied (decision 15).
+		// The write may still land later. MaybeApplied is unbounded.
 		b.env.Reachable(segmentRetriesExhausted)
 		return b.failSegment(s, errRequestTimedOut)
 	}
@@ -345,10 +345,10 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 }
 
 // retryCommit repeats a commit under the same key until CommitDeadline has
-// passed since the first CommitSegment: capped exponential backoff with
-// jitter (drawn from the Environment, so deterministic in simulation), never a count
-// limit. Past the deadline the segment fails; the write may still land later
-// (decision 15).
+// passed since the first CommitSegment. Backoff is capped exponential with
+// jitter (drawn from the Environment, so deterministic in simulation), never a
+// count limit. Past the deadline the segment fails. The write may still land
+// later.
 func (b *Broker) retryCommit(s *segment) []core.Action {
 	left := b.config.CommitDeadline - machine.Duration(b.now-s.commitAt)
 	if left <= 0 {
@@ -385,7 +385,7 @@ func (b *Broker) segmentTimer(s *segment, gen machine.TimerVersion) []core.Actio
 
 // answerPart answers pb once, with code or, on errNone, with success at range
 // r of segment key. A success also records the "produce_acked" fact that
-// drain emits right before the Send (decision 12).
+// drain emits right before the Send.
 func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r contract.BatchRange, key string) {
 	if pb.answered {
 		return

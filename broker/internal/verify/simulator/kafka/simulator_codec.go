@@ -6,10 +6,10 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 )
 
-// The broker never decompresses (decision 45), so the simulated clients need no
-// real codec: compressValue is a reversible byte scramble that stands in for gzip,
-// snappy, lz4 and zstd. A batch carries the real codec id in its attributes
-// and an compressValue'd records section the broker must treat as opaque bytes; only the
+// The broker never decompresses, so the simulated clients need no real codec.
+// compressValue is a reversible byte scramble that stands in for gzip, snappy,
+// lz4 and zstd. A batch carries the real codec id in its attributes and a
+// compressValue'd records section the broker must treat as opaque bytes. Only the
 // simulated consumer and the oracle undo it.
 func compressValue(b []byte) []byte {
 	out := make([]byte, len(b))

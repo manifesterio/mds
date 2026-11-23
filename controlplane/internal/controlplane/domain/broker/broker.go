@@ -1,7 +1,6 @@
-// Package broker is the broker context of the control plane:
-// which brokers are alive. Each broker sends a heartbeat to renew its lease, and
-// the active control-plane node answers with the live broker set (decision Q4,
-// Q7b).
+// Package broker is the broker context of the control plane.
+// It tracks which brokers are alive. Each broker sends a heartbeat to renew its lease, and
+// the active control-plane node answers with the live broker set.
 //
 // The set is not logged and not stored, so it is not a module of the replicated
 // state. After a restart or a failover it starts empty and fills again within one

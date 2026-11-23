@@ -4,7 +4,7 @@
   github.com/cockroachdb/pebble` ran to the end (network available); determinismcheck exited 1, as expected for a storage engine.
 - Requires Go: 1.22.0
 - Verdict: **REJECTED for the deterministic packages** (`internal/runtime/`, `internal/verify/simulator/`, `internal/spec/`, ...); **ACCEPTED at the edge**
-  (`internal/controlplane/metadb/engine/pebble` only, decision 49).
+  (`internal/controlplane/metadb/engine/pebble` only).
 - Import paths allowed (ops/determinism-allow.txt): **none**. Deliberately not added.
 
 ## Findings
@@ -18,7 +18,7 @@
 ## Rules for our code
 1. Import it only from `internal/controlplane/metadb/engine/pebble`. The state updater talks to the `engine.Engine` seam, never to Pebble.
 2. Commits use `pebble.NoSync`; the store is never trusted after a crash. A restart restores a checkpoint into an
-   EMPTY directory and replays the log (decision 49). Do not reuse a directory across incarnations.
+   EMPTY directory and replays the log. Do not reuse a directory across incarnations.
 3. A Pebble iterator's key/value bytes are valid only until the next call: the seam copies what it returns
    (`Get`, `Floor`) and the state updater copies strings out of `Ascend` callbacks before returning.
 4. Pebble's logger is silenced (`quiet`); store errors surface through `View`/`Update` and the state updater fails stop.

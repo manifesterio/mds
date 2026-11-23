@@ -11,9 +11,9 @@
 // identical request under the same segment key, which both the object store and
 // the control plane treat idempotently.
 //
-// The broker is stateless cattle (decisions 41-44): no registration, epoch or
-// fencing, no idempotent producers, and it never proposes an offset. The
-// segment key is a random id drawn from the injected Environment (seg/<32 hex>).
+// The broker is stateless. It has no registration, epoch or fencing, no
+// idempotent producers, and it never proposes an offset. The segment key is a
+// random id drawn from the injected Environment (seg/<32 hex>).
 package broker
 
 import (

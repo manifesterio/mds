@@ -1,7 +1,7 @@
 # Indirect modules pulled in by Pebble (stage 4 audit)
 
 Date: 2026-10-21. Auditor: stage-4 agent. Scope: the 16 modules that appeared in `go.mod` as `// indirect` when
-`github.com/cockroachdb/pebble v1.1.5` (decision 49) was added. They are EDGE dependencies: only
+`github.com/cockroachdb/pebble v1.1.5` was added. They are EDGE dependencies. Only
 `internal/controlplane/metadb/engine/pebble` (and so `cmd/mdscontrolplane`) imports Pebble. `internal/runtime/`, `internal/verify/simulator/` and every other deterministic package do not
 reach them (`ops/scripts/ci-determinism.sh` is green), so none needs a per-module determinism record under
 `docs/controlplane/dep-audits/<module>@<version>.md`; this page is the summary the open item asked for. The Pebble record itself is

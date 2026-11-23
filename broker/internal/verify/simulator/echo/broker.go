@@ -263,7 +263,6 @@ func (b *Broker) fail(o *op) []core.Action {
 	return b.reply(o, "ERR")
 }
 
-// ack emits the ack fact immediately before the Send that acks (decision 12).
 func (b *Broker) ack(o *op, off core.Offset) []core.Action {
 	b.acked++
 	acts := []core.Action{emit("echo_acked",
@@ -388,7 +387,7 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 			b.drop(o)
 			return b.ack(o, core.Offset(b.acked))
 		}
-		return b.retryLater(o, stateCommit) // idempotent per SegmentKey (decision 3)
+		return b.retryLater(o, stateCommit) // idempotent per SegmentKey
 	}
 	return b.reply(o, "ERR")
 }

@@ -64,8 +64,8 @@ type Client struct {
 func (c *Client) Observe(f func(operation string, d time.Duration)) { c.obs = f }
 
 // New returns a client for target. target may be a comma-separated list of
-// host:port addresses (decision 51 / Appendix E): calls go to the address that
-// last worked; Unavailable moves on to the next within the same call.
+// host:port addresses. Calls go to the address that
+// last worked. Unavailable moves on to the next within the same call.
 func New(target string, _ any) *Client {
 	c := &Client{
 		dial: func(ctx context.Context, addr string) (*grpc.ClientConn, error) {

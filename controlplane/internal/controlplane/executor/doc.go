@@ -9,6 +9,6 @@
 //   - executor/logtest: the conformance suite of Log. Every implementation runs it
 //     from its own package.
 //
-// The AWS SDK stays out of controlplane/replica (decision 56). The rules are
+// The AWS SDK stays out of controlplane/replica. The rules are
 // checked by architecture_test.go in the parent folder.
 package executor

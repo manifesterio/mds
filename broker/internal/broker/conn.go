@@ -210,7 +210,6 @@ func (b *Broker) drain(c *connection, acts []core.Action) []core.Action {
 			c.closing, c.abort = true, true
 			continue
 		}
-		// Ack facts go immediately before the Send that carries them (decision 12).
 		for _, f := range s.facts {
 			acts = append(acts, core.RecordFact{Fact: f})
 		}

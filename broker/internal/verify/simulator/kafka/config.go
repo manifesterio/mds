@@ -12,10 +12,10 @@ import (
 	"github.com/manifesterio/mds/dst/rng"
 )
 
-// brokerConfig is the sim-friendly broker: a short flush window so commits
-// are frequent, and a small buffer so backpressure engages. The segment size is
-// pinned to the pre-decision-35 default (4 MiB) and the batch cap to 8; a seed's
-// swarm overrides the segment knobs (see swarmBroker).
+// brokerConfig is the sim-friendly broker. A short flush window keeps commits
+// frequent, and a small buffer engages backpressure. The segment size is pinned
+// to 4 MiB and the batch cap to 8. A seed's swarm overrides the segment knobs
+// (see swarmBroker).
 func brokerConfig(bug broker.InjectedBug) broker.Config {
 	return broker.Config{BatchWindow: 5 * machine.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
 		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, InjectedBug: bug}

@@ -59,7 +59,7 @@ var supported = []APIVersionRange{ //nolint:dupl // supported_test.go pins this 
 
 // Supported returns the advertised APIs in key order. Produce >= 3 so batches
 // are RecordBatch v2. Produce and Fetch stay below v13, which switches to
-// topic IDs. The group APIs are the classic protocol only (decision Q9): no
+// topic IDs. The group APIs are the classic protocol only. No
 // ConsumerGroupHeartbeat. The result is a copy, so callers may change it.
 func Supported() []APIVersionRange {
 	return slices.Clone(supported)

@@ -12,7 +12,7 @@ import (
 
 // DynamoMaxCommitItems is DynamoDB's TransactWriteItems limit, the value the
 // Kafka preset uses. It models the item cap of the removed transactional
-// store (decision 32), a limit the log control plane does not have.
+// store, a limit the log control plane does not have.
 const DynamoMaxCommitItems = 100
 
 // ControlPlaneFaults are the faults of the simulated control plane: the faults
@@ -27,11 +27,11 @@ type ControlPlaneFaults struct {
 	MaxCommitItems int
 }
 
-// ControlPlane is the simulated control plane (decisions 3, 14, 23):
-// controlplane/spec (through specbridge) as the state, with the faults of faulty
-// around it. ErrConflict and ErrInvalid come only from the spec; ErrTooLarge
-// only from the optional commit-size limit (ControlPlaneFaults.MaxCommitItems),
-// applied before the spec; a retry of a committed segment returns the original
+// ControlPlane is the simulated control plane. It uses controlplane/spec
+// (through specbridge) as the state, with the faults of faulty around it.
+// ErrConflict and ErrInvalid come only from the spec. ErrTooLarge comes only
+// from the optional commit-size limit (ControlPlaneFaults.MaxCommitItems),
+// applied before the spec. A retry of a committed segment returns the original
 // offsets whatever the faults did.
 //
 // It is a kernel.Service. A broker node hands it a core.ControlPlaneCall, and the
@@ -104,12 +104,12 @@ func (s *ControlPlane) HighWatermark(topicPartition core.TopicPartition) core.Of
 }
 
 // tooLarge reports whether op is a CommitSegment that a store with a bounded
-// transaction would refuse. The count is the arithmetic of the removed DynamoDB-transaction store (decisions 39,
-// 41, 44: no producer, high-watermark or fencing items): one segment item, one
-// range run item per distinct partition and one item per topic the commit
+// transaction would refuse. The count matches the removed DynamoDB-transaction
+// store with no producer, high-watermark, or fencing items. One segment item,
+// one range run item per distinct partition, and one item per topic the commit
 // grows, taken as an upper bound, so it depends on the request and the topic
-// table only. The number of batches does not count. The spec stays
-// limit-free; a refusal reaches it never, so nothing changes.
+// table only. The number of batches does not count. The spec stays limit-free.
+// A refusal never reaches it, so nothing changes.
 func (s *ControlPlane) tooLarge(operation contract.Operation) bool {
 	c, ok := operation.(contract.CommitSegment)
 	if !ok || s.maxItems <= 0 {

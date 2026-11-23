@@ -66,9 +66,9 @@ func capCampaign(t *testing.T, capParts int) *sealStats {
 }
 
 // Raising the cap from 96 to 4096 changes the run only where the cap was
-// binding (decision 52): the 96-partition seals disappear (the segments they cut
-// run on until the timer). In this small simulated workload the cap binds on
-// about 1% of segments, so the two runs differ in a handful of segments.
+// binding. The 96-partition seals disappear (the segments they cut run on until
+// the timer). In this small simulated workload the cap binds on about 1% of
+// segments, so the two runs differ in a handful of segments.
 func TestCapChangeIsExplainedBySealReasons(t *testing.T) {
 	old, now := capCampaign(t, 96), capCampaign(t, 4096)
 	t.Logf("cap 96:   %d segments, %.1f partitions each, sealed by cap %d size %d timer %d batches %d",
