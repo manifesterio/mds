@@ -6,128 +6,85 @@ import (
 	"github.com/manifesterio/mds/dst/core/trace"
 )
 
-func (begin) isClientIn() {}
+func (start) isClientMsg() {}
 
-// Tag returns the frozen trace-hash number of begin.
-func (begin) Tag() uint64 { return 1 }
+// Tag returns the frozen trace-hash number of start.
+func (start) Tag() uint64 { return 34 }
 
-// Fold writes begin into the trace hash: tag 1, then the fields in order.
-func (begin) Fold(h *trace.Hash) {
-	h.Uint64(1)
+// Fold writes start into the trace hash: tag 34, then the fields in order.
+func (start) Fold(h *trace.Hash) {
+	h.Uint64(34)
 }
 
-func (nextOp) isClientIn() {}
+func (timeForNextOp) isClientMsg() {}
 
-// Tag returns the frozen trace-hash number of nextOp.
-func (nextOp) Tag() uint64 { return 2 }
+// Tag returns the frozen trace-hash number of timeForNextOp.
+func (timeForNextOp) Tag() uint64 { return 35 }
 
-// Fold writes nextOp into the trace hash: tag 2, then the fields in order.
-func (nextOp) Fold(h *trace.Hash) {
-	h.Uint64(2)
+// Fold writes timeForNextOp into the trace hash: tag 35, then the fields in order.
+func (timeForNextOp) Fold(h *trace.Hash) {
+	h.Uint64(35)
 }
 
-func (getResponse) isClientIn() {}
+func (serverAnswered) isClientMsg() {}
 
-// Tag returns the frozen trace-hash number of getResponse.
-func (getResponse) Tag() uint64 { return 3 }
+// Tag returns the frozen trace-hash number of serverAnswered.
+func (serverAnswered) Tag() uint64 { return 36 }
 
-// Fold writes getResponse into the trace hash: tag 3, then the fields in order.
-func (x getResponse) Fold(h *trace.Hash) {
-	h.Uint64(3)
-	h.String(x.Key)
-	h.String(x.Value)
-	h.String(x.Want)
+// Fold writes serverAnswered into the trace hash: tag 36, then the fields in order.
+func (x serverAnswered) Fold(h *trace.Hash) {
+	h.Uint64(36)
+	x.Answer.Fold(h)
+	h.String(x.Expected)
 }
 
-func (sendPut) isClientOut() {}
+func (putValue) isServerReq() {}
 
-// Tag returns the frozen trace-hash number of sendPut.
-func (sendPut) Tag() uint64 { return 11 }
+// Tag returns the frozen trace-hash number of putValue.
+func (putValue) Tag() uint64 { return 37 }
 
-// Fold writes sendPut into the trace hash: tag 11, then the fields in order.
-func (x sendPut) Fold(h *trace.Hash) {
-	h.Uint64(11)
-	h.String(x.Key)
-	h.String(x.Value)
-}
-
-func (sendGet) isClientOut() {}
-
-// Tag returns the frozen trace-hash number of sendGet.
-func (sendGet) Tag() uint64 { return 12 }
-
-// Fold writes sendGet into the trace hash: tag 12, then the fields in order.
-func (x sendGet) Fold(h *trace.Hash) {
-	h.Uint64(12)
-	h.String(x.Key)
-	h.String(x.Want)
-}
-
-func (waitNext) isClientOut() {}
-
-// Tag returns the frozen trace-hash number of waitNext.
-func (waitNext) Tag() uint64 { return 13 }
-
-// Fold writes waitNext into the trace hash: tag 13, then the fields in order.
-func (x waitNext) Fold(h *trace.Hash) {
-	h.Uint64(13)
-	h.Uint64(uint64(x.ID))
-	h.Int64(int64(x.After))
-}
-
-func (putRequest) isServerIn() {}
-
-// Tag returns the frozen trace-hash number of putRequest.
-func (putRequest) Tag() uint64 { return 21 }
-
-// Fold writes putRequest into the trace hash: tag 21, then the fields in order.
-func (x putRequest) Fold(h *trace.Hash) {
-	h.Uint64(21)
+// Fold writes putValue into the trace hash: tag 37, then the fields in order.
+func (x putValue) Fold(h *trace.Hash) {
+	h.Uint64(37)
 	h.String(x.Key)
 	h.String(x.Value)
 }
 
-func (getRequest) isServerIn() {}
+func (getValue) isServerReq() {}
 
-// Tag returns the frozen trace-hash number of getRequest.
-func (getRequest) Tag() uint64 { return 22 }
+// Tag returns the frozen trace-hash number of getValue.
+func (getValue) Tag() uint64 { return 38 }
 
-// Fold writes getRequest into the trace hash: tag 22, then the fields in order.
-func (x getRequest) Fold(h *trace.Hash) {
-	h.Uint64(22)
+// Fold writes getValue into the trace hash: tag 38, then the fields in order.
+func (x getValue) Fold(h *trace.Hash) {
+	h.Uint64(38)
 	h.String(x.Key)
-	h.String(x.Want)
+	x.ReplyTo.Fold(h)
 }
 
-func (getDone) isServerIn() {}
+func (storeAnswered) isServerReq() {}
 
-// Tag returns the frozen trace-hash number of getDone.
-func (getDone) Tag() uint64 { return 23 }
+// Tag returns the frozen trace-hash number of storeAnswered.
+func (storeAnswered) Tag() uint64 { return 39 }
 
-// Fold writes getDone into the trace hash: tag 23, then the fields in order.
-func (x getDone) Fold(h *trace.Hash) {
-	h.Uint64(23)
-	h.String(x.Key)
-	h.String(x.Value)
-	h.String(x.Want)
+// Fold writes storeAnswered into the trace hash: tag 39, then the fields in order.
+func (x storeAnswered) Fold(h *trace.Hash) {
+	h.Uint64(39)
+	x.Answer.Fold(h)
+	x.Asker.Fold(h)
 }
 
-func (reply) isServerOut() {}
+// Tag returns the frozen trace-hash number of serverReply.
+func (serverReply) Tag() uint64 { return 40 }
 
-// Tag returns the frozen trace-hash number of reply.
-func (reply) Tag() uint64 { return 33 }
-
-// Fold writes reply into the trace hash: tag 33, then the fields in order.
-func (x reply) Fold(h *trace.Hash) {
-	h.Uint64(33)
+// Fold writes serverReply into the trace hash: tag 40, then the fields in order.
+func (x serverReply) Fold(h *trace.Hash) {
+	h.Uint64(40)
 	h.String(x.Key)
 	h.String(x.Value)
-	h.String(x.Want)
 }
 
 func (storePut) isStoreReq() {}
-
-func (storePut) isServerOut() {}
 
 // Tag returns the frozen trace-hash number of storePut.
 func (storePut) Tag() uint64 { return 31 }
@@ -141,8 +98,6 @@ func (x storePut) Fold(h *trace.Hash) {
 
 func (storeGet) isStoreReq() {}
 
-func (storeGet) isServerOut() {}
-
 // Tag returns the frozen trace-hash number of storeGet.
 func (storeGet) Tag() uint64 { return 32 }
 
@@ -150,5 +105,14 @@ func (storeGet) Tag() uint64 { return 32 }
 func (x storeGet) Fold(h *trace.Hash) {
 	h.Uint64(32)
 	h.String(x.Key)
-	h.String(x.Want)
+}
+
+// Tag returns the frozen trace-hash number of storeReply.
+func (storeReply) Tag() uint64 { return 41 }
+
+// Fold writes storeReply into the trace hash: tag 41, then the fields in order.
+func (x storeReply) Fold(h *trace.Hash) {
+	h.Uint64(41)
+	h.String(x.Key)
+	h.String(x.Value)
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
@@ -739,5 +740,14 @@ func TestMainReplaysTheSeedOfTheVariable(t *testing.T) {
 	code, out, errOut := runMain(t, Config{Tool: "tool", EnvPrefix: "MDS"}, reg, env("MDS_SEED", "4"))
 	if code != 0 || !strings.HasPrefix(out, "a step\nseed 4:") {
 		t.Fatalf("code %d out %q err %q", code, out, errOut)
+	}
+}
+
+func TestFromSim(t *testing.T) {
+	sys := sim.NewSystem(sim.Config{Seed: 7})
+	sys.Fail(sim.FailProtocol, "p", "detail")
+	r := FromSim(sys.Run(), "replay")
+	if r.OK || r.Seed != 7 || len(r.Failures) != 1 || r.Failures[0].Kind != "protocol" || r.Reproduce != "replay" {
+		t.Fatalf("%+v", r)
 	}
 }

@@ -1,9 +1,10 @@
 # dst
 
-Deterministic simulation tools for Go tests. A product writes **machines**: state machines that take one input
-and return outputs, and do no IO. The **kernel** runs many machines in one goroutine, with one seeded `rng`,
-virtual-time `sched`, a `fault` injector, an `assert` log and a `trace` fingerprint per run. The same machine
-also runs in production with the `live` package.
+Deterministic simulation tools for Go tests. A product writes **actors** (`core/actor`): state machines that
+take one message at a time and record effects on an outbox, and do no IO. The **simulator** (`sim`) runs many
+actors in one goroutine, with one seeded `rng`, virtual time, a `fault` injector, an `assert` log and a `trace`
+fingerprint per run. The same actors run in production on `runtime/live`. The older machine API
+(`core/machine`, `sim/kernel`) stays until controlplane and broker have moved.
 
 Module: `github.com/manifesterio/mds/dst`
 
@@ -20,8 +21,10 @@ determinism check. The determinism tool is in `cmd/determinismcheck`.
 
 | Package | Role |
 |---|---|
-| `core/machine` | The machine contract: `Machine[In, Out]` (`Step(now, in) []Out`, `StateHash`), `Factory`, `Env` (random stream, buggify, assertions), time types, node names, boot numbers, `Fact`. Product machine code imports only this package. |
-| `sim/kernel` | The simulation world: `Spawn` nodes, `AddService` services, typed `Addr[In]` and `Ref[In]`, a `Router[In]` per Step, `Send` / `SendOn` / `Call`, timers, lanes (`Lanes[K]`), two inboxes per node, the cost model, phases, incarnations, crash / restart / stop / pause, attrition, rules, the fact timeline and the trace hash. |
+| `core/actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Product actor code imports this package. |
+| `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. |
+| `core/machine` | The machine contract: `Machine[In, Out]` (`Step(now, in) []Out`, `StateHash`), `Factory`, `Env` (random stream, buggify, assertions), time types, node names, boot numbers, `Fact`. Product machine code imports only this package. Old API, removed when controlplane and broker migrate. |
+| `sim/kernel` | The simulation world: `Spawn` nodes, `AddService` services, typed `Addr[In]` and `Ref[In]`, a `Router[In]` per Step, `Send` / `SendOn` / `Call`, timers, lanes (`Lanes[K]`), two inboxes per node, the cost model, phases, incarnations, crash / restart / stop / pause, attrition, rules, the fact timeline and the trace hash. Old API, removed when controlplane and broker migrate. |
 | `runtime/live` | The production loop for the same machines: one goroutine, a two-queue `Inbox[In]` (Control before Data, Data may be bounded), real timers, a `Route` function of the product for the outputs. Real time and goroutines: it is not in the determinism gate. |
 | `core/rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`), and `Derive(label)` for an independent stream that draws nothing |
 | `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap |
@@ -35,33 +38,100 @@ determinism check. The determinism tool is in `cmd/determinismcheck`.
 | `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
 | `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
+| `cmd/dstgen` | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
-## How to write a machine
+## How to write an actor
 
-1. Give the machine an input sum type and an output sum type: an interface with an unexported marker
-   method and a `//sumtype:decl` comment. Every case has a `Fold(h *trace.Hash)` method that writes a
-   fixed tag number, then the fields.
-2. Implement `machine.Machine[In, Out]`.
-3. `w := kernel.New(kernel.Config{Seed: seed})`, then `kernel.AddService(w, svc)` and
-   `addr := kernel.Spawn(w, kernel.NodeSpec[In, Out]{Name, New, Route, ...})`.
-4. `Route` is one type switch over every case of `Out`. Each case calls `r.SetTimer`, `r.End`,
-   `kernel.Send(r, addr, msg)`, `kernel.Call(r, service, req)`, and so on. The `gochecksumtype` linter
-   fails the build when a case is missing.
-5. `w.RunUntil(nil)` and `res := w.Finish()`. The same seed gives the same `res.Hash`.
+An actor is a state machine. It takes one message at a time, does no IO, and records what it wants on
+an `Outbox`. The runtime carries the effects out after `Receive` returns. `sim` runs the same actor code
+in tests; `live` runs it in production (`dst/runtime/live` is the next phase).
 
-Go infers a type parameter from every argument, and the types must be the same. So when a message is
-a concrete case, convert it to the sum type: `kernel.Send(r, server, serverIn(putRequest(x)))`, or
-write the type: `kernel.Inject[tin](w, a, 0, note{"x"})`.
+```go
+func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, actor.NoIO]) {
+	switch m := msg.(type) {
+	case putValue:
+		s.store.Tell(outbox, storePut(m))
+	case getValue:
+		actor.Call(outbox, s.store.Request(storeGet{Key: m.Key}), thenAnswer(m.ReplyTo))
+	case storeAnswered:
+		actor.Reply(outbox, m.Asker, serverReply(m.Answer))
+	}
+}
 
-`examples/kv` is the example: a small key-value store as a machine, with its own campaign test.
+func (*server) StateHash() uint64 { return 0 }
+```
 
-Assertions and buggify sites are declared once, in package-level var blocks:
-`var oneWriter = assert.NewAlways("sim: one writer per epoch")`,
-`var slowAnswer = fault.NewSite("store: slow answer")`. The declarations form a catalog
-(`assert.Catalog`, `fault.Sites`), so a campaign can list what was never reached or never fired.
+`actor.Props` says how to run it, and is the same value in sim and live. `Name` is a label for logs.
+`New` builds the actor on every boot and is required. `Boot` makes the first message of a boot,
+`StopMsg` the graceful-stop request, `Priority` picks the Control or Data inbox, and `Restart` says
+when the next boot starts (nil: the actor stays down).
 
-Deterministic packages must not use goroutines, channels, map ranges, package-level state, or imports
-outside `../ops/dst/determinism-allow.txt`. `../ops/dst/scripts/ci-determinism.sh` lists the packages that are checked.
+Messages are a sum interface that embeds `actor.Payload`. Each case is listed in a `//dst:cases` comment:
+
+```go
+//sumtype:decl
+//dst:sum
+type serverReq interface {
+	actor.Payload
+	isServerReq()
+}
+
+//dst:cases serverReq
+type (
+	putValue struct{ Key, Value string }
+	getValue struct {
+		Key     string
+		ReplyTo actor.ReplyTo[serverReply]
+	}
+)
+```
+
+Run `go generate` with `//go:generate go run github.com/manifesterio/mds/dst/cmd/dstgen`. It writes `zz_dst_gen.go`
+(markers, `Tag`, `Fold`) and numbers each case in `dst.tags`, which is append-only: never change or reuse a number.
+
+Effects on the outbox:
+
+- `outbox.TellSelf(msg)`: put msg in my inbox now, behind what is already there.
+- `outbox.After(d, msg)`: deliver msg to me after d. One shot, nothing to cancel.
+- `outbox.StartTimer(key, d, msg)`, `outbox.CancelTimer(key)`: named timers. A new timer with the same key replaces the old one.
+- `outbox.Do(io)`: hand product IO to the executor. Use `actor.Perform` when the IO has one typed answer.
+- `outbox.Stop(how, cause)`: end this incarnation with `actor.Trip` or `actor.Exit`. It must be the last effect.
+- `outbox.Fact(f)`: add an observation to the timeline. It never changes behaviour.
+- `outbox.ForgetPending()`: drop my timers and pending answers, keep running.
+- `outbox.Watch(who, gone)`: deliver gone once if the asker behind `who` ends before I reply.
+
+Sends go through handles and the outbox:
+
+- `ref.Tell(outbox, msg)` sends to an actor, and `svc.Tell(outbox, req)` to a service. No answer.
+- `actor.Ask(outbox, ref, makeReq, adapt)` asks an actor. `makeReq` puts a fresh `ReplyTo` in the request,
+  and the answer comes back as my own message, built by `adapt`.
+- `actor.Call(outbox, svc.Request(req), adapt)` asks a service. It gets the reply handle itself.
+- `actor.Reply(outbox, replyTo, answer)` answers an Ask I received.
+- `actor.Perform(outbox, req, adapt)` hands a product IO request (a case with `//dst:answer`) to the executor.
+- `actor.Sub(outbox, name, wrap)` lends a component its own outbox. Its messages come back wrapped into mine.
+
+Sends are methods on the handles because Go cannot infer `P` in `actor.Tell(o, server, putValue{...})`.
+A method checks the argument against the handle's own type instead (ADR 2.1, item 1).
+
+To run a system, use `sim`:
+
+```go
+system := sim.NewSystem(sim.Config{Seed: seed})
+storeRef := sim.AddService[storeReq, storeReply](system, "store", theStore)
+serverRef := sim.Spawn(system, actor.Props[serverReq, actor.NoIO]{Name: "server",
+	New: func(actor.Env) actor.Actor[serverReq, actor.NoIO] { return &server{store: storeRef} }})
+sim.Spawn(system, actor.Props[clientMsg, actor.NoIO]{Name: "client",
+	Boot: func(actor.Incarnation) clientMsg { return start{} },
+	New:  func(env actor.Env) actor.Actor[clientMsg, actor.NoIO] { return &client{env: env, server: serverRef, script: script} },
+}, sim.Workload())
+return system.Run()
+```
+
+`sim.Workload()` marks the driver of the script (its panic halts the run). The same seed gives the same
+trace hash. `examples/kv` is the full example.
+
+The old machine API (`core/machine`, `sim/kernel`) still exists for controlplane and broker until they
+migrate. New code uses `actor` and `sim`.
 
 ## Docs
 
@@ -76,8 +146,9 @@ A product simulator command is a few lines. It registers its scenarios and calls
 reg := &campaign.Registry{}
 reg.Add(campaign.Scenario{Name: "kv", Detail: "a store with no faults",
     Run: func(seed uint64, o campaign.RunOptions) campaign.Result {
-        r := kv.RunWith(kernel.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst, Tail: 20})
-        return campaign.FromKernel(r, "") // "": the replay command is made from Config.Tool
+        sys := sim.NewSystem(sim.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst, Tail: 20})
+        // ... AddService, Spawn: see dst/examples/kv/kv.go ...
+        return campaign.FromSim(sys.Run(), "") // "": the replay command is made from Config.Tool
     }})
 cfg := campaign.Config{Tool: "mysim", EnvPrefix: "MDS", Defaults: campaign.Options{CheckEvery: 10}}
 os.Exit(campaign.Main(cfg, reg, os.Args[1:], os.Stdout, os.Stderr))

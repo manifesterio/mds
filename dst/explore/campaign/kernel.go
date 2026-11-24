@@ -24,7 +24,7 @@ const KindNotRepeatable = "nondeterminism"
 // counter "steps" is set. A scenario may add its own counters to the
 // returned value. When reproduce is empty, the campaign makes the replay
 // command from Options.Tool.
-func FromKernel(r kernel.Result, reproduce string) Result {
+func FromKernel(r kernel.Result, reproduce string) Result { //nolint:dupl // deleted with sim/kernel in P7; FromSim replaces it
 	out := Result{
 		Seed: r.Seed, Hash: r.Hash, Steps: r.Steps, RandCalls: r.RandCalls,
 		OK: r.OK(), Reproduce: reproduce,

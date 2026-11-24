@@ -266,6 +266,7 @@ func (o *Outbox[In, IO]) ForgetPending()
 // ---- sends: package functions, because Go methods cannot add type parameters ----
 
 // Tell sends msg to an actor. No answer is expected.
+// (P4: now the method EntityRef[P].Tell(o Sender, msg P); see ADR 2.1)
 func Tell[In, IO, P Payload](o *Outbox[In, IO], to EntityRef[P], msg P)
 
 // TellService sends req to a service. Any answer the service gives is dropped.

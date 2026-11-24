@@ -60,6 +60,40 @@ Package `live` (`dst/runtime/live`, production): `Host`, `HostConfig`, `NewHost`
 
 Every exported identifier has its contract as a doc comment in Appendix A.
 
+### 2.1 Amendments made while building P4
+
+These change Appendix A; the code in `dst/core/actor` and `dst/sim` is the reference.
+
+1. **Sends to a handle are methods.** Go cannot infer `P` in `actor.Tell(o, server,
+   putValue{...})`: the ref says `P = serverReq`, the argument says `putValue`, and inference
+   fails instead of checking assignability. Every protocol is a sum interface, so every call
+   site would need `serverReq(putValue{...})`. Methods check the argument against the
+   receiver's type instead:
+   - `actor.Tell(o, to, msg)` became `to.Tell(o, msg)`.
+   - `actor.TellService(o, svc, req)` became `svc.Tell(o, req)`.
+   - `actor.Call(o, svc, req, adapt)` became `actor.Call(o, svc.Request(req), adapt)`.
+   - `actor.Watch(o, who, gone)` became `o.Watch(who, gone)` (`who` is any `ReplyTo`, through
+     the small interface `actor.Asked`).
+   - `o` in the methods is an `actor.Sender`: only `*Outbox` implements it.
+   `Ask`, `Reply`, `Perform` and `Sub` stay functions: their messages come from closures or
+   types with declared types, so inference works.
+2. **Refs carry an owner pointer** (`actor.Owner`, made by `actor.NewOwner()` per System or
+   Host) instead of a numeric runtime id, so a handle of another System is caught without
+   package-level state. It is never folded.
+3. **`sim.SpawnOption` is not generic**: `sim.Workload()`, `sim.Attrition()`, `sim.Cost(c)`
+   need no type arguments; `WithExecutor`, `OnPhase` and `AfterReceive` infer theirs from their
+   function argument and are checked against the actor's types in `Spawn` (protocol failure on a
+   mismatch). The attrition config type is `sim.AttritionPlan`.
+4. **`sim.ServiceCtx.RecordFault`** records an injected fault (was `Fault` in the sketch): the
+   embedded `actor.Faults` already has `Fault(site, p)`, the buggify coin.
+5. **Runtime side of `actor`** (`erase.go`): `Effect`, `EffectKind`, `Binding`, `NewOutbox`,
+   `Close`, `NewEntityRef`, `NewReplyTo`, `NewServiceRef`, `As`, `Asker`, `ReplyID`. Product code
+   does not use them; they are the seam that `sim` and `live` share, and the only place where
+   message types are erased.
+6. `sim.Tell(sys, to, d, msg)` and `sim.Ask` keep their function form (host code); a concrete
+   message needs a conversion or an explicit type argument there.
+7. `trace.StringMap(m)` was added (store state hashes), as change 3 of section 9 said.
+
 ## 3. Runtime model
 
 These terms are used by the guarantees. Both runtimes implement them; "sim" or "live" marks

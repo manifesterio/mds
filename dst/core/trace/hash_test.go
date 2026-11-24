@@ -99,3 +99,17 @@ func TestRingTail(t *testing.T) {
 		}
 	}
 }
+
+func TestStringMapIgnoresOrder(t *testing.T) {
+	a := map[string]string{"x": "1", "y": "2"}
+	b := map[string]string{"y": "2", "x": "1"}
+	if trace.StringMap(a) != trace.StringMap(b) {
+		t.Fatal("same map, different hash")
+	}
+	if trace.StringMap(a) == trace.StringMap(map[string]string{"x": "1", "y": "3"}) {
+		t.Fatal("a value change did not move the hash")
+	}
+	if trace.StringMap(nil) == trace.StringMap(map[string]string{"": ""}) {
+		t.Fatal("empty and one empty entry hash alike")
+	}
+}
