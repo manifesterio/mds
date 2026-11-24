@@ -235,3 +235,29 @@ that guards the path (e.g. >= 50 over the campaign test's seeds).
 Acceptance criteria
 -------------------
 - TestCampaignIsNotVacuous requires a meaningful indet count and passes.
+
+
+DST-8  Package actor exports its runtime seam to product code
+======================================================================
+Type:       API hygiene
+Priority:   Low
+Component:  dst/core/actor (erase.go)
+Created:    2026-11-25
+Status:     Open
+
+Summary
+-------
+sim and live need Effect, EffectKind, Binding, NewOutbox, Close, NewEntityRef, NewReplyTo,
+NewServiceRef, As, NewOwner, Asker, ReplyID, EntityID, ServiceID. They are exported from package
+actor, so product code can build refs or outboxes by hand and bypass the runtime.
+
+Proposal
+--------
+Either move the seam to dst/internal/actorrt (importable by dst/sim and dst/runtime/live only;
+actor keeps thin unexported accessors), or add a forbidigo rule in the product golangci configs
+that forbids these identifiers outside tests.
+
+Acceptance criteria
+-------------------
+- Product non-test code cannot use the runtime seam (compile error or lint error).
+- sim and live unchanged in behaviour; GATES-FULL green.

@@ -1,10 +1,3 @@
-// Package sim runs actors in a deterministic simulation: one seed, one
-// random stream, one event queue, virtual time. It carries out the effects
-// actors record on their Outbox (package actor), simulates outside systems
-// as Services and product IO with Executors, and folds every step into a
-// trace hash, so one seed always gives one hash.
-//
-// Test code only: production runs the same actors on dst/runtime/live.
 package sim
 
 import (

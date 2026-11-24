@@ -699,6 +699,30 @@ Revisit when a second product (SQS-like queue, workflow service) shows the same 
 
 ---
 
+## 12. Final review (P8): what a new reader may still trip on
+
+Read as a newcomer: dst/examples/kv, controlplane replica, broker machine.
+
+1. Sends have two forms: methods on handles (`ref.Tell`, `svc.Tell`, `svc.Request`) and package
+   functions (`actor.Ask`, `actor.Call`, `actor.Reply`, `actor.Perform`). The reason (Go infers no
+   type parameter from a case of a sum) is in section 2.1 and in dst/README.md, but a reader meets
+   both forms on one screen. Accepted.
+2. Package actor exports its runtime seam (`Effect`, `NewOutbox`, `Close`, `NewEntityRef`, ...).
+   Product code could call it. Filed as DST-8: move the seam behind an internal package shared by
+   sim and live, or forbid it to products with forbidigo.
+3. A sealed sum cannot gain cases from another package, so the broker's adapted answers
+   (`SegmentPutDone`, `OpCallDone`, ...) live in broker/internal/core next to the protocol, though
+   only the broker uses them. Same for the replica's timer messages in controlplane runtime.
+   Accepted: the cost is a few named types in the vocabulary package.
+4. Hand-written folds remain in controlplane/contract (DST-6) and the simulator's group host matches
+   timer messages by fold (DST-4).
+5. Time has several homes: actor.Mono/Wall, core/clock, core/syncclock, core/realclock,
+   live.RealClock, shared/clock (DST-1).
+6. Timer keys are strings the products build ("segment/" + id). Typos are possible but each key is
+   built in one helper per product. Accepted.
+
+---
+
 ## Appendix A. Frozen API (verbatim copy of `api.go`)
 
 ```go

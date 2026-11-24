@@ -1,12 +1,3 @@
-// Package actor is what product code imports to write a deterministic state
-// machine: an Actor receives one message at a time and records what it wants
-// done on an Outbox. A runtime carries the effects out after Receive returns:
-// package sim (dst/sim) in tests, package live (dst/runtime/live) in
-// production. The same actor code runs in both.
-//
-// Wiring is typed: an EntityRef[P] sends P to an actor, a ReplyTo[R] answers
-// one ask with R, a ServiceRef[Req, Rep] calls a simulated service. Strings
-// are only identity labels (names, timer keys).
 package actor
 
 import (
