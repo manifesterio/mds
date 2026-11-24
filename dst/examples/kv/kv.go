@@ -12,6 +12,8 @@
 // exhaustive type switch over the outputs of its node.
 package kv
 
+//go:generate go run github.com/manifesterio/mds/dst/cmd/dstgen
+
 import (
 	"maps"
 	"slices"
@@ -79,31 +81,31 @@ func RunWith(cfg kernel.Config) kernel.Result {
 // clientIn is every input of the client.
 //
 //sumtype:decl
+//dst:sum
 type clientIn interface {
 	machine.Message
 	Tag() uint64
 	isClientIn()
 }
 
+//dst:cases clientIn
 type (
 	begin       struct{} // the boot input
 	nextOp      struct{} // the timer between two operations
 	getResponse struct{ Key, Value, Want string }
 )
 
-func (begin) isClientIn()       {}
-func (nextOp) isClientIn()      {}
-func (getResponse) isClientIn() {}
-
 // clientOut is every output of the client.
 //
 //sumtype:decl
+//dst:sum
 type clientOut interface {
 	machine.Message
 	Tag() uint64
 	isClientOut()
 }
 
+//dst:cases clientOut
 type (
 	sendPut  struct{ Key, Value string }
 	sendGet  struct{ Key, Want string }
@@ -112,10 +114,6 @@ type (
 		After machine.Duration
 	}
 )
-
-func (sendPut) isClientOut()  {}
-func (sendGet) isClientOut()  {}
-func (waitNext) isClientOut() {}
 
 type opKind uint8
 
@@ -181,36 +179,32 @@ func (c *clientMachine) issue() []clientOut {
 // serverIn is every input of the server node.
 //
 //sumtype:decl
+//dst:sum
 type serverIn interface {
 	machine.Message
 	Tag() uint64
 	isServerIn()
 }
 
+//dst:cases serverIn
 type (
 	putRequest struct{ Key, Value string }
 	getRequest struct{ Key, Want string }
 	getDone    struct{ Key, Value, Want string } // the store answer
 )
 
-func (putRequest) isServerIn() {}
-func (getRequest) isServerIn() {}
-func (getDone) isServerIn()    {}
-
 // serverOut is every output of the server node.
 //
 //sumtype:decl
+//dst:sum
 type serverOut interface {
 	machine.Message
 	Tag() uint64
 	isServerOut()
 }
 
+//dst:cases serverOut
 type reply struct{ Key, Value, Want string } // forward a store answer to the client
-
-func (storePut) isServerOut() {}
-func (storeGet) isServerOut() {}
-func (reply) isServerOut()    {}
 
 // serverMachine has no state: it turns requests into store calls and store
 // answers into replies.
@@ -236,19 +230,18 @@ func (serverMachine) Step(_ machine.Now, in serverIn) []serverOut {
 // of the server node, so the route passes them on as they are.
 //
 //sumtype:decl
+//dst:sum
 type storeReq interface {
 	machine.Message
 	Tag() uint64
 	isStoreReq()
 }
 
+//dst:cases storeReq serverOut
 type (
 	storePut struct{ Key, Value string }
 	storeGet struct{ Key, Want string }
 )
-
-func (storePut) isStoreReq() {}
-func (storeGet) isStoreReq() {}
 
 // store is the key-value service.
 type store struct{ data map[string]string }

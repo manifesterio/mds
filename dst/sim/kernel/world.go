@@ -1,5 +1,7 @@
 package kernel
 
+//go:generate go run github.com/manifesterio/mds/dst/cmd/dstgen
+
 import (
 	"fmt"
 

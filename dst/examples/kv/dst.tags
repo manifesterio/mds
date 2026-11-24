@@ -1,0 +1,14 @@
+# dst.tags: written by dstgen. Append-only: never change a number, never reuse one.
+# <tag> <TypeName>; a retired line has the name -
+1 begin
+23 getDone
+22 getRequest
+3 getResponse
+2 nextOp
+21 putRequest
+33 reply
+12 sendGet
+11 sendPut
+32 storeGet
+31 storePut
+13 waitNext

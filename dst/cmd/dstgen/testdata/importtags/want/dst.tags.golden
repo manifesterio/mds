@@ -1,0 +1,5 @@
+# dst.tags: written by dstgen. Append-only: never change a number, never reuse one.
+# <tag> <TypeName>; a retired line has the name -
+101 a
+7 b
+32 c

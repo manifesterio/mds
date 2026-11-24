@@ -3,21 +3,23 @@ package kernel_test
 import (
 	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/dst/core/rng"
-	"github.com/manifesterio/mds/dst/core/trace"
 	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // The test machine speaks two small sums: tin (inputs) and tout (outputs).
 // tout is a sealed sum: the route below switches over every case of it, and
-// the gochecksumtype linter checks that it stays exhaustive. tin is not marked
-// as a sealed sum, so that a test script may handle only the inputs it cares
-// about.
+// the gochecksumtype linter checks that it stays exhaustive. tin is an open
+// sum (//dst:sum open, no //sumtype:decl), so that a test script may handle
+// only the inputs it cares about. dstgen writes the markers, tags and folds
+// of both.
 
+//dst:sum open
 type tin interface {
 	machine.Message
 	isTin()
 }
 
+//dst:cases tin
 type (
 	started struct{ self machine.NodeInstance } // the boot input
 	stopReq struct{ deadline machine.NodeTime } // the graceful stop request
@@ -30,30 +32,14 @@ type (
 	}
 )
 
-func (started) isTin() {}
-func (stopReq) isTin() {}
-func (tick) isTin()    {}
-func (note) isTin()    {}
-func (urgent) isTin()  {}
-func (putDone) isTin() {}
-
-func (m started) Fold(h *trace.Hash) {
-	h.Uint64(1)
-	h.String(string(m.self.Node))
-	h.Bytes(m.self.Inc[:])
-}
-func (m stopReq) Fold(h *trace.Hash) { h.Uint64(2); h.Int64(int64(m.deadline)) }
-func (m tick) Fold(h *trace.Hash)    { h.Uint64(3); h.Uint64(m.gen) }
-func (m note) Fold(h *trace.Hash)    { h.Uint64(4); h.String(m.s) }
-func (m urgent) Fold(h *trace.Hash)  { h.Uint64(5); h.String(m.s) }
-func (m putDone) Fold(h *trace.Hash) { h.Uint64(6); h.Uint64(m.req); h.Bool(m.lost) }
-
 //sumtype:decl
+//dst:sum
 type tout interface {
 	machine.Message
 	isTout()
 }
 
+//dst:cases tout
 type (
 	setTimer struct {
 		id    machine.TimerID
@@ -71,44 +57,23 @@ type (
 		msg tin
 	}
 	sendSelf struct{ msg tin }
-	put      struct{ req uint64 } // a call to the echo service
 )
 
-func (setTimer) isTout()    {}
-func (cancelTimer) isTout() {}
-func (recordFact) isTout()  {}
-func (endOut) isTout()      {}
-func (sendTo) isTout()      {}
-func (sendSelf) isTout()    {}
-func (put) isTout()         {}
-
-func (m setTimer) Fold(h *trace.Hash) {
-	h.Uint64(11)
-	h.Uint64(uint64(m.id))
-	h.Int64(int64(m.after))
-	m.msg.Fold(h)
-}
-func (m cancelTimer) Fold(h *trace.Hash) { h.Uint64(12); h.Uint64(uint64(m.id)) }
-func (m recordFact) Fold(h *trace.Hash)  { h.Uint64(13); m.f.Fold(h) }
-func (m endOut) Fold(h *trace.Hash)      { h.Uint64(14); h.Uint64(uint64(m.how)); h.String(m.cause) }
-func (m sendTo) Fold(h *trace.Hash)      { h.Uint64(15); h.String(m.to); m.msg.Fold(h) }
-func (m sendSelf) Fold(h *trace.Hash)    { h.Uint64(16); m.msg.Fold(h) }
-func (m put) Fold(h *trace.Hash)         { h.Uint64(17); h.Uint64(m.req) }
+//dst:cases tout echoReq
+type put struct{ req uint64 } // a call to the echo service
 
 // echoReq is the request sum of the test services: put, and idle (a request
 // that does nothing; no test sends it).
 //
 //sumtype:decl
+//dst:sum
 type echoReq interface {
 	machine.Message
 	isEchoReq()
 }
 
+//dst:cases echoReq
 type idle struct{}
-
-func (put) isEchoReq()          {}
-func (idle) isEchoReq()         {}
-func (idle) Fold(h *trace.Hash) { h.Uint64(18) }
 
 // scriptM is a machine whose Step is a function.
 type scriptM struct {

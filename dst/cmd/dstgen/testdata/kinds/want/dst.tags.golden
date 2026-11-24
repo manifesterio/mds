@@ -1,0 +1,13 @@
+# dst.tags: written by dstgen. Append-only: never change a number, never reuse one.
+# <tag> <TypeName>; a retired line has the name -
+1 empty
+2 scalar
+3 bytesAndArrays
+4 collections
+5 withMessages
+6 get
+7 shared
+8 answer
+9 legacy
+10 ping
+11 pong

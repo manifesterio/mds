@@ -59,3 +59,37 @@ Acceptance criteria
 Notes
 -----
 - Do not do this during P3..P7: it would move hashes in the middle of migrations.
+
+
+DST-2  Flaky broker integration test: TestCompressionRoundTrip gets cp ErrUnavailable
+======================================================================
+Type:       Bug (test flake)
+Priority:   Low
+Component:  broker/test/integrationtest (compression_test.go:52, cpproc_test.go)
+Reporter:   (dst redesign, P3 commit hook)
+Created:    2026-11-24
+Status:     Open
+
+Summary
+-------
+The pre-commit hook (make build -> broker it) failed once with
+  compression_test.go:52: cp: ErrUnavailable
+right after mdscontrolplane logged "listening". The same test passed when re-run alone
+(go test -tags integration -run TestCompressionRoundTrip ./test/integrationtest/, 38 s).
+The commit under test (P3: dstgen) changed no broker or controlplane code.
+
+Likely cause (not verified)
+---------------------------
+The test's first control-plane call races the control plane's readiness: "listening" is
+logged before the replica is active (claimed its epoch), and a call in that window is
+answered ErrUnavailable. The test does not retry or wait for GetStatus to report ready.
+
+Proposal
+--------
+Make the test helper wait until GetStatus succeeds (the server returns Unavailable while
+not ready), or retry the first call with a short backoff, before the test body starts.
+
+Acceptance criteria
+-------------------
+- go test -tags integration -count=20 -run TestCompressionRoundTrip ./test/integrationtest/
+  passes 20/20.

@@ -360,6 +360,35 @@ that does not start with its tag; a generated file edited by hand (the check in 
 into a temp copy and `dstgen -check -base origin/mainline`; a difference fails. It is part of
 GATES-FAST from P3 on.
 
+### 6.7 Amendments made while building dstgen (P3)
+
+These refine 6.1..6.6; where they differ, this section wins.
+
+1. `dst.tags` lines are `<tag> <TypeName>` (no sum column: the sum is in the code). A retired
+   line is `<tag> -`. dstgen retires a line itself when the type no longer exists in the
+   package; a type that exists but is not annotated keeps its line (the `-import` workflow).
+2. A case may belong to several sums: `//dst:cases A B` writes one marker per sum and one `Tag`.
+   The old API needs it (kv's `storePut` is a store request and a server output; the kernel
+   harness's `put`). `//dst:answer` still needs exactly one sum.
+3. Tag allocation: a new type gets one more than the highest tag of its range (types sharing a
+   sum; or all payloads). If that number is held by another range, it gets one more than the
+   highest tag in the file. dstgen never stops to ask; both rules are append-only.
+4. dstgen does not edit source: a `//dst:sum` without `//sumtype:decl` is an error. `//dst:sum open`
+   declares a sum whose switches need not be exhaustive (test harnesses that handle only some
+   inputs); it must not have `//sumtype:decl`. The sum's
+   method set must include `Fold(*trace.Hash)` (through `actor.Payload`, or `machine.Message`
+   until P4 deletes it).
+5. Generated files: `zz_dst_gen.go` (package files), `zz_dst_gen_test.go` (types in the
+   package's `_test.go` files), `zz_dst_gen_x_test.go` (the external `pkg_test` package).
+   Before generating, dstgen replaces existing generated files with a bare package clause, so
+   stale output never feeds back.
+6. Flags: `-import`, `-check`, `-base <rev>`. `make -C dst build` runs `gen-check`
+   (`dstgen -check -base $(DSTGEN_BASE) ./...`, default `mainline`). A missing `dst.tags` at the
+   base revision compares as empty. Products add the same target when they adopt dstgen (P6, P7).
+7. `//dst:state` writes `func (x *T) StateHash() uint64`; fields tagged `dst:"skip"` are left out
+   (an unfoldable field such as a pointer must be skipped explicitly). Fixed-size byte arrays fold
+   as `Bytes(v[:])`; other arrays as `Uint64(len)` then each element.
+
 ## 7. Open items: closed
 
 ### O1 Perform typing: generic `Request[IO, Rep]` constraint, method written by dstgen
