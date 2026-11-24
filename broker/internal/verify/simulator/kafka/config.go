@@ -2,14 +2,13 @@ package kafka
 
 import (
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/rng"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // brokerConfig is the sim-friendly broker. A short flush window keeps commits
@@ -17,7 +16,7 @@ import (
 // to 4 MiB and the batch cap to 8. A seed's swarm overrides the segment knobs
 // (see swarmBroker).
 func brokerConfig(bug broker.InjectedBug) broker.Config {
-	return broker.Config{BatchWindow: 5 * machine.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
+	return broker.Config{BatchWindow: 5 * actor.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
 		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, InjectedBug: bug}
 }
 
@@ -28,8 +27,8 @@ type Settings struct {
 	Broker broker.Config
 }
 
-// Config says how to run one seed of the Kafka scenario: 3 brokers, 1 workload of
-// 3 at-least-once producers and 2 consumers over 2 topics x 3 partitions, all
+// Config says how to run one seed of the Kafka scenario: 3 brokers, 3
+// at-least-once producer actors and 2 consumer actors over 2 topics x 3 partitions, all
 // three fake services, attrition and a swarm over the fault families. A zero
 // Config is the scenario as the campaign runs it.
 type Config struct {
@@ -45,17 +44,16 @@ type Config struct {
 	Tune func(s *Settings)
 	// ExtraRules, when it is set, gives more rules. They run after the rules of
 	// the scenario. A test uses them to count what a campaign did.
-	ExtraRules func(c *cluster.Cluster, h *History) []kernel.Rule
+	ExtraRules func(c *cluster.Cluster, h *History) []sim.Rule
 }
 
 // Run builds and runs one seed of the Kafka scenario.
-func Run(cfg Config) kernel.Result {
+func Run(cfg Config) sim.Result {
 	opts := cfg.Opts
 	if opts.Producers+opts.Consumers == 0 {
 		opts = DefaultOpts()
 	}
 	p := preset.New()
-	p.Settings.Network.PartialIOMax = 1024
 	p.Settings.ControlPlane.MaxCommitItems = fakeservices.DynamoMaxCommitItems
 	set := Settings{Settings: p.Settings, Broker: brokerConfig(cfg.Bug)}
 	swarm(rng.New(cfg.Seed).Derive("swarm"), &set)
@@ -69,12 +67,12 @@ func Run(cfg Config) kernel.Result {
 	for _, t := range opts.Topics {
 		c.ControlPlane.CreateTopic(t, opts.Partitions)
 	}
-	c.AddBrokers(3, broker.New(set.Broker))
-	w := c.World
-	h := history.New[Op, Res](w.Now, func(msg string) { w.Fail(kernel.FailProtocol, "history", msg) })
-	c.AddWorkload(func(env core.Environment, self machine.NodeInstance, brokers []machine.NodeID) cluster.Workload {
-		return NewWorkload(env, self, brokers, h, opts)
-	})
+	c.AddBrokers(3, broker.Props(set.Broker))
+	w := c.System
+	h := history.New[Op, Res](w.Now, func(msg string) { w.Fail(sim.FailProtocol, "history", msg) })
+	for id := range opts.Producers + opts.Consumers {
+		cluster.AddClient(c, clientSpec(id, h, opts))
+	}
 	w.AddRule(newOracle(opts, h, c.Objects, c.ControlPlane))
 	w.AddRule(&progressCheck{hist: h})
 	w.AddRule(preset.FaultCoverageCheck(preset.KafkaFaultCoverage))
@@ -90,21 +88,14 @@ func Run(cfg Config) kernel.Result {
 
 // swarm draws the knobs of one seed from the swarm stream of the seed.
 func swarm(r *rng.Rand, s *Settings) {
-	preset.Swarm(r, &s.Settings, func() {
-		switch x := r.Intn(20); {
-		case x < 2:
-			s.Network.PartialIOMax = 48
-		case x < 8:
-			s.Network.PartialIOMax = 256
-		}
-	})
+	preset.Swarm(r, &s.Settings)
 	swarmBroker(r, s)
 }
 
 func swarmBroker(r *rng.Rand, s *Settings) {
 	bc := s.Broker
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
-	window := func(menu ...int) machine.Duration { return machine.Duration(pick(menu...)) * machine.Millisecond }
+	window := func(menu ...int) actor.Duration { return actor.Duration(pick(menu...)) * actor.Millisecond }
 	d := broker.DefaultConfig()
 	switch x := r.Float64(); {
 	case x < 0.2:

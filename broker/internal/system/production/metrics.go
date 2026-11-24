@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // Metrics turns the broker's timing facts into Prometheus collectors. The
@@ -17,7 +17,7 @@ import (
 // them. Pass Observe as NodeConfig.Facts (or call it from a wrapper) and serve
 // Handler.
 //
-// Observe is called from the broker's single loop goroutine; the collectors are
+// Observe is called from the broker actor's goroutine; the collectors are
 // safe to scrape concurrently.
 type Metrics struct {
 	reg *prometheus.Registry
@@ -109,15 +109,15 @@ func (m *Metrics) setLevels(n func(string) int64) {
 }
 
 // Observe consumes one broker fact; facts it does not know are ignored.
-func (m *Metrics) Observe(f machine.Fact) {
+func (m *Metrics) Observe(f actor.Fact) {
 	n := func(k string) int64 {
-		v, _ := f.Field(k).(machine.Int64Value)
+		v, _ := f.Field(k).(actor.Int64Value)
 		return int64(v)
 	}
 	switch f.Name {
 	case "segment_sealed":
 		reason := "unknown"
-		if s, ok := f.Field("reason").(machine.StringValue); ok {
+		if s, ok := f.Field("reason").(actor.StringValue); ok {
 			reason = string(s)
 		}
 		m.sealed.WithLabelValues(reason).Inc()

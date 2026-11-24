@@ -9,21 +9,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/status"
 )
 
 func put(s *Spec, key, data string) PutDone {
-	return s.Exec(Put{Req: 1, Key: key, Data: []byte(data)}).(PutDone)
+	return s.Exec(Put{Key: key, Data: []byte(data)}).(PutDone)
 }
 
 func get(s *Spec, key string, off, n int64) GetDone {
-	return s.Exec(Get{Req: 2, Ref: SegmentRef{Key: key, Off: off, Len: n}}).(GetDone)
+	return s.Exec(Get{Ref: SegmentRef{Key: key, Off: off, Len: n}}).(GetDone)
 }
 
 func TestSpecRangeGet(t *testing.T) {
 	s := NewSpec()
-	if d := put(s, "k", "abcdef"); d.Err != status.OK || d.Outcome != status.Applied || d.Req != 1 {
+	if d := put(s, "k", "abcdef"); d.Err != status.OK || d.Outcome != status.Applied {
 		t.Fatalf("put: %+v", d)
 	}
 	for _, c := range []struct {
@@ -77,13 +76,13 @@ func TestSpecDeleteAndHash(t *testing.T) {
 	if s.StateHash() == empty {
 		t.Fatal("hash unchanged by put")
 	}
-	if d := s.Exec(Delete{Req: 3, Key: "k"}).(DeleteDone); d.Err != status.OK || d.Outcome != status.Applied {
+	if d := s.Exec(Delete{Key: "k"}).(DeleteDone); d.Err != status.OK || d.Outcome != status.Applied {
 		t.Fatalf("delete: %+v", d)
 	}
 	if s.StateHash() != empty {
 		t.Fatal("hash not restored by delete")
 	}
-	if d := s.Exec(Delete{Req: 4, Key: "k"}).(DeleteDone); d.Err != status.ErrNotFound || d.Outcome != status.NotApplied {
+	if d := s.Exec(Delete{Key: "k"}).(DeleteDone); d.Err != status.ErrNotFound || d.Outcome != status.NotApplied {
 		t.Fatalf("delete missing: %+v", d)
 	}
 	if s.StateHash() != empty {
@@ -131,7 +130,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 			case 0, 1, 2:
 				put(s, fmt.Sprintf("seg/%d", r.IntN(40)), strconv.Itoa(r.IntN(1000)))
 			default:
-				s.Exec(Delete{Req: 3, Key: fmt.Sprintf("seg/%d", r.IntN(40))})
+				s.Exec(Delete{Key: fmt.Sprintf("seg/%d", r.IntN(40))})
 			}
 			if r.IntN(3) == 0 {
 				if got, want := s.StateHash(), s.fullStateHash(); got != want {
@@ -160,7 +159,7 @@ func (m *sliceStore) Exec(call Call) Result {
 	switch c := call.(type) {
 	case Put:
 		if c.Key == "" {
-			return PutDone{Req: c.Req, Key: c.Key, Err: status.ErrInvalid}
+			return PutDone{Key: c.Key, Err: status.ErrInvalid}
 		}
 		i, ok := m.find(c.Key)
 		v := append([]byte{}, c.Data...)
@@ -170,11 +169,11 @@ func (m *sliceStore) Exec(call Call) Result {
 			m.keys = slices.Insert(m.keys, i, c.Key)
 			m.vals = slices.Insert(m.vals, i, v)
 		}
-		return PutDone{Req: c.Req, Key: c.Key, Outcome: status.Applied}
+		return PutDone{Key: c.Key, Outcome: status.Applied}
 	case Get:
 		i, ok := m.find(c.Ref.Key)
 		if !ok {
-			return GetDone{Req: c.Req, Err: status.ErrNotFound}
+			return GetDone{Err: status.ErrNotFound}
 		}
 		v, off := m.vals[i], c.Ref.Off
 		n := int64(len(v)) - off
@@ -182,23 +181,23 @@ func (m *sliceStore) Exec(call Call) Result {
 			n = c.Ref.Len
 		}
 		if off < 0 || n < 0 || off+n > int64(len(v)) {
-			return GetDone{Req: c.Req, Err: status.ErrInvalid}
+			return GetDone{Err: status.ErrInvalid}
 		}
-		return GetDone{Req: c.Req, Data: append([]byte{}, v[off:off+n]...)}
+		return GetDone{Data: append([]byte{}, v[off:off+n]...)}
 	case Delete:
 		i, ok := m.find(c.Key)
 		if !ok {
-			return DeleteDone{Req: c.Req, Err: status.ErrNotFound}
+			return DeleteDone{Err: status.ErrNotFound}
 		}
 		m.keys = slices.Delete(m.keys, i, i+1)
 		m.vals = slices.Delete(m.vals, i, i+1)
-		return DeleteDone{Req: c.Req, Outcome: status.Applied}
+		return DeleteDone{Outcome: status.Applied}
 	case List:
 		var out []string
 		for i := sort.SearchStrings(m.keys, c.Prefix); i < len(m.keys) && strings.HasPrefix(m.keys[i], c.Prefix); i++ {
 			out = append(out, m.keys[i])
 		}
-		return ListDone{Req: c.Req, Keys: out}
+		return ListDone{Keys: out}
 	}
 	panic("sliceStore: unknown call")
 }
@@ -216,20 +215,20 @@ type execKeys interface {
 func randomCall(r *rand.Rand, i int) Call {
 	keys := []string{"", "a", "a/b", "a/c", "b"}
 	prefixes := []string{"", "a", "a/", "b", "z"}
-	request, key := machine.RequestID(i+1), keys[r.IntN(len(keys))]
+	_, key := i, keys[r.IntN(len(keys))]
 	switch r.IntN(7) {
 	case 0, 1, 2:
 		data := make([]byte, r.IntN(5))
 		for j := range data {
 			data[j] = byte('a' + r.IntN(26))
 		}
-		return Put{Req: request, Key: key, Data: data}
+		return Put{Key: key, Data: data}
 	case 3, 4:
-		return Get{Req: request, Ref: SegmentRef{Key: key, Off: int64(r.IntN(7) - 1), Len: int64(r.IntN(7) - 1)}}
+		return Get{Ref: SegmentRef{Key: key, Off: int64(r.IntN(7) - 1), Len: int64(r.IntN(7) - 1)}}
 	case 5:
-		return Delete{Req: request, Key: key}
+		return Delete{Key: key}
 	}
-	return List{Req: request, Prefix: prefixes[r.IntN(len(prefixes))]}
+	return List{Prefix: prefixes[r.IntN(len(prefixes))]}
 }
 
 // lockstep runs 60 random calls on impl and on the sorted-slice model. It returns

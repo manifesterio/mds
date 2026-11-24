@@ -6,7 +6,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
@@ -34,40 +34,39 @@ type ControlPlaneFaults struct {
 // applied before the spec. A retry of a committed segment returns the original
 // offsets whatever the faults did.
 //
-// It is a kernel.Service. A broker node hands it a core.ControlPlaneCall, and the
-// service answers with core.ControlPlaneDone.
+// It is a sim.Service. A broker performs a core.ControlPlaneCall, its executor
+// forwards the call here, and the service answers with core.ControlPlaneDone.
 type ControlPlane struct {
-	*faulty.Service[core.ControlPlaneCall, core.EventData, contract.Operation, contract.Done]
+	*faulty.Service[core.ControlPlaneCall, core.ControlPlaneDone, contract.Operation, contract.Done]
 	spec     *specbridge.ControlPlane
 	maxItems int // ControlPlaneFaults.MaxCommitItems; 0 = unlimited
 }
 
-var _ kernel.Service[core.ControlPlaneCall, core.EventData] = (*ControlPlane)(nil)
+var _ sim.Service[core.ControlPlaneCall, core.ControlPlaneDone] = (*ControlPlane)(nil)
 
-// NewControlPlane returns an empty control plane with the given faults. The
-// world gives it its lanes.
-func NewControlPlane(w *kernel.World, f ControlPlaneFaults) *ControlPlane {
+// NewControlPlane returns an empty control plane with the given faults. Add it
+// to a System with sim.AddService.
+func NewControlPlane(f ControlPlaneFaults) *ControlPlane {
 	s := &ControlPlane{spec: specbridge.New(), maxItems: f.MaxCommitItems}
-	shape := faulty.Shape[core.ControlPlaneCall, core.EventData, contract.Operation, contract.Done]{
-		Name:      "fakecontrolplane",
-		Prefix:    "cp",
-		Asserts:   controlPlaneAsserts,
-		Op:        func(c core.ControlPlaneCall) contract.Operation { return c.Op },
-		RequestID: core.ControlPlaneCall.RequestID,
+	shape := faulty.Shape[core.ControlPlaneCall, core.ControlPlaneDone, contract.Operation, contract.Done]{
+		Name:    "fakecontrolplane",
+		Prefix:  "cp",
+		Asserts: controlPlaneAsserts,
+		Op:      func(c core.ControlPlaneCall) contract.Operation { return c.Op },
 		Mutating: func(op contract.Operation) bool {
 			_, ok := op.(contract.CommitSegment)
 			return ok
 		},
 		// A replayed commit is Applied too, so Gen may bump without a change.
 		Changed: func(d contract.Done) bool { return d.Outcome == core.Applied },
-		Reply: func(req core.ControlPlaneCall, d contract.Done) core.EventData {
-			return core.ControlPlaneDone{Req: req.Req, Resp: d.Resp, Err: d.Err, Outcome: d.Outcome}
+		Reply: func(_ core.ControlPlaneCall, d contract.Done) core.ControlPlaneDone {
+			return core.ControlPlaneDone{Resp: d.Resp, Err: d.Err, Outcome: d.Outcome}
 		},
-		Fail: func(req core.ControlPlaneCall, failure faulty.Failure) core.EventData {
+		Fail: func(_ core.ControlPlaneCall, failure faulty.Failure) core.ControlPlaneDone {
 			if failure == faulty.TimedOut {
-				return core.ControlPlaneDone{Req: req.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
+				return core.ControlPlaneDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}
 			}
-			return core.ControlPlaneDone{Req: req.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		},
 		Limit: func(op contract.Operation) (contract.Done, bool) {
 			if s.tooLarge(op) {
@@ -76,7 +75,7 @@ func NewControlPlane(w *kernel.World, f ControlPlaneFaults) *ControlPlane {
 			return contract.Done{}, false
 		},
 	}
-	s.Service = faulty.New(w, faulty.Spec[contract.Operation, contract.Done](s.spec), f.Faults, shape)
+	s.Service = faulty.New(faulty.Spec[contract.Operation, contract.Done](s.spec), f.Faults, shape)
 	return s
 }
 

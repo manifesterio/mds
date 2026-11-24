@@ -3,6 +3,7 @@ package broker
 import (
 	"cmp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -10,7 +11,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -30,13 +31,10 @@ type openSegment struct {
 	batches []*partitionBatch
 	bytes   int
 	parts   []core.TopicPartition // distinct partitions buffered
-	// Flush timer generation matched by onTimer. 0 means none is armed, an
-	// empty buffer or one just sealed.
-	gen machine.TimerVersion
 	// Time of the first batch, for the segment_sealed age fact and
 	// SegmentCaps. Not used to schedule. Does not move when
-	// InjectedBugTimerFromLastBatch re-arms gen.
-	since machine.NodeTime
+	// InjectedBugTimerFromLastBatch re-arms the flush timer.
+	since actor.Mono
 }
 
 // Why a segment was sealed (the "reason" of the segment_sealed fact).
@@ -65,17 +63,15 @@ type segment struct {
 	key      string
 	data     []byte
 	state    segmentState
-	request  machine.RequestID
-	gen      machine.TimerVersion
 	attempts int
 
 	// sealedAt and putDoneAt are facts only, and StateHash omits them.
 	// The PUT starts at the seal. commitAt is the time of the first
 	// CommitSegment, and commitStarted keeps that time fixed.
 	// retryCommit reads commitAt for the deadline. StateHash omits both.
-	sealedAt      machine.NodeTime
-	putDoneAt     machine.NodeTime
-	commitAt      machine.NodeTime
+	sealedAt      actor.Mono
+	putDoneAt     actor.Mono
+	commitAt      actor.Mono
 	commitStarted bool
 }
 
@@ -90,8 +86,7 @@ func (s *segment) dataBytes() int {
 
 // addBatch appends an admitted batch. The first batch arms a fixed
 // BatchWindow timer, and a cap may seal earlier.
-func (b *Broker) addBatch(pb *partitionBatch) []core.Action {
-	var acts []core.Action
+func (b *Broker) addBatch(pb *partitionBatch, outbox *brokerOutbox) {
 	before := b.open.bytes
 	b.open.batches = append(b.open.batches, pb)
 	b.open.bytes += len(pb.data)
@@ -106,9 +101,7 @@ func (b *Broker) addBatch(pb *partitionBatch) []core.Action {
 		b.open.since = b.now
 	}
 	if first || b.config.InjectedBug == InjectedBugTimerFromLastBatch {
-		b.timerGen++
-		b.open.gen = b.timerGen
-		acts = append(acts, core.SetTimer{ID: timerFlush, Gen: b.timerGen, After: b.config.BatchWindow})
+		outbox.StartTimer(timerFlush, b.config.BatchWindow, core.FlushDue{})
 	}
 	sizeBytes := b.open.bytes
 	if b.config.InjectedBug == InjectedBugSealOffByOne {
@@ -116,19 +109,18 @@ func (b *Broker) addBatch(pb *partitionBatch) []core.Action {
 	}
 	switch {
 	case sizeBytes >= b.config.MaxSegmentBytes:
-		return append(acts, b.seal(closeOnSize)...)
+		b.seal(closeOnSize, outbox)
 	case len(b.open.parts) >= b.config.MaxSegmentPartitions && b.config.InjectedBug != InjectedBugNoPartitionCap:
-		return append(acts, b.seal(closeOnPartitions)...)
+		b.seal(closeOnPartitions, outbox)
 	case len(b.open.batches) >= b.config.MaxSegmentBatches && b.config.InjectedBug != InjectedBugNoBatchCap:
-		return append(acts, b.seal(closeOnBatches)...)
+		b.seal(closeOnBatches, outbox)
 	}
-	return acts
 }
 
 // seal turns the open buffer into a segment and starts its upload.
-func (b *Broker) seal(why string) []core.Action {
+func (b *Broker) seal(why string, outbox *brokerOutbox) {
 	if len(b.open.batches) == 0 {
-		return nil
+		return
 	}
 	bs := b.open.batches
 	switch why {
@@ -144,20 +136,21 @@ func (b *Broker) seal(why string) []core.Action {
 	case closeOnPartitions:
 		b.env.Reachable(segmentSealedPartitionCap)
 	}
-	acts := []core.Action{core.CancelTimer{ID: timerFlush}, recordFact("segment_sealed",
-		machine.Field{Key: "reason", Value: machine.StringValue(why)},
-		machine.Field{Key: "bytes", Value: machine.Int64Value(b.open.bytes)},
-		machine.Field{Key: "batches", Value: machine.Int64Value(len(bs))},
-		machine.Field{Key: "parts", Value: machine.Int64Value(len(b.open.parts))},
-		machine.Field{Key: "last", Value: machine.Int64Value(len(bs[len(bs)-1].data))},
-		machine.Field{Key: "age", Value: machine.Int64Value(b.now - b.open.since)},
-		machine.Field{Key: "inflight", Value: machine.Int64Value(len(b.segs) + 1)},
-		machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)})}
+	outbox.CancelTimer(timerFlush)
+	recordFact(outbox, "segment_sealed",
+		actor.Field{Key: "reason", Value: actor.StringValue(why)},
+		actor.Field{Key: "bytes", Value: actor.Int64Value(b.open.bytes)},
+		actor.Field{Key: "batches", Value: actor.Int64Value(len(bs))},
+		actor.Field{Key: "parts", Value: actor.Int64Value(len(b.open.parts))},
+		actor.Field{Key: "last", Value: actor.Int64Value(len(bs[len(bs)-1].data))},
+		actor.Field{Key: "age", Value: actor.Int64Value(b.now - b.open.since)},
+		actor.Field{Key: "inflight", Value: actor.Int64Value(len(b.segs) + 1)},
+		actor.Field{Key: "buffered", Value: actor.Int64Value(b.bufBytes)})
 	b.open = openSegment{}
-	return append(acts, b.sealBatches(bs)...)
+	b.sealBatches(bs, outbox)
 }
 
-func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
+func (b *Broker) sealBatches(bs []*partitionBatch, outbox *brokerOutbox) {
 	// Sort by topic and partition, so each partition's batches sit next to
 	// each other in the object. The sort is stable: batches of one partition
 	// keep their arrival order, and so do their offsets.
@@ -172,15 +165,25 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 		for _, pb := range bs {
 			b.answerPart(pb, errUnknownServer, contract.BatchRange{}, "")
 		}
-		return nil
+		return
 	}
 	s := &segment{id: b.id(), batches: bs, data: data,
-		key: segmentformat.SegmentKey(b.env.NewID()), sealedAt: b.now}
+		key: b.newSegmentKey(), sealedAt: b.now}
 	for i, pb := range bs {
 		pb.loc = entries[i].Ref(s.key)
 	}
 	b.segs = append(b.segs, s)
-	return b.put(s)
+	b.put(s, outbox)
+}
+
+// newSegmentKey draws a fresh segment key from the Environment.
+func (b *Broker) newSegmentKey() string {
+	return segmentformat.SegmentKey([16]byte(b.env.NewID()))
+}
+
+// segmentTimer is the key of the retry timer of s.
+func segmentTimer(s *segment) actor.TimerKey {
+	return actor.TimerKey("segment/" + strconv.FormatUint(s.id, 10))
 }
 
 // comparePartitionBatch orders batches by topic, then partition.
@@ -191,45 +194,55 @@ func comparePartitionBatch(x, y *partitionBatch) int {
 	return cmp.Compare(x.topicPartition.Partition, y.topicPartition.Partition)
 }
 
-func (b *Broker) put(s *segment) []core.Action {
-	s.state, s.request = segmentUpload, b.nextRequestID()
-	return []core.Action{core.ObjectCall{Call: objectstore.Put{Req: s.request, Key: s.key, Data: s.data}}}
+func (b *Broker) put(s *segment, outbox *brokerOutbox) {
+	s.state = segmentUpload
+	id := s.id
+	actor.Perform(outbox, core.ObjectCall{Call: objectstore.Put{Key: s.key, Data: s.data}},
+		func(d core.ObjectDone) core.EventData { return core.SegmentPutDone{Seg: id, Done: d} })
 }
 
-func (b *Broker) onPutDone(s *segment, e objectstore.PutDone) []core.Action {
+// onPutDone takes the answer of the PUT of s. Any other kind of answer is
+// ignored.
+func (b *Broker) onPutDone(s *segment, d core.ObjectDone, outbox *brokerOutbox) {
+	e, ok := d.Result.(objectstore.PutDone)
+	if !ok {
+		return
+	}
 	if e.Err == core.ErrInvalid {
-		return b.failSegment(s, errUnknownServer)
+		b.failSegment(s, errUnknownServer, outbox)
+		return
 	}
 	if e.Err != core.OK {
-		return b.retryPut(s)
+		b.retryPut(s, outbox)
+		return
 	}
 	attempts := s.attempts + 1
-	s.state, s.request, s.attempts, s.putDoneAt = segmentUploadDone, 0, 0, b.now
-	acts := []core.Action{recordFact("segment_put_done",
-		machine.Field{Key: "segment", Value: machine.StringValue(s.key)},
-		machine.Field{Key: "bytes", Value: machine.Int64Value(len(s.data))},
-		machine.Field{Key: "put_ns", Value: machine.Int64Value(b.now - s.sealedAt)},
-		machine.Field{Key: "attempts", Value: machine.Int64Value(attempts)})}
+	s.state, s.attempts, s.putDoneAt = segmentUploadDone, 0, b.now
+	recordFact(outbox, "segment_put_done",
+		actor.Field{Key: "segment", Value: actor.StringValue(s.key)},
+		actor.Field{Key: "bytes", Value: actor.Int64Value(len(s.data))},
+		actor.Field{Key: "put_ns", Value: actor.Int64Value(b.now - s.sealedAt)},
+		actor.Field{Key: "attempts", Value: actor.Int64Value(attempts)})
 	if b.config.InjectedBug == InjectedBugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
 			b.answerPart(pb, errNone, contract.BatchRange{TopicPartition: pb.topicPartition, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
 		}
 	}
-	return append(acts, b.pump()...)
+	b.pump(outbox)
 }
 
 // pump starts the commit of the head segment once it is uploaded. Only the
 // head commits, so segments reach the control plane in seal order.
-func (b *Broker) pump() []core.Action {
+func (b *Broker) pump(outbox *brokerOutbox) {
 	if len(b.segs) == 0 || b.segs[0].state != segmentUploadDone {
-		return nil
+		return
 	}
-	return b.commit(b.segs[0])
+	b.commit(b.segs[0], outbox)
 }
 
-func (b *Broker) commit(s *segment) []core.Action {
-	s.state, s.request = segmentCommit, b.nextRequestID()
+func (b *Broker) commit(s *segment, outbox *brokerOutbox) {
+	s.state = segmentCommit
 	if !s.commitStarted {
 		s.commitStarted, s.commitAt = true, b.now
 	}
@@ -239,13 +252,14 @@ func (b *Broker) commit(s *segment) []core.Action {
 	}
 	key := s.key
 	if b.config.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
-		key = segmentformat.SegmentKey(b.env.NewID())
+		key = b.newSegmentKey()
 	}
-	return []core.Action{core.ControlPlaneCall{Req: s.request, Op: contract.CommitSegment{
-		SegmentKey: key, Batches: pend}}}
+	id := s.id
+	actor.Perform(outbox, core.ControlPlaneCall{Op: contract.CommitSegment{SegmentKey: key, Batches: pend}},
+		func(d core.ControlPlaneDone) core.EventData { return core.SegmentCommitDone{Seg: id, Done: d} })
 }
 
-func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
+func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone, outbox *brokerOutbox) {
 	switch e.Err {
 	case core.OK:
 		response, ok := e.Resp.(contract.CommitSegmentResp)
@@ -255,48 +269,50 @@ func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 		}
 		b.env.AlwaysOrUnreachable(shape, commitAnswersEveryBatchOrder)
 		if !shape {
-			return b.failSegment(s, errUnknownServer)
+			b.failSegment(s, errUnknownServer, outbox)
+			return
 		}
 		if s.attempts >= b.config.MaxAttempts {
 			// Past the old six-attempt budget (audit item 8): the outage was
 			// ridden out instead of failing the segment.
 			b.env.Reachable(commitSucceededAfterOldRetryBudget)
 		}
-		return b.committed(s, response.Assigned)
+		b.committed(s, response.Assigned, outbox)
 	case core.ErrInvalid:
-		return b.failSegment(s, errUnknownServer)
+		b.failSegment(s, errUnknownServer, outbox)
 	case core.ErrConflict:
 		// The same key with a different request: a broker bug, not a race.
 		b.env.Unreachable(commitKeyReusedDifferentRequest)
-		return b.failSegment(s, errUnknownServer)
+		b.failSegment(s, errUnknownServer, outbox)
 	case core.ErrTooLarge:
 		// The segment exceeds the CP's commit limit; retrying cannot help.
 		b.env.Unreachable(segmentExceedsCommitSize)
-		return b.failSegment(s, errUnknownServer)
+		b.failSegment(s, errUnknownServer, outbox)
+	default:
+		// MaybeApplied or a transient error: resend the identical request under
+		// the same key until definite; a replay returns the same answer.
+		b.retryCommit(s, outbox)
 	}
-	// MaybeApplied or a transient error: resend the identical request under
-	// the same key until definite; a replay returns the same answer.
-	return b.retryCommit(s)
 }
 
 // committed answers every batch of s from the control plane's verdicts.
 // Timing is in nanoseconds. put plus wait plus commit equals total. wait is
 // the time the uploaded segment queued behind earlier segments' commits.
-func (b *Broker) committed(s *segment, rs []contract.BatchRange) []core.Action {
-	acts := []core.Action{recordFact("segment_committed",
-		machine.Field{Key: "segment", Value: machine.StringValue(s.key)},
-		machine.Field{Key: "batches", Value: machine.Int64Value(len(s.batches))},
-		machine.Field{Key: "bytes", Value: machine.Int64Value(len(s.data))},
-		machine.Field{Key: "put_ns", Value: machine.Int64Value(s.putDoneAt - s.sealedAt)},
-		machine.Field{Key: "wait_ns", Value: machine.Int64Value(s.commitAt - s.putDoneAt)},
-		machine.Field{Key: "commit_ns", Value: machine.Int64Value(b.now - s.commitAt)},
-		machine.Field{Key: "total_ns", Value: machine.Int64Value(b.now - s.sealedAt)},
-		machine.Field{Key: "inflight", Value: machine.Int64Value(len(b.segs) - 1)},
-		machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes - s.dataBytes())})}
+func (b *Broker) committed(s *segment, rs []contract.BatchRange, outbox *brokerOutbox) {
+	recordFact(outbox, "segment_committed",
+		actor.Field{Key: "segment", Value: actor.StringValue(s.key)},
+		actor.Field{Key: "batches", Value: actor.Int64Value(len(s.batches))},
+		actor.Field{Key: "bytes", Value: actor.Int64Value(len(s.data))},
+		actor.Field{Key: "put_ns", Value: actor.Int64Value(s.putDoneAt - s.sealedAt)},
+		actor.Field{Key: "wait_ns", Value: actor.Int64Value(s.commitAt - s.putDoneAt)},
+		actor.Field{Key: "commit_ns", Value: actor.Int64Value(b.now - s.commitAt)},
+		actor.Field{Key: "total_ns", Value: actor.Int64Value(b.now - s.sealedAt)},
+		actor.Field{Key: "inflight", Value: actor.Int64Value(len(b.segs) - 1)},
+		actor.Field{Key: "buffered", Value: actor.Int64Value(b.bufBytes - s.dataBytes())})
 	for i, pb := range s.batches {
 		b.answerPart(pb, errNone, rs[i], s.key)
 	}
-	return append(acts, b.endSegment(s)...)
+	b.endSegment(s, outbox)
 }
 
 func (b *Broker) remove(s *segment) {
@@ -309,39 +325,38 @@ func (b *Broker) remove(s *segment) {
 }
 
 // endSegment retires s and starts the next commit.
-func (b *Broker) endSegment(s *segment) []core.Action {
+func (b *Broker) endSegment(s *segment, outbox *brokerOutbox) {
 	b.remove(s)
 	for _, pb := range s.batches {
 		b.bufBytes -= len(pb.data)
 	}
-	return b.pump()
+	b.pump(outbox)
 }
 
 // failSegment answers every unanswered batch of s with code.
-func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
-	acts := []core.Action{recordFact("segment_failed",
-		machine.Field{Key: "segment", Value: machine.StringValue(s.key)},
-		machine.Field{Key: "code", Value: machine.Int64Value(int64(code))},
-		machine.Field{Key: "total_ns", Value: machine.Int64Value(b.now - s.sealedAt)},
-		machine.Field{Key: "inflight", Value: machine.Int64Value(len(b.segs) - 1)},
-		machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes - s.dataBytes())})}
+func (b *Broker) failSegment(s *segment, code kafkaErrorCode, outbox *brokerOutbox) {
+	recordFact(outbox, "segment_failed",
+		actor.Field{Key: "segment", Value: actor.StringValue(s.key)},
+		actor.Field{Key: "code", Value: actor.Int64Value(int64(code))},
+		actor.Field{Key: "total_ns", Value: actor.Int64Value(b.now - s.sealedAt)},
+		actor.Field{Key: "inflight", Value: actor.Int64Value(len(b.segs) - 1)},
+		actor.Field{Key: "buffered", Value: actor.Int64Value(b.bufBytes - s.dataBytes())})
 	for _, pb := range s.batches {
 		b.answerPart(pb, code, contract.BatchRange{}, "")
 	}
-	return append(acts, b.endSegment(s)...)
+	b.endSegment(s, outbox)
 }
 
 // retryPut backs off and repeats the PUT under the same key.
-func (b *Broker) retryPut(s *segment) []core.Action {
+func (b *Broker) retryPut(s *segment, outbox *brokerOutbox) {
 	if s.attempts++; s.attempts >= b.config.MaxAttempts {
 		// The write may still land later. MaybeApplied is unbounded.
 		b.env.Reachable(segmentRetriesExhausted)
-		return b.failSegment(s, errRequestTimedOut)
+		b.failSegment(s, errRequestTimedOut, outbox)
+		return
 	}
-	s.state, s.request = segmentUploadRetry, 0
-	t, g := b.timer(machine.TimerID(s.id), s.attempts)
-	s.gen = g
-	return []core.Action{t}
+	s.state = segmentUploadRetry
+	outbox.StartTimer(segmentTimer(s), b.backoff(s.attempts), core.SegmentRetryDue{Seg: s.id})
 }
 
 // retryCommit repeats a commit under the same key until CommitDeadline has
@@ -349,11 +364,12 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 // jitter (drawn from the Environment, so deterministic in simulation), never a
 // count limit. Past the deadline the segment fails. The write may still land
 // later.
-func (b *Broker) retryCommit(s *segment) []core.Action {
-	left := b.config.CommitDeadline - machine.Duration(b.now-s.commitAt)
+func (b *Broker) retryCommit(s *segment, outbox *brokerOutbox) {
+	left := b.config.CommitDeadline - actor.Duration(b.now-s.commitAt)
 	if left <= 0 {
 		b.env.Reachable(commitDeadlineExceeded)
-		return b.failSegment(s, errRequestTimedOut)
+		b.failSegment(s, errRequestTimedOut, outbox)
+		return
 	}
 	s.attempts++
 	d := b.config.RetryBase
@@ -361,26 +377,23 @@ func (b *Broker) retryCommit(s *segment) []core.Action {
 		d *= 2
 	}
 	d = min(d, b.config.CommitRetryMax)
-	d = d/2 + machine.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
+	d = d/2 + actor.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
 	d = min(d, left)
-	s.state, s.request = segmentCommitRetry, 0
-	b.timerGen++
-	s.gen = b.timerGen
-	return []core.Action{core.SetTimer{ID: machine.TimerID(s.id), Gen: b.timerGen, After: d}}
+	s.state = segmentCommitRetry
+	outbox.StartTimer(segmentTimer(s), d, core.SegmentRetryDue{Seg: s.id})
 }
 
-func (b *Broker) segmentTimer(s *segment, gen machine.TimerVersion) []core.Action {
-	if s.gen != gen {
-		return nil
-	}
+// onSegmentRetry repeats the PUT or the commit of s once its backoff has
+// passed.
+func (b *Broker) onSegmentRetry(s *segment, outbox *brokerOutbox) {
 	switch s.state {
 	case segmentUploadRetry:
-		return b.put(s)
+		b.put(s, outbox)
 	case segmentCommitRetry:
 		b.env.Reachable(commitRetried)
-		return b.commit(s)
+		b.commit(s, outbox)
+	case segmentUpload, segmentUploadDone, segmentCommit:
 	}
-	return nil
 }
 
 // answerPart answers pb once, with code or, on errNone, with success at range
@@ -394,12 +407,12 @@ func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r contract.
 	pb.part.ErrorCode, pb.part.BaseOffset = int16(code), -1
 	if code == errNone {
 		pb.part.BaseOffset = int64(r.Base)
-		pb.s.facts = append(pb.s.facts, machine.Fact{Name: "produce_acked", Fields: []machine.Field{
-			{Key: "topic", Value: machine.StringValue(pb.topicPartition.Topic)},
-			{Key: "partition", Value: machine.Int64Value(pb.topicPartition.Partition)},
-			{Key: "base_offset", Value: machine.Int64Value(r.Base)},
-			{Key: "count", Value: machine.Int64Value(pb.records)},
-			{Key: "segment", Value: machine.StringValue(key)},
+		pb.s.facts = append(pb.s.facts, actor.Fact{Name: "produce_acked", Fields: []actor.Field{
+			{Key: "topic", Value: actor.StringValue(pb.topicPartition.Topic)},
+			{Key: "partition", Value: actor.Int64Value(pb.topicPartition.Partition)},
+			{Key: "base_offset", Value: actor.Int64Value(r.Base)},
+			{Key: "count", Value: actor.Int64Value(pb.records)},
+			{Key: "segment", Value: actor.StringValue(key)},
 		}})
 	}
 	b.finishPart(pb.s)

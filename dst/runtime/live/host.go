@@ -14,6 +14,10 @@ var (
 	// ErrTripped: an actor ended with Trip (its memory is not trusted). The
 	// text has the actor and the cause.
 	ErrTripped = errors.New("tripped")
+	// ErrStopped: Run ended because its context ended.
+	ErrStopped = errors.New("live: stopped")
+	// ErrKilled: a graceful stop missed StopGrace.
+	ErrKilled = errors.New("live: killed after the stop grace")
 	// ErrHostStopped: the Host is not running (any more).
 	ErrHostStopped = errors.New("live: the host has stopped")
 	// ErrProtocol: an actor used the API the wrong way (a service in

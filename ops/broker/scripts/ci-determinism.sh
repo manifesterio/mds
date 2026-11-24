@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI gate for the deterministic packages (internal/core, internal/verify/simulator (the tree on dst/sim/kernel), internal/wire/segmentformat, the broker spec in
+# CI gate for the deterministic packages (internal/core, internal/verify/simulator (on dst/sim), internal/wire/segmentformat, the broker spec in
 # spec, internal/verify/speccheck (the spec bridge) except its system adapters in internal/verify/speccheck/specsystem,
 # plus internal/wire/kafkawire and internal/broker).
 # Control-plane replica lives in the controlplane module; see docs/contribute/determinism.md.

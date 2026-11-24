@@ -15,7 +15,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 func waitAcked(t *testing.T, s *sent, n int) {
@@ -264,7 +264,7 @@ func runKill(t *testing.T, s *stack) {
 // and the broker exits cleanly.
 func TestGracefulStopFlushesProduce(t *testing.T) {
 	s := fullStack(t)
-	s.brokers.BatchWindow = machine.Duration(3 * time.Second)
+	s.brokers.BatchWindow = actor.Duration(3 * time.Second)
 	s.addBrokers(1)
 	create(s)
 	cl := newClient(t, s.seeds())

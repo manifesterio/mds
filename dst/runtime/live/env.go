@@ -10,7 +10,6 @@ import (
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // NewEnv makes a production Env: a random stream seeded from crypto/rand,
@@ -94,19 +93,6 @@ func (realClock) Wall() actor.Wall   { return actor.Wall(time.Now().UnixNano()) 
 
 func (realClock) AfterFunc(d actor.Duration, f func()) Timer {
 	return time.AfterFunc(time.Duration(d), f)
-}
-
-// FromMachineClock adapts a clock that uses machine time types, such as
-// shared/clock.
-func FromMachineClock(c machine.Clock) Clock { return machineClock{c} }
-
-type machineClock struct{ c machine.Clock }
-
-func (m machineClock) Mono() actor.Mono { return actor.Mono(m.c.Mono()) }
-func (m machineClock) Wall() actor.Wall { return actor.Wall(m.c.Wall()) }
-
-func (m machineClock) AfterFunc(d actor.Duration, f func()) Timer {
-	return m.c.AfterFunc(machine.Duration(d), f)
 }
 
 var _ actor.Env = (*prodEnv)(nil)

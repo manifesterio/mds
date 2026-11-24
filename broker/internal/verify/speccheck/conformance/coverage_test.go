@@ -10,7 +10,6 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -167,31 +166,6 @@ func TestSameSeedGivesSameSequence(t *testing.T) {
 
 func objectSequence(p InputProfile, seed int) []objectstore.Call {
 	return sequence(ObjectOps(p), seed)
-}
-
-// recordingObject keeps the request number of every call it gets.
-type recordingObject struct{ reqs []machine.RequestID }
-
-func (r *recordingObject) Apply(operation objectstore.Call) (ObjectResult, error) {
-	r.reqs = append(r.reqs, operation.RequestID())
-	return ObjectResult{}, nil
-}
-
-// The generators make operations with no request id. The pair of the suite
-// must give the call at position i the id i+1, and no other id.
-func TestRequestIDsFollowPosition(t *testing.T) {
-	objects := &recordingObject{}
-	pair := &ObjectPair{mirror: objectstore.NewSpec(), subject: objects}
-	for _, operation := range objectSequence(Default(), 3)[:50] {
-		if _, err := pair.Apply(operation); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for i, got := range objects.reqs {
-		if got != machine.RequestID(i+1) {
-			t.Fatalf("object operation %d has request id %d, want %d.", i, got, i+1)
-		}
-	}
 }
 
 func TestFormatIsAGoExpression(t *testing.T) {

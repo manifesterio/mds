@@ -16,11 +16,15 @@ var simKindNames = map[sim.FailKind]string{
 	sim.FailNotRepeatable: KindNotRepeatable,
 }
 
+// KindNotRepeatable is the failure kind of a seed whose second run gave
+// another result than the first (see Options.CheckEvery).
+const KindNotRepeatable = "nondeterminism"
+
 // FromSim turns the result of a sim run into a campaign result. The
 // counter "steps" is set. A scenario may add its own counters to the
 // returned value. When reproduce is empty, the campaign makes the replay
 // command from Options.Tool.
-func FromSim(r sim.Result, reproduce string) Result { //nolint:dupl // FromKernel is the same for kernel results
+func FromSim(r sim.Result, reproduce string) Result {
 	out := Result{
 		Seed: r.Seed, Hash: r.Hash, Steps: r.Steps, RandCalls: r.RandCalls,
 		OK: r.OK(), Reproduce: reproduce,

@@ -1,11 +1,12 @@
-// Package broker is the Kafka broker state machine: stateless, pure and
-// deterministic (core.Machine), with S3 as the data plane and the control
-// plane assigning offsets. The simulator and the production loop (dst/runtime/live) drive the same code.
+// Package broker is the Kafka broker actor: stateless, pure and deterministic
+// (an actor.Actor), with S3 as the data plane and the control plane assigning
+// offsets. The simulator (dst/sim) and the production host (dst/runtime/live)
+// run the same code.
 //
 // Pipeline of a produce: the batch joins the open segment buffer; a flush
 // (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,
 // uploads it (ObjectPut) and commits it (CommitSegment); only then is the client
-// answered, with a "produce_acked" fact emitted right before the Send.
+// answered, with a "produce_acked" fact recorded right before the Send.
 // Commits go out strictly in segment order, so a partition's batches get
 // offsets in the order the broker admitted them. Every retry resends the
 // identical request under the same segment key, which both the object store and
@@ -20,59 +21,79 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/shared/objectstore"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
-// Fixed timer ids; retry timers use the id of the segment or op they belong to
-// (ids >= firstID).
-const (
-	timerFlush = machine.TimerID(2)
-	firstID    = 16
-)
+// brokerOutbox is the Outbox the broker records its effects on.
+type brokerOutbox = actor.Outbox[core.EventData, core.IO]
 
-// Broker is the machine. Build it with New.
+// timerFlush is the key of the batch window timer of the open segment. Retry
+// timers are keyed by the segment or operation they belong to (segmentTimer,
+// opTimer).
+const timerFlush actor.TimerKey = "flush"
+
+// Broker is the actor. Build it with New or Props.
 type Broker struct {
 	env    core.Environment
-	self   machine.NodeInstance
 	config Config
 	codec  kafkawire.Codec
 
 	started bool
 
-	nextRequestNumber machine.RequestID
-	nextID            uint64
-	timerGen          machine.TimerVersion
-	stopping          bool
-	exited            bool
+	nextID   uint64
+	stopping bool
+	exited   bool
 
 	conns  []*connection
-	dirty  []*connection        // connections whose queue head may be ready (drained at end of Step)
+	dirty  []*connection        // connections whose queue head may be ready (drained at end of Receive)
 	topics []contract.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
 	live   []core.BrokerAddr    // live brokers from LiveBrokers; nil means self only
 
-	now        machine.NodeTime // At of the event being stepped (set by Step; not state)
+	now        actor.Mono // time of the message being received (set by Receive; not state)
 	open       openSegment
 	segs       []*segment // sealed segments in commit order
 	ops        []*operation
-	bufBytes   int              // produce bytes admitted and not yet answered
-	pressure   bool             // above MaxBufferedBytes, until back at ResumeBufferedBytes
-	pressureAt machine.NodeTime // when pressure began (fact timing only, not state)
+	bufBytes   int        // produce bytes admitted and not yet answered
+	pressure   bool       // above MaxBufferedBytes, until back at ResumeBufferedBytes
+	pressureAt actor.Mono // when pressure began (fact timing only, not state)
 	guess      uint64
 }
 
-// New returns the core.MachineFactory of the broker.
-func New(config Config) core.MachineFactory {
+// Factory builds a broker for one incarnation of a node.
+type Factory func(env core.Environment) *Broker
+
+// New returns the Factory of the broker.
+func New(config Config) Factory {
 	config = config.withDefaults()
-	return func(env core.Environment, self machine.NodeInstance) core.Machine {
-		return &Broker{env: env, self: self, config: config, nextID: firstID}
+	return func(env core.Environment) *Broker {
+		return &Broker{env: env, config: config, nextID: firstID}
 	}
 }
 
-func (b *Broker) nextRequestID() machine.RequestID { b.nextRequestNumber++; return b.nextRequestNumber }
-func (b *Broker) id() uint64                       { b.nextID++; return b.nextID }
+// Props says how to run the broker. Every boot builds a new Broker. A
+// graceful stop is a StopRequest; answers and timers are received before
+// connection data (core.PriorityOf).
+func Props(config Config) actor.Props[core.EventData, core.IO] {
+	factory := New(config)
+	return actor.Props[core.EventData, core.IO]{
+		Name: "broker",
+		New: func(env actor.Env) actor.Actor[core.EventData, core.IO] {
+			return factory(env)
+		},
+		Boot: func(self actor.Incarnation) core.EventData { return core.NodeStarted{Self: self} },
+		StopMsg: func(deadline actor.Mono) core.EventData {
+			return core.StopRequest{Deadline: deadline}
+		},
+		Priority: core.PriorityOf,
+	}
+}
 
-func (b *Broker) backoff(n int) machine.Duration {
+// firstID is one less than the first id of a segment or operation.
+const firstID = 16
+
+func (b *Broker) id() uint64 { b.nextID++; return b.nextID }
+
+func (b *Broker) backoff(n int) actor.Duration {
 	d := b.config.RetryBase
 	for ; n > 1 && d < b.config.RetryMax; n-- {
 		d *= 2
@@ -80,62 +101,69 @@ func (b *Broker) backoff(n int) machine.Duration {
 	return min(d, b.config.RetryMax)
 }
 
-func (b *Broker) timer(id machine.TimerID, n int) (core.SetTimer, machine.TimerVersion) {
-	b.timerGen++
-	return core.SetTimer{ID: id, Gen: b.timerGen, After: b.backoff(n)}, b.timerGen
-}
-
-// Step implements core.StateMachine.
-func (b *Broker) Step(event core.Event) []core.Action {
+// Receive takes one message and records what the broker wants done, in
+// order. Answers and timers that nothing waits for any more leave the state
+// unchanged. After the broker exited every message is a no-op.
+func (b *Broker) Receive(now actor.Now, msg core.EventData, outbox *brokerOutbox) {
 	if b.exited {
-		return nil
+		return
 	}
-	b.now = event.At
-	var acts []core.Action
-	switch e := event.Body.(type) {
+	b.now = now.Mono
+	switch m := msg.(type) {
 	case core.NodeStarted:
 		b.started = true
 	case core.StopRequest:
-		acts = b.stop()
+		b.stop(outbox)
 	case core.ConnOpened:
-		acts = b.onOpen(e)
+		b.onOpen(m, outbox)
 	case core.BytesReceived:
-		acts = b.onBytes(e)
+		b.onBytes(m, outbox)
 	case core.ConnClosed:
-		acts = b.onClosed(e)
-	case core.TimerFired:
-		acts = b.onTimer(e)
-	case core.ObjectDone:
-		acts = b.onObject(e.Result)
-	case core.ControlPlaneDone:
-		acts = b.onControlPlane(e)
+		b.onClosed(m, outbox)
+	case core.FlushDue:
+		b.onFlushDue(outbox)
+	case core.SegmentRetryDue:
+		b.onSegmentRetryDue(m.Seg, outbox)
+	case core.OpDue:
+		b.onOpDue(m.Op, outbox)
+	case core.SegmentPutDone:
+		b.onSegmentPutDone(m, outbox)
+	case core.SegmentCommitDone:
+		b.onSegmentCommitDone(m, outbox)
+	case core.OpReadDone:
+		b.onOpReadDone(m, outbox)
+	case core.OpCallDone:
+		b.onOpCallDone(m, outbox)
 	case core.LiveBrokers:
-		b.live = e.Brokers
+		b.live = m.Brokers
+	case core.ConnectDone, core.ObjectDone, core.ControlPlaneDone, core.ClientDue:
+		// The broker never asks for these: its answers come adapted, with
+		// the segment or operation they belong to.
 	}
-	return b.finish(acts)
+	b.finish(outbox)
 }
 
 // finish drains ready responses, applies admission control and ends a graceful
 // stop.
-func (b *Broker) finish(acts []core.Action) []core.Action {
-	acts = b.drainDirty(acts)
-	acts = b.updatePressure(acts)
-	acts = b.syncReads(acts)
-	return b.maybeExit(acts)
+func (b *Broker) finish(outbox *brokerOutbox) {
+	b.drainDirty(outbox)
+	b.updatePressure(outbox)
+	b.syncReads(outbox)
+	b.maybeExit(outbox)
 }
 
 // ---- stop ----
 
 // stop stops admission, flushes the open segment and lets in-flight work
-// finish; maybeExit emits ShutdownDone once everything is answered.
-func (b *Broker) stop() []core.Action {
+// finish; maybeExit stops the actor once everything is answered.
+func (b *Broker) stop(outbox *brokerOutbox) {
 	if b.stopping {
-		return nil
+		return
 	}
 	b.stopping = true
-	acts := b.seal(closeOnStop)
+	b.seal(closeOnStop, outbox)
 	b.endParked(func(*operation) bool { return true }) // parked Fetches answer now
-	return append(acts, b.failGroupCalls()...)
+	b.failGroupCalls()
 }
 
 func (b *Broker) idle() bool {
@@ -150,42 +178,44 @@ func (b *Broker) idle() bool {
 	return true
 }
 
-func (b *Broker) maybeExit(acts []core.Action) []core.Action {
+// maybeExit ends a graceful stop once nothing is left to answer. Stop is the
+// last effect of the Receive: finish calls it last.
+func (b *Broker) maybeExit(outbox *brokerOutbox) {
 	if !b.stopping || b.exited || !b.idle() {
-		return acts
+		return
 	}
 	b.exited = true
 	for _, c := range b.conns {
-		acts = append(acts, core.CloseConn{Conn: c.id})
+		outbox.Do(core.CloseConn{Conn: c.id})
 	}
 	b.conns = nil
-	return append(acts, recordFact("broker_exited"), core.ShutdownDone{})
+	recordFact(outbox, "broker_exited")
+	outbox.Stop(actor.Exit, "")
 }
 
 // ---- admission control ----
 
 // updatePressure turns pressure on when the broker holds too many unacked
 // produce bytes and off once back at the low mark.
-func (b *Broker) updatePressure(acts []core.Action) []core.Action {
+func (b *Broker) updatePressure(outbox *brokerOutbox) {
 	switch {
 	case !b.pressure && b.bufBytes >= b.config.MaxBufferedBytes:
 		b.pressure, b.pressureAt = true, b.now
 		b.env.Reachable(readsPausedByBackpressure)
-		acts = append(acts, recordFact("backpressure_on",
-			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)}))
+		recordFact(outbox, "backpressure_on",
+			actor.Field{Key: "buffered", Value: actor.Int64Value(b.bufBytes)})
 	case b.pressure && b.bufBytes <= b.config.ResumeBufferedBytes:
 		b.pressure = false
 		b.env.Reachable(readsResumedAfterBackpressure)
-		acts = append(acts, recordFact("backpressure_off",
-			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)},
-			machine.Field{Key: "paused_ns", Value: machine.Int64Value(b.now - b.pressureAt)}))
+		recordFact(outbox, "backpressure_off",
+			actor.Field{Key: "buffered", Value: actor.Int64Value(b.bufBytes)},
+			actor.Field{Key: "paused_ns", Value: actor.Int64Value(b.now - b.pressureAt)})
 	}
-	return acts
 }
 
 // syncReads pauses reads on every client connection under pressure or while
 // stopping, and resumes them otherwise.
-func (b *Broker) syncReads(acts []core.Action) []core.Action {
+func (b *Broker) syncReads(outbox *brokerOutbox) {
 	want := b.pressure || b.stopping
 	for _, c := range b.conns {
 		if c.closing || c.paused == want {
@@ -193,99 +223,92 @@ func (b *Broker) syncReads(acts []core.Action) []core.Action {
 		}
 		c.paused = want
 		if want {
-			acts = append(acts, core.PauseReads{Conn: c.id})
+			outbox.Do(core.PauseReads{Conn: c.id})
 		} else {
-			acts = append(acts, core.ResumeReads{Conn: c.id})
+			outbox.Do(core.ResumeReads{Conn: c.id})
 		}
 	}
-	return acts
 }
 
 // ---- timers ----
 
-func (b *Broker) onTimer(e core.TimerFired) []core.Action {
-	if e.ID == timerFlush {
-		return b.onFlushTimer(e)
-	}
-	if s := b.segmentByTimer(e.ID); s != nil {
-		return b.segmentTimer(s, e.Gen)
-	}
-	if o := b.opByTimer(e.ID); o != nil {
-		return b.opTimer(o, e.Gen)
-	}
-	return nil
+// onFlushDue seals the open segment when its batch window has passed. Seal
+// cancels the timer, so an empty buffer means a timer that fired just
+// before a seal by size.
+func (b *Broker) onFlushDue(outbox *brokerOutbox) {
+	b.seal(closeOnTimer, outbox)
 }
 
-func (b *Broker) onFlushTimer(e core.TimerFired) []core.Action {
-	if e.Gen != b.open.gen || b.open.gen == 0 {
-		return nil
+func (b *Broker) onSegmentRetryDue(id uint64, outbox *brokerOutbox) {
+	if s := b.findSegment(id); s != nil {
+		b.onSegmentRetry(s, outbox)
 	}
-	return b.seal(closeOnTimer)
 }
 
-func (b *Broker) segmentByTimer(id machine.TimerID) *segment {
+func (b *Broker) onOpDue(id uint64, outbox *brokerOutbox) {
+	if o := b.findOp(id); o != nil {
+		b.onOpTimer(o, outbox)
+	}
+}
+
+func (b *Broker) findSegment(id uint64) *segment {
 	for _, s := range b.segs {
-		if machine.TimerID(s.id) == id {
+		if s.id == id {
 			return s
 		}
 	}
 	return nil
 }
 
-func (b *Broker) segmentByRequest(request machine.RequestID, st segmentState) *segment {
-	if request == 0 {
-		return nil
+// ---- answers ----
+
+// The broker has at most one call in flight per segment and per operation,
+// and the answer names the segment or operation. An answer for one that is
+// gone, or that waits for another kind of answer, is ignored.
+
+func (b *Broker) onSegmentPutDone(m core.SegmentPutDone, outbox *brokerOutbox) {
+	if s := b.segmentIn(m.Seg, segmentUpload); s != nil {
+		b.onPutDone(s, m.Done, outbox)
 	}
-	for _, s := range b.segs {
-		if s.request == request && s.state == st {
-			return s
-		}
+}
+
+func (b *Broker) onSegmentCommitDone(m core.SegmentCommitDone, outbox *brokerOutbox) {
+	if s := b.segmentIn(m.Seg, segmentCommit); s != nil {
+		b.onCommit(s, m.Done, outbox)
+	}
+}
+
+func (b *Broker) onOpReadDone(m core.OpReadDone, outbox *brokerOutbox) {
+	if o := b.opIn(m.Op, opGet); o != nil {
+		b.onFetchGet(o, m.Done, outbox)
+	}
+}
+
+func (b *Broker) onOpCallDone(m core.OpCallDone, outbox *brokerOutbox) {
+	if o := b.opIn(m.Op, opControlPlane); o != nil {
+		b.onOpCP(o, m.Done, outbox)
+	}
+}
+
+// segmentIn returns segment id if it waits in state st, else nil.
+func (b *Broker) segmentIn(id uint64, st segmentState) *segment {
+	if s := b.findSegment(id); s != nil && s.state == st {
+		return s
 	}
 	return nil
 }
 
-// ---- completions ----
-
-func (b *Broker) onControlPlane(e core.ControlPlaneDone) []core.Action {
-	if s := b.segmentByRequest(e.Req, segmentCommit); s != nil {
-		return b.onCommit(s, e)
-	}
-	if o := b.findOp(e.Req); o != nil && o.state == opControlPlane {
-		return b.onOpCP(o, e)
+// opIn returns operation id if it waits in state st, else nil.
+func (b *Broker) opIn(id uint64, st operationState) *operation {
+	if o := b.findOp(id); o != nil && o.state == st {
+		return o
 	}
 	return nil
 }
 
-// onObject routes an object store result. The broker sends only Put and Get, so a
-// DeleteDone or a ListDone is not expected and is ignored.
-func (b *Broker) onObject(result objectstore.Result) []core.Action {
-	switch r := result.(type) {
-	case objectstore.PutDone:
-		return b.onPut(r)
-	case objectstore.GetDone:
-		return b.onGet(r)
-	case objectstore.DeleteDone, objectstore.ListDone:
-		return nil
-	}
-	return nil
+func recordFact(outbox *brokerOutbox, name string, fs ...actor.Field) {
+	outbox.Fact(actor.Fact{Name: name, Fields: fs})
 }
 
-func (b *Broker) onPut(e objectstore.PutDone) []core.Action {
-	if s := b.segmentByRequest(e.Req, segmentUpload); s != nil {
-		return b.onPutDone(s, e)
-	}
-	return nil
-}
-
-func (b *Broker) onGet(e objectstore.GetDone) []core.Action {
-	if o := b.findOp(e.Req); o != nil && o.state == opGet {
-		return b.onFetchGet(o, e)
-	}
-	return nil
-}
-
-func recordFact(name string, fs ...machine.Field) core.RecordFact {
-	return core.RecordFact{Fact: machine.Fact{Name: name, Fields: fs}}
-}
-
-var _ core.Machine = (*Broker)(nil)
+// Broker is an actor.
+var _ actor.Actor[core.EventData, core.IO] = (*Broker)(nil)

@@ -1,12 +1,13 @@
 package production
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/manifesterio/mds/dst/core/actor"
+)
 
 func TestEnvIntnAndBetweenStayInRange(t *testing.T) {
-	e, err := NewEnv(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	e := NewEnv(actor.Incarnation{Name: "broker"}, nil)
 	if e.Intn(0) != 0 || e.Intn(-3) != 0 {
 		t.Fatal("Intn with n <= 0 must give 0")
 	}
@@ -28,13 +29,18 @@ func TestEnvIntnAndBetweenStayInRange(t *testing.T) {
 		t.Fatal("Between with hi <= lo must give lo")
 	}
 	_ = e.Between(-1<<63, 1<<63-1) // the whole range must not divide by zero
+	for range 100 {
+		if d := e.Duration(3, 5); d < 3 || d > 5 {
+			t.Fatalf("Duration(3, 5) = %d", d)
+		}
+	}
+	if e.Self().Name != "broker" {
+		t.Fatalf("Self = %+v", e.Self())
+	}
 }
 
 func TestEnvChance(t *testing.T) {
-	e, err := NewEnv(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	e := NewEnv(actor.Incarnation{Name: "broker"}, nil)
 	if e.Chance(0) || e.Chance(-1) {
 		t.Fatal("Chance(p <= 0) must be false")
 	}

@@ -15,18 +15,18 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the
 // specs (controlplane/spec assigns offsets and replays a committed key,
 // broker/spec is the expected log; a retried batch is committed again, so it is
-// in the log twice), exposed to the oracle through a fake kernel.View. Faults
+// in the log twice), exposed to the oracle through a fake sim.View. Faults
 // mutate the finished world (c4_faults_test.go).
 
-// failures counts violated Always props (the fake machine.Assertions).
+// failures counts violated Always props (the fake actor.Assertions).
 type failures map[string]int
 
 func (f failures) Always(c bool, p assert.Always, _ ...assert.Pair) {
@@ -47,9 +47,9 @@ type stats struct{ retries, replays, indetLand, indetNo, rejected, multi int }
 
 type producer struct{ nb int }
 
-type broker struct{ ref machine.NodeInstance }
+type broker struct{ ref actor.Incarnation }
 
-// world is the fake kernel.View plus the spec-side truth it was built from.
+// world is the fake sim.View plus the spec-side truth it was built from.
 type world struct {
 	opts   kafka.Opts
 	tps    []core.TopicPartition
@@ -61,27 +61,27 @@ type world struct {
 	st     stats
 	nextID uint64
 	nseg   int
-	now    kernel.Time
+	now    sim.Time
 
 	// What the oracle sees (mutable by faults).
 	ranges map[core.TopicPartition][]contract.BatchRange
 	hwmAdj map[core.TopicPartition]int64
 	objs   map[string][]byte
 	ops    []kafka.Operation
-	raw    []kernel.TimedFact
-	tl     *kernel.Timeline
+	raw    []sim.TimedFact
+	tl     *sim.Timeline
 	gen    uint64
 	as     failures
 
-	invs []kernel.Rule // live observers, nil in one-shot mode
+	invs []sim.Rule // live observers, nil in one-shot mode
 }
 
-func (w *world) Step() uint64               { return uint64(len(w.raw)) }
-func (w *world) Now() kernel.Time           { return w.now }
-func (w *world) Phase() kernel.Phase        { return kernel.PhaseHeal }
-func (w *world) Timeline() *kernel.Timeline { return w.tl }
-func (w *world) Assert() machine.Assertions { return w.as }
-func (w *world) touch()                     { w.gen++ }
+func (w *world) Step() uint64             { return uint64(len(w.raw)) }
+func (w *world) Now() sim.Time            { return w.now }
+func (w *world) Phase() sim.Phase         { return sim.PhaseHeal }
+func (w *world) Timeline() *sim.Timeline  { return w.tl }
+func (w *world) Assert() actor.Assertions { return w.as }
+func (w *world) touch()                   { w.gen++ }
 
 type hist world
 
@@ -109,14 +109,14 @@ func (c *controlPlaneView) HighWatermark(topicPartition core.TopicPartition) cor
 }
 
 func (w *world) rebuildTL() {
-	w.tl = kernel.NewTimeline()
+	w.tl = sim.NewTimeline()
 	for _, tf := range w.raw {
 		w.tl.Append(tf.Source, tf.At, tf.Fact)
 	}
 }
 
-func (w *world) emit(src machine.NodeInstance, f machine.Fact) {
-	tf := kernel.TimedFact{Seq: uint64(len(w.raw) + 1), At: w.now, Source: src, Fact: f}
+func (w *world) emit(src actor.Incarnation, f actor.Fact) {
+	tf := sim.TimedFact{Seq: uint64(len(w.raw) + 1), At: w.now, Source: src, Fact: f}
 	w.raw = append(w.raw, tf)
 	w.tl.Append(src, w.now, f)
 }
@@ -130,14 +130,14 @@ func (w *world) step() {
 	}
 }
 
-func nodeRef(s string) machine.NodeInstance { return machine.NodeInstance{Node: machine.NodeID(s)} }
+func nodeRef(s string) actor.Incarnation { return actor.Incarnation{Name: s} }
 
 func newWorld(seed uint64, live bool) *world {
 	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
 	opts := kafka.DefaultOpts()
 	w := &world{opts: opts, cp: specbridge.New(), parts: map[core.TopicPartition]*brokerspec.Broker{},
 		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]contract.BatchRange{},
-		hwmAdj: map[core.TopicPartition]int64{}, objs: map[string][]byte{}, tl: kernel.NewTimeline(), as: failures{}}
+		hwmAdj: map[core.TopicPartition]int64{}, objs: map[string][]byte{}, tl: sim.NewTimeline(), as: failures{}}
 	opts.Partitions = int32(1 + r.IntN(3))
 	w.opts = opts
 	for _, t := range opts.Topics {
@@ -155,7 +155,7 @@ func newWorld(seed uint64, live bool) *world {
 		w.prods = append(w.prods, &producer{})
 	}
 	if live {
-		w.invs = []kernel.Rule{kafka.NewOracle(opts, (*hist)(w), (*objView)(w), (*controlPlaneView)(w))}
+		w.invs = []sim.Rule{kafka.NewOracle(opts, (*hist)(w), (*objView)(w), (*controlPlaneView)(w))}
 	}
 	steps := 20 + r.IntN(30)
 	for range steps {
@@ -175,9 +175,9 @@ func newWorld(seed uint64, live bool) *world {
 	return w
 }
 
-func (w *world) newID() machine.ID {
+func (w *world) newID() actor.ID {
 	w.nextID++
-	var id machine.ID
+	var id actor.ID
 	binary.BigEndian.PutUint64(id[:], w.nextID)
 	return id
 }
@@ -252,14 +252,14 @@ func (w *world) commit(items []*item, replay bool) []contract.BatchRange {
 	}
 	w.objs[key] = obj
 	operation := contract.CommitSegment{SegmentKey: key, Batches: pbs}
-	d := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
+	d := w.cp.Exec(core.ControlPlaneCall{Op: operation})
 	if d.Err != core.OK {
 		panic(fmt.Sprintf("spec CP refused a commit: %v", d.Err))
 	}
 	as := d.Resp.(contract.CommitSegmentResp).Assigned
 	if replay {
 		w.st.replays++
-		d2 := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
+		d2 := w.cp.Exec(core.ControlPlaneCall{Op: operation})
 		if d2.Err != core.OK || !slices.Equal(d2.Resp.(contract.CommitSegmentResp).Assigned, as) {
 			panic("spec CP: a replayed commit did not return the original answer")
 		}
@@ -277,7 +277,7 @@ func (w *world) commit(items []*item, replay bool) []contract.BatchRange {
 		panic(fmt.Sprintf("spec CP assigned %d ranges for %d batches", len(as), len(items)))
 	}
 	for topicPartition := range touched { // map order is irrelevant: independent entries
-		lk := w.cp.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone).Resp.(contract.FindSegmentsResp)
+		lk := w.cp.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: topicPartition}}).Resp.(contract.FindSegmentsResp)
 		w.ranges[topicPartition] = lk.Ranges
 		if lk.End != w.parts[topicPartition].HighWatermark() {
 			panic("Broker end != CP end")
@@ -295,10 +295,10 @@ func valBytes(vs []string) [][]byte {
 }
 
 func (w *world) ack(b *broker, rg contract.BatchRange, it *item) {
-	w.emit(b.ref, machine.Fact{Name: "produce_acked", Fields: []machine.Field{
-		{Key: "topic", Value: machine.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: machine.Int64Value(rg.TopicPartition.Partition)},
-		{Key: "base_offset", Value: machine.Int64Value(rg.Base)}, {Key: "count", Value: machine.Int64Value(rg.Count)},
-		{Key: "segment", Value: machine.StringValue(rg.Loc.Key)}}})
+	w.emit(b.ref, actor.Fact{Name: "produce_acked", Fields: []actor.Field{
+		{Key: "topic", Value: actor.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: actor.Int64Value(rg.TopicPartition.Partition)},
+		{Key: "base_offset", Value: actor.Int64Value(rg.Base)}, {Key: "count", Value: actor.Int64Value(rg.Count)},
+		{Key: "segment", Value: actor.StringValue(rg.Loc.Key)}}})
 }
 
 func (w *world) invoke(it *item, c int) {

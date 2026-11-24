@@ -4,7 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -21,7 +21,7 @@ import (
 // second) this is a few hundred lines a second at most; raise -log-level to
 // warn to keep only failures.
 //
-// Observe and IO must be called from one goroutine (the broker loop).
+// Observe and IO must be called from one goroutine (the broker actor's).
 type SegmentLog struct {
 	log     *slog.Logger
 	pending []*segmentInfo
@@ -42,25 +42,25 @@ func NewSegmentLog(log *slog.Logger) *SegmentLog {
 
 func ms(nanoseconds int64) float64 { return float64(nanoseconds/10_000) / 100 } // 10 us resolution
 
-func fi(f machine.Fact, k string) int64 {
+func fi(f actor.Fact, k string) int64 {
 	switch x := f.Field(k).(type) {
-	case machine.Int64Value:
+	case actor.Int64Value:
 		return int64(x)
-	case machine.Uint64Value:
+	case actor.Uint64Value:
 		return int64(x)
-	case machine.StringValue, machine.Bool, machine.Bytes:
+	case actor.StringValue, actor.Bool, actor.Bytes:
 		return 0 // not a number
 	}
 	return 0
 }
 
-func fs(f machine.Fact, k string) string {
-	s, _ := f.Field(k).(machine.StringValue)
+func fs(f actor.Fact, k string) string {
+	s, _ := f.Field(k).(actor.StringValue)
 	return string(s)
 }
 
-// IO notes an action the broker issued (wire to NodeConfig.OnIO).
-func (s *SegmentLog) IO(a core.IOCall) {
+// IO notes an IO the broker issued (wire to NodeConfig.OnIO).
+func (s *SegmentLog) IO(a core.IO) {
 	call, ok := a.(core.ObjectCall)
 	if !ok || len(s.pending) == 0 {
 		return
@@ -80,7 +80,7 @@ func (s *SegmentLog) IO(a core.IOCall) {
 }
 
 // Observe consumes one broker fact.
-func (s *SegmentLog) Observe(f machine.Fact) {
+func (s *SegmentLog) Observe(f actor.Fact) {
 	switch f.Name {
 	case "segment_sealed":
 		if len(s.pending) < 4096 {

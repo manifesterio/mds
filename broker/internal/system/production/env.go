@@ -3,41 +3,41 @@ package production
 import (
 	crand "crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"sync"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // Env is the production core.Environment: crypto-seeded randomness, inert buggify and
 // assertions that log violations and carry on.
 type Env struct {
+	self actor.Incarnation
+
 	mu  sync.Mutex
 	rnd *rand.ChaCha8
 	log *slog.Logger
 }
 
-var (
-	_ core.Environment = (*Env)(nil)
-	_ machine.Env      = (*Env)(nil)
-)
+var _ core.Environment = (*Env)(nil)
 
-// NewEnv returns a production Env that logs to log.
-func NewEnv(log *slog.Logger) (*Env, error) {
+// NewEnv returns the production Env of incarnation self that logs to log.
+// crypto/rand.Read never fails: it ends the process instead.
+func NewEnv(self actor.Incarnation, log *slog.Logger) *Env {
 	var seed [32]byte
-	if _, err := crand.Read(seed[:]); err != nil {
-		return nil, fmt.Errorf("prod.NewEnv: %w", err)
-	}
+	_, _ = crand.Read(seed[:])
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Env{rnd: rand.NewChaCha8(seed), log: log}, nil
+	return &Env{self: self, rnd: rand.NewChaCha8(seed), log: log}
 }
+
+// Self is the incarnation the Env belongs to.
+func (e *Env) Self() actor.Incarnation { return e.self }
 
 // Uint64 returns a random 64-bit value.
 func (e *Env) Uint64() uint64 {
@@ -46,8 +46,7 @@ func (e *Env) Uint64() uint64 {
 	return e.rnd.Uint64()
 }
 
-// Intn returns a random int in [0, n). It returns 0 when n <= 0 (the contract of
-// machine.Rand).
+// Intn returns a random int in [0, n). It returns 0 when n <= 0.
 func (e *Env) Intn(n int) int {
 	if n <= 0 {
 		return 0
@@ -76,9 +75,14 @@ func (e *Env) Chance(p float64) bool {
 	return float64(e.Uint64()>>11)/(1<<53) < p
 }
 
+// Duration returns a random duration in [lo, hi]: both ends are included.
+func (e *Env) Duration(lo, hi actor.Duration) actor.Duration {
+	return actor.Duration(e.Between(int64(lo), int64(hi)))
+}
+
 // NewID returns a random ID.
-func (e *Env) NewID() machine.ID {
-	var id machine.ID
+func (e *Env) NewID() actor.ID {
+	var id actor.ID
 	binary.LittleEndian.PutUint64(id[:8], e.Uint64())
 	binary.LittleEndian.PutUint64(id[8:], e.Uint64())
 	return id

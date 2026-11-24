@@ -1,18 +1,32 @@
 package broker
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
-func flushTimers(h *harness) []core.SetTimer {
-	var out []core.SetTimer
-	for _, a := range h.all {
-		if s, ok := a.(core.SetTimer); ok && s.ID == timerFlush {
-			out = append(out, s)
+// flushTimers returns every StartTimer of the flush timer, in order.
+func flushTimers(h *harness) []actor.Effect {
+	var out []actor.Effect
+	for _, e := range h.all {
+		if e.Kind == actor.EffectStartTimer && e.Key == timerFlush {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// flushTimerKinds lists the StartTimer and CancelTimer effects of the flush
+// timer, in order.
+func flushTimerKinds(h *harness) []actor.EffectKind {
+	var out []actor.EffectKind
+	for _, e := range h.all {
+		if (e.Kind == actor.EffectStartTimer || e.Kind == actor.EffectCancelTimer) && e.Key == timerFlush {
+			out = append(out, e.Kind)
 		}
 	}
 	return out
@@ -21,14 +35,14 @@ func flushTimers(h *harness) []core.SetTimer {
 func sealReasons(h *harness) []string {
 	var out []string
 	for _, f := range factsNamed(h.all, "segment_sealed") {
-		out = append(out, string(f.Field("reason").(machine.StringValue)))
+		out = append(out, string(f.Field("reason").(actor.StringValue)))
 	}
 	return out
 }
 
 func TestDefaultFlushRule(t *testing.T) {
 	d := DefaultConfig()
-	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*machine.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentPartitions != 4096 {
+	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*actor.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentPartitions != 4096 {
 		t.Fatalf("%+v", d)
 	}
 	z := Config{}.withDefaults()
@@ -81,7 +95,7 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, e("t", 1, plain(t, "b"))))
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "c"))))
 	ts := flushTimers(h)
-	if len(ts) != 1 || ts[0].After != 200*machine.Millisecond {
+	if len(ts) != 1 || ts[0].D != 200*actor.Millisecond {
 		t.Fatalf("flush timers %+v (want one of 200ms)", ts)
 	}
 	if len(h.puts) != 0 {
@@ -92,10 +106,10 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 		t.Fatalf("%d puts after the timer", len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")
-	if len(f) != 1 || f[0].Field("reason").(machine.StringValue) != "timer" || f[0].Field("batches").(machine.Int64Value) != 3 {
+	if len(f) != 1 || f[0].Field("reason").(actor.StringValue) != "timer" || f[0].Field("batches").(actor.Int64Value) != 3 {
 		t.Fatalf("%+v", f)
 	}
-	if age := f[0].Field("age").(machine.Int64Value); age <= 0 {
+	if age := f[0].Field("age").(actor.Int64Value); age <= 0 {
 		t.Fatalf("age %d", age)
 	}
 	for range 3 {
@@ -110,7 +124,8 @@ func TestFlushTimerRearms(t *testing.T) {
 	h.produceOne(c, e("t", 0, plain(t, "a")))
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "b"))))
 	ts := flushTimers(h)
-	if len(ts) != 2 || ts[1].Gen == ts[0].Gen || ts[1].After != 200*machine.Millisecond {
+	kinds := []actor.EffectKind{actor.EffectStartTimer, actor.EffectCancelTimer, actor.EffectStartTimer}
+	if len(ts) != 2 || !slices.Equal(flushTimerKinds(h), kinds) || ts[1].D != 200*actor.Millisecond {
 		t.Fatalf("%+v", ts)
 	}
 	if _, ok := h.timers[timerFlush]; !ok {
@@ -165,10 +180,10 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	commits := 0
-	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.ControlPlaneDone) core.ControlPlaneDone {
 		if _, ok := a.Op.(contract.CommitSegment); ok {
 			commits++
-			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTooLarge, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Err: core.ErrTooLarge, Outcome: core.NotApplied}
 		}
 		return run()
 	}
@@ -236,10 +251,10 @@ func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 		t.Fatalf("reasons %v puts %d", r, len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")[0]
-	if b := f.Field("batches").(machine.Int64Value); b != 200 {
+	if b := f.Field("batches").(actor.Int64Value); b != 200 {
 		t.Fatalf("%d batches in the segment", b)
 	}
-	if n := f.Field("parts").(machine.Int64Value); n != 2 {
+	if n := f.Field("parts").(actor.Int64Value); n != 2 {
 		t.Fatalf("%d partitions in the segment, want 2", n)
 	}
 	h.next(c)

@@ -1,26 +1,9 @@
 package core
 
-import "github.com/manifesterio/mds/dst/core/machine"
+import "github.com/manifesterio/mds/dst/core/actor"
 
-// Environment is injected into every StateMachine at construction. It is the only way
-// nondeterminism enters the core. Time is NOT here: it arrives on each Event.
-//
-// Faults (buggify sites) and Assertions are the dst/core/machine types. A site or an
-// assertion is a declared value (dst/core/fault NewSite, dst/core/assert NewAlways and so on),
-// never a string. Rand stays here until the machines take the v2 machine.Env: the
-// dst Rand also has Between and Chance, and the broker Between excludes its upper
-// end, so that move is done together with the broker kernel (plan T1.12).
-type Environment interface {
-	Rand
-	machine.Faults
-	machine.Assertions
-}
-
-// Rand draws from the single seeded stream in simulation (lesson 3).
-type Rand interface {
-	Uint64() uint64
-	// Intn returns a value in [0, n). n > 0.
-	Intn(n int) int
-	// NewID returns a fresh 128-bit ID (segment keys, incarnations, request IDs).
-	NewID() machine.ID
-}
+// Environment is the Env of a broker or simulated client: random numbers,
+// buggify sites and assertions. It is the only way nondeterminism enters the
+// core. Time is not here: it comes with each Receive. In production no site
+// fires.
+type Environment = actor.Env

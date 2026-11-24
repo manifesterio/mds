@@ -41,7 +41,7 @@
 //   - metadb/engine: the ordered key-value interface under metadb.
 //     metadb/engine/memory and metadb/engine/pebble implement it.
 //   - replica: one node's copy of the replicated log: writer or standby,
-//     catch-up, checkpoint and restore. A dst machine.Machine.
+//     catch-up, checkpoint and restore. A dst actor.
 //   - executor: runs the log and object-store calls that replica asks for. It
 //     owns the Log and ObjectStore ports. executor/dynamolog and executor/sqllog
 //     are the DynamoDB and Postgres logs; executor/logtest is their shared tests.
@@ -76,11 +76,10 @@
 // are never stored. A writer that decides outcomes before it appends works from
 // stale state: that is the planted bug writer-offsets.
 //
-// The rebalance machine is a pure dst machine.Machine state machine (Step takes
-// one input and returns outputs; time and chance come from the step context).
-// server.Node hosts it in a second live.Run loop beside the replica. Its log
-// writes and reads go to the replica as inputs, and the answers come back as
-// inputs. The simulator hosts it the same way (a second dst process per node).
+// The rebalance machine is a dst actor (Receive takes one message and records
+// effects; time and chance come from the actor's Env). server.Node runs it in
+// the same live.Host as the replica, and it asks the replica directly for its
+// log writes and reads. The simulator runs both actors in one sim.System.
 //
 // # How they fit together, from the imports
 //

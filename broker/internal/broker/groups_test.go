@@ -8,7 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // groupCP is a fake control plane for the group calls of one test. answer
@@ -18,11 +18,9 @@ type groupCP struct {
 	answer func(operation contract.Operation) core.ControlPlaneDone
 }
 
-func (g *groupCP) hook(a core.ControlPlaneCall, _ func() core.IOResult) core.IOResult {
+func (g *groupCP) hook(a core.ControlPlaneCall, _ func() core.ControlPlaneDone) core.ControlPlaneDone {
 	g.calls = append(g.calls, a)
-	d := g.answer(a.Op)
-	d.Req = a.Req
-	return d
+	return g.answer(a.Op)
 }
 
 // cpOK is a successful answer. cpErr is a failed one.
@@ -81,7 +79,7 @@ func TestJoinGroupSuccess(t *testing.T) {
 	if operation.Group != "g1" || operation.ClientHost != "/test" || operation.RebalanceTimeoutMs != 30000 || len(operation.Protocols) != 1 {
 		t.Fatalf("join call %+v", operation)
 	}
-	if want := machine.Duration(40 * time.Second); g.calls[0].Timeout != want {
+	if want := actor.Duration(40 * time.Second); g.calls[0].Timeout != want {
 		t.Fatalf("deadline %v, want 40s", time.Duration(g.calls[0].Timeout))
 	}
 	h.noViolations()
@@ -92,7 +90,7 @@ func TestJoinGroupVersion0UsesSessionTimeout(t *testing.T) {
 		return cpOK(contract.GroupJoinResp{MemberID: "m-2", Leader: "m-2", Generation: 1})
 	})
 	h.call(h.open(1), 0, joinRequest("g1", 10000, 0))
-	if want := machine.Duration(20 * time.Second); g.calls[0].Timeout != want { // session 10 s + margin
+	if want := actor.Duration(20 * time.Second); g.calls[0].Timeout != want { // session 10 s + margin
 		t.Fatalf("deadline %v, want 20s", time.Duration(g.calls[0].Timeout))
 	}
 	h.noViolations()
@@ -123,7 +121,7 @@ func TestSyncGroupLeaderAndFollower(t *testing.T) {
 	if got := g.calls[0].Op.(contract.GroupSync); len(got.Assignments) != 2 || got.Assignments[1].Member != "m-2" {
 		t.Fatalf("leader call %+v", got)
 	}
-	if want := machine.Duration(70 * time.Second); g.calls[0].Timeout != want {
+	if want := actor.Duration(70 * time.Second); g.calls[0].Timeout != want {
 		t.Fatalf("sync deadline %v, want 70s", time.Duration(g.calls[0].Timeout))
 	}
 	follower := syncRequest("g1", "m-2", 4)

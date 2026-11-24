@@ -5,7 +5,6 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
 )
 
@@ -15,7 +14,7 @@ const resourceTopic = kmsg.ConfigResourceType(2)
 // describeConfigs answers DescribeConfigs (Kafka key 32) for topics, which
 // kafka-topics.sh --describe needs. The broker keeps no topic configs, so an
 // existing topic gets an empty config list. Other resource types are refused.
-func (b *Broker) describeConfigs(s *slot, r *kmsg.DescribeConfigsRequest) []core.Action {
+func (b *Broker) describeConfigs(s *slot, r *kmsg.DescribeConfigsRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrDescribeConfigsResponse()
 	response.Resources = make([]kmsg.DescribeConfigsResponseResource, len(r.Resources))
 	var names []string
@@ -30,14 +29,14 @@ func (b *Broker) describeConfigs(s *slot, r *kmsg.DescribeConfigsRequest) []core
 	}
 	s.response = response
 	if len(names) == 0 { // nothing to ask: DescribeTopics with no names would list every topic
-		return nil
+		return
 	}
-	return b.startOp(&operation{kind: opDescribeConfigs, s: s, names: names, dresp: response})
+	b.startOp(&operation{kind: opDescribeConfigs, s: s, names: names, dresp: response}, outbox)
 }
 
 // onDescribeConfigsCP fills the answer of a DescribeConfigs op from the topics the
 // control plane knows. Resources refused earlier keep their error.
-func (b *Broker) onDescribeConfigsCP(o *operation, infos []contract.TopicInfo) []core.Action {
+func (b *Broker) onDescribeConfigsCP(o *operation, infos []contract.TopicInfo) {
 	for i := range o.dresp.Resources {
 		rr := &o.dresp.Resources[i]
 		if rr.ErrorCode != 0 {
@@ -49,7 +48,7 @@ func (b *Broker) onDescribeConfigsCP(o *operation, infos []contract.TopicInfo) [
 		}
 		rr.Configs = []kmsg.DescribeConfigsResponseResourceConfig{}
 	}
-	return b.endOp(o)
+	b.endOp(o)
 }
 
 // failDescribeConfigs gives every resource of o that has no error the code.

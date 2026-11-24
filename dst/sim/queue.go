@@ -6,8 +6,7 @@ import (
 )
 
 // entryKind says what a queue entry is. The number is folded into the trace
-// hash, so the values are frozen (they are the numbers of the old broker
-// kernel; 4 and 6 are no longer used).
+// hash, so the values are frozen (4 and 6 are not used).
 type entryKind uint8
 
 const (

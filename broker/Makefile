@@ -22,7 +22,7 @@ RISK_FLAGS    ?=
 SIM_SEEDS     ?= 300
 
 # Everything except the simulation tree and test/integrationtest (those have their own targets).
-# internal/verify/simulator is the tree on dst/sim/kernel. (The old tree was deleted in T1.12d.)
+# internal/verify/simulator runs the broker on dst/sim.
 UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulator(/|$$)|/test/integrationtest$$')
 
 export RISK_THRESHOLD
@@ -36,7 +36,17 @@ PG_TEST_ARGS  ?=
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
 	e2e-kafka-cli it-postgres
 
-build: fmt-check ascii-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
+# Regenerate sum-type markers, tags and folds (dst/cmd/dstgen).
+generate:
+	go run github.com/manifesterio/mds/dst/cmd/dstgen ./...
+
+# The code dstgen writes (zz_dst_gen*.go, dst.tags) must match the annotations,
+# and dst.tags must not have lost or renumbered a line since DSTGEN_BASE.
+DSTGEN_BASE ?= mainline
+gen-check:
+	go run github.com/manifesterio/mds/dst/cmd/dstgen -check -base $(DSTGEN_BASE) ./...
+
+build: fmt-check ascii-check gen-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
 
 compile:
 	go build ./...
@@ -48,7 +58,7 @@ $(COVER_DIR)/.gitignore:
 test: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
 
-# Deterministic simulation packages (the tree on dst/sim/kernel), then a seed campaign
+# Deterministic simulation packages (on dst/sim), then a seed campaign
 # for the broker (scenario kafka). kafka-log lives in mds-controlplane after CP extraction.
 sim: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...

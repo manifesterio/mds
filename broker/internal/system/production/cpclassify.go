@@ -16,18 +16,18 @@ var (
 	_ system.ErrorClassifier = ControlPlaneClassifier{}
 )
 
-// ControlPlaneClassifier is the system.ErrorClassifier for ControlPlaneCall (lesson 1).
-// The rules are in client.Classify. This type only takes the operation out of the action.
-// An action that is not a ControlPlaneCall counts as a write.
+// ControlPlaneClassifier is the system.ErrorClassifier for ControlPlaneCall.
+// The rules are in client.Classify. This type only takes the operation out of the IO.
+// An IO that is not a ControlPlaneCall counts as a write.
 type ControlPlaneClassifier struct{}
 
 // Classify maps a failed control plane call to its error code and outcome.
-func (ControlPlaneClassifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
+func (ControlPlaneClassifier) Classify(a core.IO, err error) (core.ErrCode, core.Outcome) {
 	var op contract.Operation
 	if call, ok := a.(core.ControlPlaneCall); ok {
 		op = call.Op
 	}
 	code, out := client.Classify(op, err)
-	slog.Debug("cp call failed", "action", a, "err", err, "code", code, "outcome", out)
+	slog.Debug("cp call failed", "io", a, "err", err, "code", code, "outcome", out)
 	return code, out
 }

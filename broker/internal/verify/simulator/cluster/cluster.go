@@ -1,30 +1,27 @@
-// Package cluster is the host of one broker simulation run on dst/sim/kernel. It
-// builds the world of a seed: the three fake outside systems (object store,
-// control plane, network), the broker nodes, the workload node (a test client),
-// the phases, the node attrition and the quiesce task. A scenario (kafka)
-// gives it the machines and the rules.
+// Package cluster is the host of one broker simulation run on dst/sim. It
+// builds the System of a seed: the two fake outside systems (object store and
+// control plane, as sim services), the connection table (network.go), the
+// broker actors, the client actors (test workloads), the phases, the broker
+// attrition and the quiesce task. A scenario (kafka) gives it the broker
+// Props, the clients and the rules.
 //
-// The broker machines and the workloads are core machines: they take one core.Event
-// and return core actions. The kernel runs machines with the dst v2 contract
-// (machine.Machine), so this package wraps each core machine in a small adapter
-// (adapter.go). The route function (route.go) sends each core action to the
-// kernel or to the right fake service. It is one exhaustive type switch.
+// The brokers and the clients share one executor: it forwards object store
+// and control-plane calls to their services, and runs the connection table
+// for the socket IO.
 package cluster
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/span"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/core/rng"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // wallStart is the virtual UTC time at the start of every run (2023-11-14).
-const wallStart machine.RealTime = 1_700_000_000 * 1_000_000_000
+const wallStart actor.Wall = 1_700_000_000 * 1_000_000_000
 
 // tailLines is how many of the last step lines a failed run keeps.
 const tailLines = 48
@@ -34,169 +31,166 @@ const tailLines = 48
 type Settings struct {
 	ObjectStore  fakeservices.ObjectStoreFaults
 	ControlPlane fakeservices.ControlPlaneFaults
-	Network      fakenetwork.Faults
-	// ClockSkewMax is the largest fixed clock skew of one node. It is drawn once
-	// for each node when the node is spawned.
-	ClockSkewMax machine.Duration
-	// Attrition kills and restarts broker nodes during the chaos window.
-	Attrition kernel.Attrition
-	// RecoveryDelay is the time from the end of a broker node to its next boot.
-	RecoveryDelay [2]machine.Duration
-	// Cost is the CPU model of every node: how long a node is busy after a Step.
-	Cost kernel.CostParams
+	// NetDelay bounds the one-way delay of one frame on a connection.
+	NetDelay [2]actor.Duration
+	// ConnResetProb is the chance that one write resets its connection while
+	// faults are on.
+	ConnResetProb float64
+	// ClockSkewMax is the largest fixed clock skew of one actor. It is drawn
+	// once for each actor when it is spawned.
+	ClockSkewMax actor.Duration
+	// Attrition kills and restarts brokers during the fault phase.
+	Attrition sim.AttritionPlan
+	// RecoveryDelay is the time from the end of a broker incarnation to its
+	// next boot.
+	RecoveryDelay [2]actor.Duration
+	// Cost is the CPU model of every actor: how long it is busy after a Receive.
+	Cost sim.CostParams
 }
 
 // Plan says how to build one run.
 type Plan struct {
 	Seed     uint64
 	Settings Settings
-	Phases   kernel.Phases
+	Phases   sim.Phases
 	// QuiesceEvery is the time between two quiesce points. Zero: no quiesce point.
-	QuiesceEvery machine.Duration
-	// MaxSteps is the step limit of the run. Zero: the kernel default.
+	QuiesceEvery actor.Duration
+	// MaxSteps is the step limit of the run. Zero: the System default.
 	MaxSteps uint64
 	// Log keeps every step line. HaltOnFirst stops the run at the first failure.
 	// VerifyHashes recomputes every cached state hash at each step.
 	Log, HaltOnFirst, VerifyHashes bool
 }
 
-// Workload is a test client. It is a machine that records every operation in a
-// history and does not judge. It never ends and it boots after every broker.
-type Workload interface {
-	core.Machine
-	// OnPhase tells the workload that the phase changed (into Recovering and into
-	// Recover). The returned actions are routed like the actions of a Step.
-	OnPhase(p kernel.Phase) []core.Action
+// Client is a test client actor. It records every operation in a history and
+// does not judge.
+type Client[In actor.Payload] interface {
+	actor.Actor[In, core.IO]
 	// Quiescent reports that no operation is in flight.
 	Quiescent() bool
 }
 
-// WorkloadFactory builds a fresh workload for a boot. brokers are the names of the
-// broker nodes, in order.
-type WorkloadFactory func(env core.Environment, self machine.NodeInstance, brokers []machine.NodeID) Workload
+// ClientSpec says how to run one client.
+type ClientSpec[In actor.Payload] struct {
+	// New builds the client. brokers are the broker actor names, in order;
+	// a client dials them by name (core.Connect.Addr).
+	New func(env actor.Env, brokers []string) Client[In]
+	// Boot makes the first message of the client.
+	Boot func(self actor.Incarnation) In
+	// OnPhase makes the message the client gets when the phase changes.
+	// Nil: none.
+	OnPhase func(p sim.Phase) (In, bool)
+	// FromNet turns a connection event (core.ConnOpened is never sent to a
+	// client; core.BytesReceived and core.ConnClosed are) into a message.
+	FromNet func(ev core.EventData) In
+}
 
-// BrokerAddr is the address of a node that takes core events.
-type BrokerAddr = kernel.Addr[core.EventData]
-
-// Cluster is the world of one run and the handles a scenario needs.
+// Cluster is the System of one run and the handles a scenario needs.
 type Cluster struct {
-	// World is the kernel world. A scenario adds its rules to it.
-	World *kernel.World
-	// Objects, ControlPlane and Network are the fake services. A rule reads the
-	// ground truth from the first two (see package truth).
+	// System is the simulation. A scenario adds its rules to it.
+	System *sim.System
+	// Objects and ControlPlane are the fake services. A rule reads the
+	// ground truth from them (see package truth).
 	Objects      *fakeservices.ObjectStore
 	ControlPlane *fakeservices.ControlPlane
-	Network      *fakenetwork.Engine
 
-	plan      Plan
-	svc       services
-	brokers   []BrokerAddr
-	brokerIDs []machine.NodeID
-	workloads []*workloadSlot
+	plan    Plan
+	net     *network
+	brokers []string
+	clients []*clientSlot
 }
 
-// workloadSlot remembers the workload of the last boot of one workload node.
-type workloadSlot struct {
-	live Workload
+// clientSlot holds the client built by the last boot of one client actor.
+type clientSlot struct {
+	live interface{ Quiescent() bool }
 }
 
-// New builds the world, the three services and nothing else. Add the brokers,
-// then the workload, then the rules, then call Run.
+// New builds the System and the two services. Add the brokers, then the
+// clients, then the rules, then call Run.
 func New(p Plan) *Cluster {
-	w := kernel.New(kernel.Config{
+	sys := sim.NewSystem(sim.Config{
 		Seed: p.Seed, WallStart: wallStart, MaxSteps: p.MaxSteps,
 		ClockSkewMax: p.Settings.ClockSkewMax, Attrition: p.Settings.Attrition,
 		Log: p.Log, Tail: tailLines, HaltOnFirst: p.HaltOnFirst, VerifyHashes: p.VerifyHashes,
 	})
-	c := &Cluster{World: w, plan: p}
-	c.Objects = fakeservices.NewObjectStore(w, p.Settings.ObjectStore)
-	c.ControlPlane = fakeservices.NewControlPlane(w, p.Settings.ControlPlane)
-	c.Network = fakenetwork.New(w, p.Settings.Network)
-	c.svc = services{
-		world:        w,
-		objects:      kernel.AddService[core.ObjectCall, core.EventData](w, c.Objects),
-		controlPlane: kernel.AddService[core.ControlPlaneCall, core.EventData](w, c.ControlPlane),
-		network:      kernel.AddService[fakenetwork.Call, core.EventData](w, c.Network),
-	}
+	c := &Cluster{System: sys, plan: p}
+	c.Objects = fakeservices.NewObjectStore(p.Settings.ObjectStore)
+	c.ControlPlane = fakeservices.NewControlPlane(p.Settings.ControlPlane)
+	c.net = newNetwork(sys, p.Settings.NetDelay, p.Settings.ConnResetProb,
+		sim.AddService[core.ObjectCall, core.ObjectDone](sys, c.Objects.Name(), c.Objects),
+		sim.AddService[core.ControlPlaneCall, core.ControlPlaneDone](sys, c.ControlPlane.Name(), c.ControlPlane))
 	return c
 }
 
-// restart is the restart rule of a broker node: every end (crash, trip or exit)
+// restart is the restart policy of a broker: every end (crash, trip or exit)
 // is followed by a boot after a delay in RecoveryDelay.
-func (c *Cluster) restart(_ machine.End, r *rng.Rand) (machine.Duration, bool) {
+func (c *Cluster) restart(_ actor.End, r actor.Rand) (actor.Duration, bool) {
 	d := c.plan.Settings.RecoveryDelay
-	return machine.Duration(span.Between(r, int64(d[0]), int64(d[1]))), true
+	return r.Duration(d[0], d[1]), true
 }
 
-// AddBrokers spawns n broker nodes named broker-0, broker-1, ... They can be
-// dialed and the kernel may kill them. factory builds the machine of each boot.
-func (c *Cluster) AddBrokers(n int, factory core.MachineFactory) {
+// AddBrokers spawns n brokers named broker-0, broker-1, ... from props (its
+// Name and Restart are replaced). Clients dial them by name, and the System
+// may kill them.
+func (c *Cluster) AddBrokers(n int, props actor.Props[core.EventData, core.IO]) {
 	for i := range n {
-		name := machine.NodeID(fmt.Sprintf("broker-%d", i))
-		addr := kernel.Spawn(c.World, kernel.NodeSpec[core.EventData, core.Action]{
-			Name:      name,
-			New:       adaptFactory(factory),
-			Route:     c.svc.route,
-			Boot:      bootEvent,
-			StopMsg:   stopEvent,
-			Class:     core.InboxKindOf,
-			Cost:      c.plan.Settings.Cost,
-			Restart:   c.restart,
-			Attrition: true,
-		})
-		c.Network.AddNode(addr)
-		c.brokers = append(c.brokers, addr)
-		c.brokerIDs = append(c.brokerIDs, name)
+		p := props
+		p.Name = fmt.Sprintf("broker-%d", i)
+		p.Restart = c.restart
+		ref := sim.Spawn(c.System, p,
+			sim.WithExecutor(c.net.exec),
+			sim.Cost(c.plan.Settings.Cost),
+			sim.Attrition(),
+			sim.OnEnd(c.net.ended))
+		c.net.add(p.Name, ref, func(ev core.EventData) { sim.Tell(c.System, ref, 0, ev) })
+		c.brokers = append(c.brokers, p.Name)
 	}
 }
 
-// AddWorkload spawns a workload node named workload-0, workload-1, ... Add the
-// brokers first: the workload gets their names.
-func (c *Cluster) AddWorkload(factory WorkloadFactory) {
-	slot := &workloadSlot{}
-	c.workloads = append(c.workloads, slot)
-	name := machine.NodeID(fmt.Sprintf("workload-%d", len(c.workloads)-1))
-	addr := kernel.Spawn(c.World, kernel.NodeSpec[core.EventData, core.Action]{
+// AddClient spawns a client named client-0, client-1, ... as a workload: it
+// boots after every broker and never ends. Add the brokers first: the client
+// gets their names.
+func AddClient[In actor.Payload](c *Cluster, s ClientSpec[In]) actor.EntityRef[In] {
+	slot := &clientSlot{}
+	name := fmt.Sprintf("client-%d", len(c.clients))
+	c.clients = append(c.clients, slot)
+	brokers := slices.Clone(c.brokers)
+	opts := []sim.SpawnOption{sim.WithExecutor(c.net.exec), sim.Workload(), sim.Cost(c.plan.Settings.Cost)}
+	if s.OnPhase != nil {
+		opts = append(opts, sim.OnPhase(s.OnPhase))
+	}
+	ref := sim.Spawn(c.System, actor.Props[In, core.IO]{
 		Name: name,
-		New: func(env machine.Env, self machine.NodeInstance) machine.Machine[core.EventData, core.Action] {
-			wl := factory(env, self, c.brokerIDs)
-			if wl == nil {
-				return nil
-			}
-			slot.live = wl
-			return driverAdapter{wl}
+		New: func(env actor.Env) actor.Actor[In, core.IO] {
+			cl := s.New(env, brokers)
+			slot.live = cl
+			return cl
 		},
-		Route:   c.svc.route,
-		Boot:    bootEvent,
-		Class:   core.InboxKindOf,
-		Cost:    c.plan.Settings.Cost,
-		Driver:  true,
-		OnPhase: phaseEvent,
-	})
-	c.Network.AddNode(addr)
+		Boot: s.Boot,
+	}, opts...)
+	c.net.add(name, ref, func(ev core.EventData) { sim.Tell(c.System, ref, 0, s.FromNet(ev)) })
+	return ref
 }
 
-// quiesce appends a "sim_quiesce" fact that says whether no workload has an
+// quiesce appends a "sim_quiesce" fact that says whether no client has an
 // operation in flight, then queues the next one.
 func (c *Cluster) quiesce() {
 	q := true
-	for _, s := range c.workloads {
+	for _, s := range c.clients {
 		if s.live != nil && !s.live.Quiescent() {
 			q = false
 		}
 	}
-	c.World.Fact(machine.Fact{Name: "sim_quiesce", Fields: []machine.Field{{Key: "quiescent", Value: machine.Bool(q)}}})
-	c.World.At(c.World.Now()+kernel.Time(c.plan.QuiesceEvery), kernel.HostLane, c.quiesce)
+	c.System.Fact(actor.Fact{Name: "sim_quiesce", Fields: []actor.Field{{Key: "quiescent", Value: actor.Bool(q)}}})
+	c.System.After(c.plan.QuiesceEvery, c.quiesce)
 }
 
-// Run schedules the phases and the quiesce points, boots the nodes, runs the
-// world to the end and returns the result.
-func (c *Cluster) Run() kernel.Result {
-	kernel.SchedulePhases(c.World, c.plan.Phases)
+// Run schedules the phases and the quiesce points, boots the actors, runs the
+// System to the end and returns the result.
+func (c *Cluster) Run() sim.Result {
+	sim.SchedulePhases(c.System, c.plan.Phases)
 	if c.plan.QuiesceEvery > 0 {
-		c.World.At(kernel.Time(c.plan.QuiesceEvery), kernel.HostLane, c.quiesce)
+		c.System.After(c.plan.QuiesceEvery, c.quiesce)
 	}
-	c.World.Start()
-	c.World.RunUntil(nil)
-	return c.World.Finish()
+	return c.System.Run()
 }

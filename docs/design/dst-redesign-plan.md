@@ -665,12 +665,27 @@ Commit: `docs(dst): actor API docs and redesign results`.
 
 ## 13. Success metrics (filled in P8 against the P0 baseline)
 
-| Metric | Baseline | Target |
-|---|---|---|
-| Hand-written Fold / Tag / marker methods | 120 / 112 / 147 | 0 outside generated files |
-| Timer generation fields and checks | (P0) | 0 |
-| Request-ID tables in product machines | (P0) | 0 where Perform/Call/Ask apply |
-| Route switch cases that only forward effects | (P0) | 0 |
-| kv example code lines (non-comment) | 202 | about 120 |
-| Product output cases duplicating effects | 9 (broker 5, controlplane 4) | 0 |
-| Determinism gate coverage | 10 listed packages | every core/sim package |
+Counts over non-test Go files of dst, shared, controlplane and broker (generated `zz_dst_gen*`
+files and dstgen testdata excluded). Baseline numbers are from
+`docs/design/dst-redesign-baseline.md`.
+
+| Metric | Baseline (P0) | Target | Result (P8) |
+|---|---|---|---|
+| Hand-written Fold / Tag / marker methods | 120 / 112 / 27 | 0 outside generated files | 44 / 28 / 12, see note 1; 87 Folds are generated |
+| Timer generation fields and checks | 39 | 0 | 0 |
+| Request-ID tables in product machines | 71 lines | 0 where Perform/Call/Ask apply | 0 |
+| Route functions / switch cases that only forward effects | 18 | 0 | 0 (every route switch is deleted) |
+| kv example code lines (non-comment) | 243 (P0 count) | about 120 | 165, see note 2 |
+| Product output cases duplicating effects | 12 (broker 5, controlplane 7) | 0 | 0 |
+| Determinism gate coverage | 10 listed packages | every core/sim package | every package under dst/core and dst/sim by default (opt-out list: syncclock, realclock), plus verify/check and verify/check/faulty |
+
+Notes:
+
+1. The remaining hand-written folds: 24 are dst's own runtime types (refs, facts, effects,
+   phases), which define the trace format itself; 27 are controlplane/contract operations and
+   responses (issues.txt DST-6); the rest are deliberate `//dst:fold manual` cases (broker
+   ObjectCall/ObjectDone keep a wrapper layout; rebalance.Reply has a non-payload Body) and a few
+   domain event types outside the migration. Tags and markers left are the same types.
+2. kv grew from the plan's sketch (about 120) because it is a real, tested program: a client
+   workload that checks every read, a store service with a planted-bug switch, and four files of
+   doc comments that teach the API. Its boilerplate (markers, Tag, Fold) is all generated.

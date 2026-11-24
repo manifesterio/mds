@@ -15,7 +15,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/dst/explore/campaign"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -50,28 +50,28 @@ func config() campaign.Config {
 func registry() *campaign.Registry {
 	var reg campaign.Registry
 	add(&reg, "kafka", "the broker under a Kafka workload",
-		func(seed uint64, o campaign.RunOptions) kernel.Result {
+		func(seed uint64, o campaign.RunOptions) sim.Result {
 			return kafka.Run(kafka.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
 		})
 	return &reg
 }
 
 // add registers a scenario that runs one seed with run.
-func add(reg *campaign.Registry, name, detail string, run func(uint64, campaign.RunOptions) kernel.Result) {
+func add(reg *campaign.Registry, name, detail string, run func(uint64, campaign.RunOptions) sim.Result) {
 	reg.Add(campaign.Scenario{
 		Name:   name,
 		Detail: detail,
 		Run: func(seed uint64, o campaign.RunOptions) campaign.Result {
-			return fromKernel(name, run(seed, o))
+			return fromSim(name, run(seed, o))
 		},
 	})
 }
 
-// fromKernel turns the result of one seed into a campaign result. It adds the
+// fromSim turns the result of one seed into a campaign result. It adds the
 // replay command and the two counters (crashes and exits) that the old tool
 // printed for each seed.
-func fromKernel(scenario string, r kernel.Result) campaign.Result {
-	out := campaign.FromKernel(r, fmt.Sprintf("go run ./cmd/mdssimulator -scenario %s -seed %d", scenario, r.Seed))
+func fromSim(scenario string, r sim.Result) campaign.Result {
+	out := campaign.FromSim(r, fmt.Sprintf("go run ./cmd/mdssimulator -scenario %s -seed %d", scenario, r.Seed))
 	out.Counters["crashes"] = uint64(r.Crashes)
 	out.Counters["exits"] = uint64(r.Exits)
 	return out

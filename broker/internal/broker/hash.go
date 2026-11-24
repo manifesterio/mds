@@ -59,9 +59,7 @@ func (b *Broker) StateHash() uint64 {
 func (b *Broker) hashScalars(h *stateHasher) {
 	h.u64(uint64(b.config.InjectedBug))
 	h.bool(b.started)
-	h.u64(uint64(b.nextRequestNumber))
 	h.u64(b.nextID)
-	h.u64(uint64(b.timerGen))
 	h.bool(b.stopping)
 	h.bool(b.exited)
 	h.u64(uint64(b.bufBytes))
@@ -78,7 +76,6 @@ func (h *stateHasher) topics(topics []contract.TopicInfo) {
 }
 
 func (h *stateHasher) openSeg(o openSegment) {
-	h.u64(uint64(o.gen))
 	h.u64(uint64(o.since))
 	h.u64(uint64(o.bytes))
 	h.u64(uint64(len(o.parts)))
@@ -112,8 +109,6 @@ func (h *stateHasher) hashSegments(segs []*segment) {
 	for _, s := range segs {
 		h.u64(s.id)
 		h.u64(uint64(s.state))
-		h.u64(uint64(s.request))
-		h.u64(uint64(s.gen))
 		h.u64(uint64(s.attempts))
 		h.str(s.key)
 		h.u64(uint64(len(s.data)))
@@ -128,8 +123,6 @@ func (h *stateHasher) ops(ops []*operation) {
 		h.u64(uint64(o.kind))
 		h.u64(uint64(o.state))
 		h.u64(uint64(o.retry))
-		h.u64(uint64(o.requestID))
-		h.u64(uint64(o.gen))
 		h.u64(uint64(o.attempts))
 		h.u64(uint64(o.s.conn.id))
 		h.u64(uint64(uint32(o.s.h.CorrelationID)))

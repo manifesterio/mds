@@ -12,8 +12,8 @@
 // the code and never shares logic, and it never imports the package it is the
 // spec of.
 //
-// The broker kernel speaks core.IOCall and core.IOResult. The control plane
-// spec speaks contract.Operation and contract.Done. The package specbridge
+// The broker performs core.ControlPlaneCall and gets core.ControlPlaneDone. The
+// control plane spec speaks contract.Operation and contract.Done. The package specbridge
 // converts between the two and adds no rule. The package specsystem puts the
 // specs behind the production seams, so a production Executor can run against
 // them. The package conformance compares a subject with a spec, step by step, with

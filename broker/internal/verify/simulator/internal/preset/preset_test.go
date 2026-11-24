@@ -3,10 +3,10 @@ package preset
 import (
 	"testing"
 
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/dst/core/rng"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // stubAssert keeps the names of the Sometimes properties that held.
@@ -23,15 +23,15 @@ func (a *stubAssert) Reachable(assert.Reachable)                     {}
 func (a *stubAssert) Unreachable(assert.Unreachable, ...assert.Pair) {}
 
 type stubView struct {
-	tl *kernel.Timeline
-	as machine.Assertions
+	tl *sim.Timeline
+	as actor.Assertions
 }
 
-func (v stubView) Step() uint64               { return 0 }
-func (v stubView) Now() kernel.Time           { return 0 }
-func (v stubView) Phase() kernel.Phase        { return kernel.PhaseFaults }
-func (v stubView) Timeline() *kernel.Timeline { return v.tl }
-func (v stubView) Assert() machine.Assertions { return v.as }
+func (v stubView) Step() uint64             { return 0 }
+func (v stubView) Now() sim.Time            { return 0 }
+func (v stubView) Phase() sim.Phase         { return sim.PhaseFaults }
+func (v stubView) Timeline() *sim.Timeline  { return v.tl }
+func (v stubView) Assert() actor.Assertions { return v.as }
 
 func TestNewAndPhases(t *testing.T) {
 	t.Parallel()
@@ -39,10 +39,10 @@ func TestNewAndPhases(t *testing.T) {
 	if p.Phases != Phases() {
 		t.Fatalf("New phases = %+v, want %+v", p.Phases, Phases())
 	}
-	if p.QuiesceEvery != machine.Second {
+	if p.QuiesceEvery != actor.Second {
 		t.Fatalf("New defaults QuiesceEvery=%d", p.QuiesceEvery)
 	}
-	if ProgressGraceTime != 6*machine.Second {
+	if ProgressGraceTime != 6*actor.Second {
 		t.Fatalf("ProgressGraceTime = %d", ProgressGraceTime)
 	}
 }
@@ -51,27 +51,23 @@ func TestSwarm(t *testing.T) {
 	t.Parallel()
 	p := New()
 	s := p.Settings
-	called := false
-	Swarm(rng.New(1), &s, func() { called = true })
-	if !called {
-		t.Fatal("afterKnobs not called")
-	}
-	Swarm(rng.New(2), &s, nil)
+	Swarm(rng.New(1), &s)
+	Swarm(rng.New(2), &s)
 }
 
 func TestPhaseStart(t *testing.T) {
 	t.Parallel()
-	tl := kernel.NewTimeline()
-	tl.Append(machine.NodeInstance{}, 10, machine.Fact{
+	tl := sim.NewTimeline()
+	tl.Append(actor.Incarnation{}, 10, actor.Fact{
 		Name:   "sim_phase",
-		Fields: []machine.Field{{Key: "phase", Value: machine.Uint64Value(uint64(kernel.PhaseHeal))}},
+		Fields: []actor.Field{{Key: "phase", Value: actor.Uint64Value(uint64(sim.PhaseHeal))}},
 	})
 	v := stubView{tl: tl, as: &stubAssert{}}
-	at, ok := PhaseStart(v, kernel.PhaseHeal)
+	at, ok := PhaseStart(v, sim.PhaseHeal)
 	if !ok || at != 10 {
 		t.Fatalf("PhaseStart Heal = %d, %v", at, ok)
 	}
-	if _, ok := PhaseStart(v, kernel.PhaseDrain); ok {
+	if _, ok := PhaseStart(v, sim.PhaseDrain); ok {
 		t.Fatal("PhaseStart Drain unexpectedly found")
 	}
 }
@@ -82,14 +78,14 @@ func TestFaultCoverage(t *testing.T) {
 	if rule.Name() != "FaultCoverage" {
 		t.Fatalf("Name = %q", rule.Name())
 	}
-	rule.Observe(stubView{tl: kernel.NewTimeline(), as: &stubAssert{}})
+	rule.Observe(stubView{tl: sim.NewTimeline(), as: &stubAssert{}})
 
-	tl := kernel.NewTimeline()
-	tl.Append(machine.NodeInstance{}, 1, machine.Fact{
+	tl := sim.NewTimeline()
+	tl.Append(actor.Incarnation{}, 1, actor.Fact{
 		Name:   "sim_crashed",
-		Fields: []machine.Field{{Key: "cause", Value: machine.StringValue("attrition")}},
+		Fields: []actor.Field{{Key: "cause", Value: actor.StringValue("attrition")}},
 	})
-	tl.Append(machine.NodeInstance{}, 2, machine.Fact{Name: "sim_exited"})
+	tl.Append(actor.Incarnation{}, 2, actor.Fact{Name: "sim_exited"})
 	as := &stubAssert{}
 	rule.AtEnd(stubView{tl: tl, as: as})
 	if len(as.sometimes) != 2 {

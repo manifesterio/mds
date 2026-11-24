@@ -1,10 +1,11 @@
 package core
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/trace"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
@@ -13,7 +14,7 @@ import (
 // value, with every field set. The sample lists are the ones of the old tag tests.
 
 var (
-	sampleInstance = machine.NodeInstance{Node: "n1", Inc: machine.BootNumber{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+	sampleInstance = actor.Incarnation{Name: "n1", Boot: actor.ID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 	sampleRef      = SegmentRef{Key: "seg/1", Off: 10, Len: -1}
 	sampleTP       = TopicPartition{Topic: "t", Partition: -2}
 	sampleRange    = contract.BatchRange{TopicPartition: sampleTP, Base: 5, Count: 3, Loc: sampleRef}
@@ -28,39 +29,44 @@ var (
 )
 
 // sampleEvents has one value of every EventData case, with every field set.
+// ObjectDone has one value per object store result.
 func sampleEvents() map[string]EventData {
+	putDone := ObjectDone{Result: objectstore.PutDone{Key: "k", Err: ErrTimeout, Outcome: MaybeApplied}}
+	cpDone := ControlPlaneDone{Resp: contract.GroupSyncResp{Assignment: []byte("z")}, Err: OK, Outcome: Applied}
 	return map[string]EventData{
 		"NodeStarted": NodeStarted{Self: sampleInstance}, "StopRequest": StopRequest{Deadline: -5},
 		"ConnOpened": ConnOpened{Conn: 3, Peer: "p"}, "BytesReceived": BytesReceived{Conn: 3, Data: []byte("abc")},
-		"ConnClosed": ConnClosed{Conn: 4, Abort: true}, "SendDone": SendDone{Req: 5, Conn: 6, Err: ErrIO},
-		"ConnectDone": ConnectDone{Req: 5, Conn: 6, Err: ErrConnClosed}, "TimerFired": TimerFired{ID: 7, Gen: 8},
-		"ObjectPutDone":    ObjectDone{Result: objectstore.PutDone{Req: 9, Key: "k", Err: ErrTimeout, Outcome: MaybeApplied}},
-		"ObjectGetDone":    ObjectDone{Result: objectstore.GetDone{Req: 9, Data: []byte("d"), Err: ErrNotFound}},
-		"ObjectDeleteDone": ObjectDone{Result: objectstore.DeleteDone{Req: 9, Err: ErrIO, Outcome: Applied}},
-		"ObjectListDone":   ObjectDone{Result: objectstore.ListDone{Req: 9, Keys: []string{"a", "b"}, Err: ErrUnavailable}},
-		"ControlPlaneDone": ControlPlaneDone{Req: 9, Resp: contract.GroupSyncResp{Assignment: []byte("z")}, Err: OK, Outcome: Applied},
-		"ControlPlaneDeliver": ControlPlaneDeliver{
-			From: sampleInstance, Req: 11, Op: contract.CreateTopic{Name: "t", Partitions: 3, FailIfExists: true},
-		},
+		"ConnClosed":        ConnClosed{Conn: 4, Abort: true},
+		"ConnectDone":       ConnectDone{Conn: 6, Err: ErrConnClosed},
+		"ObjectPutDone":     putDone,
+		"ObjectGetDone":     ObjectDone{Result: objectstore.GetDone{Data: []byte("d"), Err: ErrNotFound}},
+		"ObjectDeleteDone":  ObjectDone{Result: objectstore.DeleteDone{Err: ErrIO, Outcome: Applied}},
+		"ObjectListDone":    ObjectDone{Result: objectstore.ListDone{Keys: []string{"a", "b"}, Err: ErrUnavailable}},
+		"ControlPlaneDone":  cpDone,
+		"SegmentPutDone":    SegmentPutDone{Seg: 17, Done: putDone},
+		"SegmentCommitDone": SegmentCommitDone{Seg: 17, Done: cpDone},
+		"OpReadDone":        OpReadDone{Op: 18, Done: putDone},
+		"OpCallDone":        OpCallDone{Op: 18, Done: cpDone},
+		"FlushDue":          FlushDue{}, "SegmentRetryDue": SegmentRetryDue{Seg: 19}, "OpDue": OpDue{Op: 20},
+		"ClientDue":   ClientDue{Key: "wake"},
 		"LiveBrokers": LiveBrokers{Brokers: []BrokerAddr{{NodeID: 1, Host: "h", Port: 9092}, {NodeID: -1}}},
 	}
 }
 
-// sampleActions has one value of every Action case, with every field set.
-func sampleActions() map[string]Action {
-	return map[string]Action{
-		"SetTimer": SetTimer{ID: 1, Gen: 2, After: 3 * machine.Second}, "CancelTimer": CancelTimer{ID: 1},
-		"Send": Send{Req: 1, Conn: 2, Data: []byte("s")}, "CloseConn": CloseConn{Conn: 2, Abort: true},
+// sampleIO has one value of every IO case, with every field set. ObjectCall
+// has one value per object store call.
+func sampleIO() map[string]IO {
+	return map[string]IO{
+		"Send": Send{Conn: 2, Data: []byte("s")}, "CloseConn": CloseConn{Conn: 2, Abort: true},
 		"PauseReads": PauseReads{Conn: 2}, "ResumeReads": ResumeReads{Conn: 3},
-		"Connect":   Connect{Req: 1, Addr: "a:1"},
-		"ObjectPut": ObjectCall{Call: objectstore.Put{Req: 1, Key: "k", Data: []byte("v")}}, "ObjectGet": ObjectCall{Call: objectstore.Get{Req: 1, Ref: sampleRef}},
-		"ObjectDelete": ObjectCall{Call: objectstore.Delete{Req: 1, Key: "k"}}, "ObjectList": ObjectCall{Call: objectstore.List{Req: 1, Prefix: "p/"}},
-		"ControlPlaneCall": ControlPlaneCall{Req: 1, Op: contract.FindSegments{TopicPartition: sampleTP, From: 4, MaxBytes: -3}, Timeout: machine.Second},
-		"ControlPlaneReply": ControlPlaneReply{
-			To: sampleInstance, Done: ControlPlaneDone{Req: 2, Resp: contract.ListGroupsResp{}, Err: OK, Outcome: Applied},
+		"Connect":      Connect{Addr: "a:1"},
+		"ObjectPut":    ObjectCall{Call: objectstore.Put{Key: "k", Data: []byte("v")}},
+		"ObjectGet":    ObjectCall{Call: objectstore.Get{Ref: sampleRef}},
+		"ObjectDelete": ObjectCall{Call: objectstore.Delete{Key: "k"}},
+		"ObjectList":   ObjectCall{Call: objectstore.List{Prefix: "p/"}},
+		"ControlPlaneCall": ControlPlaneCall{
+			Op: contract.FindSegments{TopicPartition: sampleTP, From: 4, MaxBytes: -3}, Timeout: actor.Second,
 		},
-		"RecordFact": RecordFact{Fact: machine.Fact{Name: "f"}}, "StopForRestart": StopForRestart{Cause: "why"},
-		"ShutdownDone": ShutdownDone{},
 	}
 }
 
@@ -113,12 +119,12 @@ func sampleResponses() map[string]contract.Response {
 	}
 }
 
-// sampleFieldValues has one value of every field value case. They live in dst/core/machine and
+// sampleFieldValues has one value of every field value case. They live in dst/core/actor and
 // have no Tag method: Fold writes the tag.
-func sampleFieldValues() map[string]machine.FieldValue {
-	return map[string]machine.FieldValue{
-		"Int64Value": machine.Int64Value(-4), "Uint64Value": machine.Uint64Value(4), "StringValue": machine.StringValue("s"),
-		"Bool": machine.Bool(true), "Bytes": machine.Bytes("by"),
+func sampleFieldValues() map[string]actor.FieldValue {
+	return map[string]actor.FieldValue{
+		"Int64Value": actor.Int64Value(-4), "Uint64Value": actor.Uint64Value(4), "StringValue": actor.StringValue("s"),
+		"Bool": actor.Bool(true), "Bytes": actor.Bytes("by"),
 	}
 }
 
@@ -141,31 +147,36 @@ func checkFold(t *testing.T, name string, f func(h *trace.Hash)) {
 	}
 }
 
-// Every tag of an event, action, operation or response is in its range, and no two values
-// share a tag. A value without a tag does not compile.
+// tagged is a message with a frozen tag.
+type tagged interface{ Tag() uint64 }
+
+// Every tag of an event, IO case, operation or response is in its range, and no two types
+// share a tag. Values of one type (the object store wrappers) share its tag. A value
+// without a tag does not compile.
 func TestTagsAreInRangeAndUnique(t *testing.T) {
 	seen := map[uint64]string{}
-	check := func(kind, name string, tag, lo, hi uint64) {
+	check := func(kind string, v tagged, tag, lo, hi uint64) {
 		t.Helper()
+		name := fmt.Sprintf("%T", v)
 		if tag < lo || tag > hi {
 			t.Errorf("%s %s: tag %d is outside %d..%d", kind, name, tag, lo, hi)
 		}
-		if prev, dup := seen[tag]; dup {
+		if prev, dup := seen[tag]; dup && prev != kind+" "+name {
 			t.Errorf("%s %s and %s have the same tag %d", kind, name, prev, tag)
 		}
 		seen[tag] = kind + " " + name
 	}
-	for n, v := range sampleEvents() {
-		check("event", n, v.Tag(), 1, 99)
+	for _, v := range sampleEvents() {
+		check("event", v.(tagged), v.(tagged).Tag(), 1, 99)
 	}
-	for n, v := range sampleActions() {
-		check("action", n, v.Tag(), 101, 199)
+	for _, v := range sampleIO() {
+		check("io", v.(tagged), v.(tagged).Tag(), 101, 199)
 	}
-	for n, v := range sampleOperations() {
-		check("operation", n, v.Tag(), 201, 299)
+	for _, v := range sampleOperations() {
+		check("operation", v, v.Tag(), 201, 299)
 	}
-	for n, v := range sampleResponses() {
-		check("response", n, v.Tag(), 301, 399)
+	for _, v := range sampleResponses() {
+		check("response", v, v.Tag(), 301, 399)
 	}
 }
 
@@ -184,8 +195,8 @@ func TestFoldWritesDistinctDeterministicBytes(t *testing.T) {
 	for n, v := range sampleEvents() {
 		add("event "+n, func(h *trace.Hash) { v.Fold(h) })
 	}
-	for n, v := range sampleActions() {
-		add("action "+n, func(h *trace.Hash) { v.Fold(h) })
+	for n, v := range sampleIO() {
+		add("io "+n, func(h *trace.Hash) { v.Fold(h) })
 	}
 	for n, v := range sampleOperations() {
 		add("operation "+n, func(h *trace.Hash) { v.Fold(h) })
@@ -199,17 +210,11 @@ func TestFoldWritesDistinctDeterministicBytes(t *testing.T) {
 	// A value with a nil operation or response shares the tag of its type, so these are only
 	// folded here, not in the tag check above.
 	add("event ControlPlaneDone nil response", func(h *trace.Hash) {
-		ControlPlaneDone{Req: 3, Err: ErrTimeout, Outcome: MaybeApplied}.Fold(h)
+		ControlPlaneDone{Err: ErrTimeout, Outcome: MaybeApplied}.Fold(h)
 	})
-	add("event ControlPlaneDeliver nil operation", func(h *trace.Hash) {
-		ControlPlaneDeliver{From: sampleInstance, Req: 3}.Fold(h)
+	add("io ControlPlaneCall nil operation", func(h *trace.Hash) {
+		ControlPlaneCall{Timeout: 4}.Fold(h)
 	})
-	add("action ControlPlaneCall nil operation", func(h *trace.Hash) {
-		ControlPlaneCall{Req: 4}.Fold(h)
-	})
-	add("action ControlPlaneReply nil response", func(h *trace.Hash) {
-		ControlPlaneReply{To: sampleInstance, Done: ControlPlaneDone{Req: 4, Err: ErrIO}}.Fold(h)
-	})
-	fact := machine.Fact{Name: "fact", Fields: []machine.Field{{Key: "a", Value: machine.Int64Value(-1)}}}
+	fact := actor.Fact{Name: "fact", Fields: []actor.Field{{Key: "a", Value: actor.Int64Value(-1)}}}
 	add("fact", func(h *trace.Hash) { fact.Fold(h) })
 }

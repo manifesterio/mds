@@ -1,6 +1,6 @@
 # Determinism gates
 
-Run the import and construct checks that keep the sans-I/O core replayable. Package layout and how to write a machine live in `dst/README.md`. Example: `dst/examples/kv`.
+Run the import and construct checks that keep the sans-I/O core replayable. Package layout and how to write an actor live in `dst/README.md`. Example: `dst/examples/kv`.
 
 ## Run the gates
 
@@ -78,12 +78,12 @@ See `dst/README.md` for more campaign flags and env vars.
 
 ## What the gate enforces
 
-Product logic under test is a `machine.Machine`: one input in, outputs out, no real network, disk, wall clock, or goroutines. The `dst` kernel owns the seeded RNG, virtual clock, faults, assertions, and trace hash. Same seed, same run.
+Product logic under test is an `actor.Actor`: one message in, effects recorded on an outbox, no real network, disk, wall clock, or goroutines. The `dst` simulator owns the seeded RNG, virtual clock, faults, assertions, and trace hash. Same seed, same run.
 
 Rules the checker and reviews enforce:
 
 - One RNG per run. No `math/rand` or wall-time seeds inside the subject.
-- Virtual time only through the scheduler heap. No `time.Now` in core machines.
+- Virtual time only through the simulator. No `time.Now` in actors.
 - Issue-time faults latched per site so drops and crashes replay stably.
 - No map-range control flow in deterministic packages. Go randomizes map order.
 - No goroutines or channels in gated packages. `runtime/live` and campaign runners stay outside the gate on purpose.

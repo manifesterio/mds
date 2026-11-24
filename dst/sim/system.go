@@ -124,8 +124,7 @@ type Result struct {
 // OK reports a run without failures.
 func (r Result) OK() bool { return len(r.Failures) == 0 }
 
-// Counter indexes. The names and their order are the ones of the old broker
-// kernel (without "freezes": freeze is deleted).
+// Counter indexes. Their names and order are part of the Result.
 const (
 	countNodeSteps = iota
 	countServiceSteps

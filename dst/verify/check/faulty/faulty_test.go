@@ -4,22 +4,22 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/dst/core/trace"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 // The tests use a tiny spec: a map from a name to a number. A "set" op stores a
-// number and a "get" op reads it. The caller node issues the requests and keeps
+// number and a "get" op reads it. A caller actor issues the requests and keeps
 // every answer it gets. Nothing here is specific to a product.
 
-const ms = machine.Duration(1_000_000)
+const ms = actor.Millisecond
 
 // request is one call to the service.
 type request struct {
-	id    machine.RequestID
+	id    uint64
 	key   string
 	set   bool // true: store val under key. false: read key.
 	val   int64
@@ -29,7 +29,7 @@ type request struct {
 
 func (r request) Fold(h *trace.Hash) {
 	h.Uint64(1)
-	h.Uint64(uint64(r.id))
+	h.Uint64(r.id)
 	h.String(r.key)
 	h.Bool(r.set)
 	h.Int64(r.val)
@@ -37,15 +37,23 @@ func (r request) Fold(h *trace.Hash) {
 	h.Bool(r.quiet)
 }
 
-// answer is what the caller gets back.
+// answer is what the caller gets back. It keeps the id of the request it answers.
 type answer struct {
-	id      machine.RequestID
+	id      uint64
 	val     int64
 	changed bool // the spec changed its state
 	failure faulty.Failure
 }
 
-// input is the input of the caller node: a command to issue a request, or an
+func (a answer) Fold(h *trace.Hash) {
+	h.Uint64(3)
+	h.Uint64(a.id)
+	h.Int64(a.val)
+	h.Bool(a.changed)
+	h.Uint64(uint64(a.failure))
+}
+
+// input is the input of the caller actor: a command to issue a request, or an
 // answer from the service.
 type input struct {
 	issue bool
@@ -57,10 +65,7 @@ func (i input) Fold(h *trace.Hash) {
 	h.Uint64(2)
 	h.Bool(i.issue)
 	i.req.Fold(h)
-	h.Uint64(uint64(i.ans.id))
-	h.Int64(i.ans.val)
-	h.Bool(i.ans.changed)
-	h.Uint64(uint64(i.ans.failure))
+	i.ans.Fold(h)
 }
 
 // spec is the fault-free map.
@@ -109,18 +114,17 @@ type extras struct {
 	limit       bool
 }
 
-func shape(e extras) faulty.Shape[request, input, request, answer] {
-	s := faulty.Shape[request, input, request, answer]{
-		Name:      "testservice",
-		Prefix:    "test",
-		Asserts:   testAsserts,
-		Op:        func(r request) request { return r },
-		RequestID: func(r request) machine.RequestID { return r.id },
-		Mutating:  func(r request) bool { return r.set },
-		Changed:   func(a answer) bool { return a.changed },
-		Reply:     func(_ request, a answer) input { return input{ans: a} },
-		Fail: func(r request, f faulty.Failure) input {
-			return input{ans: answer{id: r.id, failure: f}}
+func shape(e extras) faulty.Shape[request, answer, request, answer] {
+	s := faulty.Shape[request, answer, request, answer]{
+		Name:     "testservice",
+		Prefix:   "test",
+		Asserts:  testAsserts,
+		Op:       func(r request) request { return r },
+		Mutating: func(r request) bool { return r.set },
+		Changed:  func(a answer) bool { return a.changed },
+		Reply:    func(_ request, a answer) answer { return a },
+		Fail: func(r request, f faulty.Failure) answer {
+			return answer{id: r.id, failure: f}
 		},
 	}
 	if e.limit {
@@ -149,46 +153,47 @@ func shape(e extras) faulty.Shape[request, input, request, answer] {
 
 // delivery is one answer that reached the caller.
 type delivery struct {
-	at  kernel.Time
+	at  sim.Time
 	ans answer
 }
 
-// caller is the machine of the caller node.
+// caller is the actor that issues the requests and keeps the answers.
 type caller struct{ t *testWorld }
 
-func (c caller) Step(_ machine.Now, in input) []request {
+func (c caller) Receive(_ actor.Now, in input, o *actor.Outbox[input, actor.NoIO]) {
 	if in.issue {
-		return []request{in.req}
+		actor.Call(o, c.t.call.Request(in.req), func(a answer) input { return input{ans: a} })
+		return
 	}
-	c.t.got = append(c.t.got, delivery{at: c.t.w.Now(), ans: in.ans})
-	return nil
+	c.t.got = append(c.t.got, delivery{at: c.t.sys.Now(), ans: in.ans})
 }
+
 func (caller) StateHash() uint64 { return 0 }
 
-// testWorld is a kernel world with one caller node "a" and the service.
+// testWorld is a System with one caller actor "a" and the service.
 type testWorld struct {
 	tb   testing.TB
-	w    *kernel.World
-	a    kernel.Addr[input]
+	sys  *sim.System
 	sp   *spec
-	svc  *faulty.Service[request, input, request, answer]
+	svc  *faulty.Service[request, answer, request, answer]
+	call actor.ServiceRef[request, answer]
+	who  actor.EntityRef[input]
 	got  []delivery
-	next machine.RequestID
+	next uint64
 }
 
 func newWorld(tb testing.TB, seed uint64, f faulty.Faults, e extras) *testWorld {
 	tb.Helper()
-	t := &testWorld{tb: tb, w: kernel.New(kernel.Config{Seed: seed}), sp: &spec{m: map[string]int64{}}}
-	t.svc = faulty.New(t.w, faulty.Spec[request, answer](t.sp), f, shape(e))
-	addr := kernel.AddService[request, input](t.w, t.svc)
-	t.a = kernel.Spawn(t.w, kernel.NodeSpec[input, request]{
-		Name:  "a",
-		New:   func(machine.Env, machine.NodeInstance) machine.Machine[input, request] { return caller{t} },
-		Route: func(r *kernel.Router[input], out request) { kernel.Call(r, addr, out) },
+	t := &testWorld{tb: tb, sys: sim.NewSystem(sim.Config{Seed: seed}), sp: &spec{m: map[string]int64{}}}
+	t.svc = faulty.New(t.sp, f, shape(e))
+	t.call = sim.AddService[request, answer](t.sys, "testservice", t.svc)
+	t.who = sim.Spawn(t.sys, actor.Props[input, actor.NoIO]{
+		Name: "a",
+		New:  func(actor.Env) actor.Actor[input, actor.NoIO] { return caller{t} },
 	})
-	t.w.Start()
+	t.sys.Start()
 	tb.Cleanup(func() {
-		for _, f := range t.w.Finish().Failures {
+		for _, f := range t.sys.Finish().Failures {
 			tb.Errorf("run failure: %s: %s", f.Property, f.Detail)
 		}
 	})
@@ -197,44 +202,44 @@ func newWorld(tb testing.TB, seed uint64, f faulty.Faults, e extras) *testWorld 
 
 // base is a service with timing and no faults.
 func base() faulty.Faults {
-	ts := kernel.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
 // do makes the caller issue r after a delay. It gives r the next id if it has none.
-func (t *testWorld) do(after machine.Duration, r request) {
+func (t *testWorld) do(after actor.Duration, r request) {
 	if r.id == 0 {
 		t.next++
 		r.id = t.next
 	}
-	kernel.Inject(t.w, t.a, after, input{issue: true, req: r})
+	sim.Tell(t.sys, t.who, after, input{issue: true, req: r})
 }
 
-func (t *testWorld) set(id machine.RequestID, key string, val int64) {
+func (t *testWorld) set(id uint64, key string, val int64) {
 	t.do(0, request{id: id, key: key, set: true, val: val})
 }
 
-func (t *testWorld) get(id machine.RequestID, key string) { t.do(0, request{id: id, key: key}) }
+func (t *testWorld) get(id uint64, key string) { t.do(0, request{id: id, key: key}) }
 
-func (t *testWorld) run() { t.w.RunUntil(nil) }
+func (t *testWorld) run() { t.sys.RunUntil(nil) }
 
-func (t *testWorld) runTo(at kernel.Time) {
+func (t *testWorld) runTo(at sim.Time) {
 	reached := false
-	t.w.At(at, kernel.NoLane, func() { reached = true })
-	t.w.RunUntil(func() bool { return reached })
+	t.sys.At(at, sim.NoLane, func() { reached = true })
+	t.sys.RunUntil(func() bool { return reached })
 }
 
 // step takes exactly one queue entry.
 func (t *testWorld) step() bool {
-	start := t.w.Steps()
-	t.w.RunUntil(func() bool { return t.w.Steps() > start })
-	return t.w.Steps() > start
+	start := t.sys.Steps()
+	t.sys.RunUntil(func() bool { return t.sys.Steps() > start })
+	return t.sys.Steps() > start
 }
 
-func (t *testWorld) recover() { t.w.SetPhase(kernel.PhaseHeal) }
+func (t *testWorld) recover() { t.sys.SetPhase(sim.PhaseHeal) }
 
 // find returns the answer to request id (false if none came).
-func (t *testWorld) find(id machine.RequestID) (delivery, bool) {
+func (t *testWorld) find(id uint64) (delivery, bool) {
 	for _, d := range t.got {
 		if d.ans.id == id {
 			return d, true
@@ -246,8 +251,8 @@ func (t *testWorld) find(id machine.RequestID) (delivery, bool) {
 // faults lists the kinds of the injected faults, in order.
 func (t *testWorld) faults() []string {
 	var kinds []string
-	for _, f := range t.w.Timeline().Snapshot("sim_fault") {
-		if k, ok := f.Fact.Field("kind").(machine.StringValue); ok {
+	for _, f := range t.sys.Timeline().Snapshot("sim_fault") {
+		if k, ok := f.Fact.Field("kind").(actor.StringValue); ok {
 			kinds = append(kinds, string(k))
 		}
 	}
@@ -256,7 +261,7 @@ func (t *testWorld) faults() []string {
 
 // hit reports whether the assertion passed at least once.
 func (t *testWorld) hit(name string) bool {
-	c, ok := t.w.Assert().Coverage()[name]
+	c, ok := t.sys.Assert().Coverage()[name]
 	return ok && c.Passes > 0
 }
 
@@ -303,8 +308,8 @@ func TestSlowReply(t *testing.T) {
 	w.set(1, "k", 1)
 	w.run()
 	d, ok := w.find(1)
-	lo := kernel.Time(f.ApplyLatency.SlowMin + f.RespondLatency.SlowMin)
-	hi := kernel.Time(f.ApplyLatency.SlowMax + f.RespondLatency.SlowMax)
+	lo := sim.Time(f.ApplyLatency.SlowMin + f.RespondLatency.SlowMin)
+	hi := sim.Time(f.ApplyLatency.SlowMax + f.RespondLatency.SlowMax)
 	if !ok || d.at < lo || d.at > hi {
 		t.Fatal("answer time", d.at, "want in", lo, hi)
 	}
@@ -312,7 +317,7 @@ func TestSlowReply(t *testing.T) {
 	g := newWorld(t, 1, base(), extras{})
 	g.set(1, "k", 1)
 	g.run()
-	if d, _ := g.find(1); d.at > kernel.Time(base().ApplyLatency.FastMax+base().RespondLatency.FastMax) {
+	if d, _ := g.find(1); d.at > sim.Time(base().ApplyLatency.FastMax+base().RespondLatency.FastMax) {
 		t.Fatal("fast answer came late:", d.at)
 	}
 }
@@ -347,7 +352,7 @@ func TestTimeoutAppliesOrNot(t *testing.T) {
 		w.set(1, "k", 7)
 		w.run()
 		d, ok := w.find(1)
-		if !ok || d.ans.failure != faulty.TimedOut || len(w.got) != 1 || d.at != kernel.Time(f.CallerTimeout) {
+		if !ok || d.ans.failure != faulty.TimedOut || len(w.got) != 1 || d.at != sim.Time(f.CallerTimeout) {
 			t.Fatal(w.got)
 		}
 		if _, has := w.value("k"); has {
@@ -373,7 +378,7 @@ func TestLostReplyStillApplies(t *testing.T) {
 	w.set(1, "k", 7)
 	w.run()
 	d, ok := w.find(1)
-	if !ok || d.ans.failure != faulty.TimedOut || d.at != kernel.Time(f.CallerTimeout) {
+	if !ok || d.ans.failure != faulty.TimedOut || d.at != sim.Time(f.CallerTimeout) {
 		t.Fatal(w.got)
 	}
 	if v, has := w.value("k"); !has || v != 7 {
@@ -419,10 +424,10 @@ func TestRetryAfterLostReply(t *testing.T) {
 // Outage window: while it lasts, every call is refused. Only one window starts.
 func TestOutageWindow(t *testing.T) {
 	f := base()
-	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{100 * ms, 200 * ms}}
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]actor.Duration{100 * ms, 200 * ms}}
 	w := newWorld(t, 1, f, extras{})
 	w.set(1, "k", 1)
-	w.runTo(50 * kernel.Time(ms)) // still inside the window
+	w.runTo(50 * sim.Time(ms)) // still inside the window
 	w.set(2, "k", 1)
 	w.run()
 	for _, d := range w.got {
@@ -441,7 +446,7 @@ func TestOutageWindow(t *testing.T) {
 		t.Fatal("outage not recorded")
 	}
 	w.recover()
-	w.runTo(10_000 * kernel.Time(ms))
+	w.runTo(10_000 * sim.Time(ms))
 	w.set(3, "k", 1)
 	w.run()
 	if d, _ := w.find(3); d.ans.failure != 0 {
@@ -503,10 +508,10 @@ func TestLandsAfterCallerCrash(t *testing.T) {
 	w := newWorld(t, 1, base(), extras{})
 	w.set(1, "k", 7)
 	w.step() // the caller issues the call
-	w.w.Crash(w.a, "test")
+	w.sys.Crash(w.who, "test")
 	w.run()
 	if len(w.got) != 0 {
-		t.Fatal("delivered to a dead node")
+		t.Fatal("delivered to a dead actor")
 	}
 	if v, ok := w.value("k"); !ok || v != 7 {
 		t.Fatal("the call did not land")
@@ -524,8 +529,8 @@ func TestCrashBetweenLandingAndReply(t *testing.T) {
 			t.Fatal("the call never landed")
 		}
 	}
-	w.w.Crash(w.a, "test")
-	w.w.Boot(w.a) // a new incarnation must not get the answer of the old one
+	w.sys.Crash(w.who, "test")
+	w.sys.Boot(w.who) // a new incarnation must not get the answer of the old one
 	w.run()
 	if len(w.got) != 0 {
 		t.Fatal("delivered to another incarnation")
@@ -540,7 +545,7 @@ func TestNoCorruptionForADeadCaller(t *testing.T) {
 	w.run()
 	w.get(2, "k")
 	w.step() // the caller issues the read
-	w.w.Crash(w.a, "test")
+	w.sys.Crash(w.who, "test")
 	w.run()
 	if len(w.got) != 1 {
 		t.Fatal("the dead caller got an answer:", w.got)
@@ -554,7 +559,7 @@ func TestNoCorruptionForADeadCaller(t *testing.T) {
 func TestRecoveryStopsFaults(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse = 1, 1, 1
-	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]actor.Duration{ms, 2 * ms}}
 	w := newWorld(t, 1, f, extras{corruptProb: 1})
 	w.set(1, "k", 100) // faulted
 	w.run()
@@ -601,14 +606,14 @@ func TestSpecHashCacheIsNeverStale(t *testing.T) {
 		key := string(rune('a' + i%5))
 		switch {
 		case i%3 == 2:
-			w.get(machine.RequestID(i+1), key)
+			w.get(uint64(i+1), key)
 		case i%4 == 0:
 			// A change that the answer does not name: only Mutating can clear the cache.
-			w.do(0, request{id: machine.RequestID(i + 1), key: key, set: true, val: int64(i), quiet: true})
+			w.do(0, request{id: uint64(i + 1), key: key, set: true, val: int64(i), quiet: true})
 		default:
-			w.set(machine.RequestID(i+1), key, int64(i%4))
+			w.set(uint64(i+1), key, int64(i%4))
 		}
-		w.runTo(w.w.Now() + kernel.Time(ms))
+		w.runTo(w.sys.Now() + sim.Time(ms))
 		if got := w.svc.SpecStateHash(); got != w.sp.StateHash() {
 			t.Fatalf("op %d: cached spec hash is stale", i)
 		}
@@ -630,18 +635,18 @@ func TestSpecHashCacheIsNeverStale(t *testing.T) {
 func TestDeterminism(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse = 0.2, 0.2, 0.2
-	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
+	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]actor.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) ([]delivery, uint64, uint64) {
 		w := newWorld(t, seed, f, extras{corruptProb: 0.3})
 		for i := range 60 {
 			key := string(rune('a' + i%5))
 			if i%3 == 0 {
-				w.do(machine.Duration(i)*ms, request{id: machine.RequestID(i + 1), key: key, set: true, val: int64(i)})
+				w.do(actor.Duration(i)*ms, request{id: uint64(i + 1), key: key, set: true, val: int64(i)})
 			} else {
-				w.do(machine.Duration(i)*ms, request{id: machine.RequestID(i + 1), key: key})
+				w.do(actor.Duration(i)*ms, request{id: uint64(i + 1), key: key})
 			}
 		}
-		w.runTo(30 * kernel.Time(ms))
+		w.runTo(30 * sim.Time(ms))
 		mid := w.svc.StateHash()
 		w.run()
 		return w.got, w.svc.StateHash(), mid

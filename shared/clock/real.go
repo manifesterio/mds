@@ -1,4 +1,4 @@
-// Package clock has the two implementations of machine.Clock that the broker and
+// Package clock has the two implementations of live.Clock that the broker and
 // the control plane share outside the simulator:
 //
 //   - Real is the production clock. It only converts types over dst/core/realclock.
@@ -10,26 +10,27 @@
 package clock
 
 import (
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	dstreal "github.com/manifesterio/mds/dst/core/realclock"
 	"github.com/manifesterio/mds/dst/core/sched"
+	"github.com/manifesterio/mds/dst/runtime/live"
 )
 
 // Real is the process clock.
 type Real struct{ dstreal.Clock }
 
-var _ machine.Clock = Real{}
+var _ live.Clock = Real{}
 
 // NewReal returns a Real clock anchored at the current time.
 func NewReal() Real { return Real{dstreal.New()} }
 
 // Mono returns monotonic time elapsed since the clock was created.
-func (c Real) Mono() machine.NodeTime { return machine.NodeTime(c.Clock.Mono()) }
+func (c Real) Mono() actor.Mono { return actor.Mono(c.Clock.Mono()) }
 
 // Wall returns the current wall-clock time in nanoseconds.
-func (c Real) Wall() machine.RealTime { return machine.RealTime(c.Clock.Wall()) }
+func (c Real) Wall() actor.Wall { return actor.Wall(c.Clock.Wall()) }
 
 // AfterFunc calls f once after d, on its own goroutine.
-func (c Real) AfterFunc(d machine.Duration, f func()) machine.Timer {
+func (c Real) AfterFunc(d actor.Duration, f func()) live.Timer {
 	return c.Clock.AfterFunc(sched.TimeNs(d), f)
 }

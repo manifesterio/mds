@@ -8,16 +8,16 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/faulty"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
-const ms = machine.Duration(1_000_000)
+const ms = actor.Duration(1_000_000)
 
 func objectBase() fakeservices.ObjectStoreFaults {
-	ts := kernel.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return fakeservices.ObjectStoreFaults{Faults: faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}}
 }
 
@@ -25,22 +25,17 @@ func objectBase() fakeservices.ObjectStoreFaults {
 func objectSetup(t *testing.T, f fakeservices.ObjectStoreFaults, seed uint64) (*fakeservices.ObjectStore, *servicetest.Harness) {
 	t.Helper()
 	h := servicetest.New(t, seed, "a")
-	e := fakeservices.NewObjectStore(h.W, f)
-	svc := kernel.AddService[core.ObjectCall, core.EventData](h.W, e)
-	h.Route = func(r *servicetest.Router, out core.Action) {
-		if oc, ok := out.(core.ObjectCall); ok {
-			kernel.Call(r, svc, oc)
-		}
-	}
+	e := fakeservices.NewObjectStore(f)
+	h.Objects = sim.AddService[core.ObjectCall, core.ObjectDone](h.Sys, e.Name(), e)
 	return e, h
 }
 
-func put(h *servicetest.Harness, request machine.RequestID, key, data string) {
-	h.Do("a", core.ObjectCall{Call: objectstore.Put{Req: request, Key: key, Data: []byte(data)}})
+func put(h *servicetest.Harness, request uint64, key, data string) {
+	h.Do("a", request, core.ObjectCall{Call: objectstore.Put{Key: key, Data: []byte(data)}})
 }
 
-func get(h *servicetest.Harness, request machine.RequestID, key string) {
-	h.Do("a", core.ObjectCall{Call: objectstore.Get{Req: request, Ref: core.SegmentRef{Key: key}}})
+func get(h *servicetest.Harness, request uint64, key string) {
+	h.Do("a", request, core.ObjectCall{Call: objectstore.Get{Ref: core.SegmentRef{Key: key}}})
 }
 
 // only returns the one result that was delivered, as the object store result type T.
@@ -94,10 +89,10 @@ func TestObjectStoreRefusedAppliesNothing(t *testing.T) {
 
 func TestObjectStoreOutageWindow(t *testing.T) {
 	f := objectBase()
-	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{100 * ms, 200 * ms}}
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]actor.Duration{100 * ms, 200 * ms}}
 	_, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "x")
-	h.RunTo(50 * kernel.Time(ms)) // still inside
+	h.RunTo(50 * sim.Time(ms)) // still inside
 	put(h, 2, "k", "x")
 	h.Run()
 	for _, d := range h.Delivered {
@@ -110,7 +105,7 @@ func TestObjectStoreOutageWindow(t *testing.T) {
 		t.Fatal("want exactly one window", faults)
 	}
 	h.Recover()
-	h.RunTo(10_000 * kernel.Time(ms))
+	h.RunTo(10_000 * sim.Time(ms))
 	put(h, 3, "k", "x")
 	h.Run()
 	if p := h.Delivered[2].Body.(core.ObjectDone).Result.(objectstore.PutDone); p.Err != core.OK {
@@ -129,7 +124,7 @@ func TestObjectStoreTimeoutAppliesOrNot(t *testing.T) {
 		d := only[objectstore.PutDone](t, h)
 		// The caller sees the timeout one CallerTimeout after the call. The call is
 		// issued at the time of the command, which is time zero.
-		if d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied || h.Delivered[0].At != kernel.Time(f.CallerTimeout) {
+		if d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied || h.Delivered[0].At != sim.Time(f.CallerTimeout) {
 			t.Fatal(d, h.Delivered[0].At)
 		}
 		if _, ok := e.Object("k"); ok {
@@ -205,7 +200,7 @@ func TestObjectStoreCrashBetweenLandingAndResponse(t *testing.T) {
 func TestObjectStoreRecoveryStopsFaults(t *testing.T) {
 	f := objectBase()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 1, 1, 1, 1
-	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]actor.Duration{ms, 2 * ms}}
 	_, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "x") // faulted, in flight
 	h.Run()
@@ -297,7 +292,7 @@ func TestObjectStoreTruthAndGen(t *testing.T) {
 	if e.Gen() != g {
 		t.Fatal("read bumped Gen")
 	}
-	h.Do("a", core.ObjectCall{Call: objectstore.Delete{Req: 4, Key: "a"}})
+	h.Do("a", 4, core.ObjectCall{Call: objectstore.Delete{Key: "a"}})
 	h.Run()
 	if e.Gen() != g+1 {
 		t.Fatal("delete did not bump Gen")
@@ -307,22 +302,22 @@ func TestObjectStoreTruthAndGen(t *testing.T) {
 func TestObjectStoreDeterminism(t *testing.T) {
 	f := objectBase()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 0.2, 0.2, 0.2, 0.3
-	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
+	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]actor.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, h := objectSetup(t, f, seed)
 		for i := range 60 {
-			after := machine.Duration(i) * ms
+			after := actor.Duration(i) * ms
 			k := string(rune('a' + i%5))
 			switch i % 3 {
 			case 0:
-				h.DoAfter(after, "a", core.ObjectCall{Call: objectstore.Put{Req: machine.RequestID(i), Key: k, Data: []byte("data-" + k)}})
+				h.DoAfter(after, "a", uint64(i), core.ObjectCall{Call: objectstore.Put{Key: k, Data: []byte("data-" + k)}})
 			case 1:
-				h.DoAfter(after, "a", core.ObjectCall{Call: objectstore.Get{Req: machine.RequestID(i), Ref: core.SegmentRef{Key: k}}})
+				h.DoAfter(after, "a", uint64(i), core.ObjectCall{Call: objectstore.Get{Ref: core.SegmentRef{Key: k}}})
 			default:
-				h.DoAfter(after, "a", core.ObjectCall{Call: objectstore.Delete{Req: machine.RequestID(i), Key: k}})
+				h.DoAfter(after, "a", uint64(i), core.ObjectCall{Call: objectstore.Delete{Key: k}})
 			}
 		}
-		h.RunTo(30 * kernel.Time(ms))
+		h.RunTo(30 * sim.Time(ms))
 		mid := e.StateHash() // pending plans folded in
 		h.Run()
 		return h.Trace(), e.StateHash(), mid

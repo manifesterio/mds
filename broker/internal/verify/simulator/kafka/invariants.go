@@ -4,18 +4,18 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 type progressCheck struct{ hist history.Reader[Op, Res] }
 
-func (*progressCheck) Name() string        { return "Liveness" }
-func (*progressCheck) Observe(kernel.View) {}
+func (*progressCheck) Name() string     { return "Liveness" }
+func (*progressCheck) Observe(sim.View) {}
 
-func (p *progressCheck) AtEnd(v kernel.View) {
-	heal, ok := preset.PhaseStart(v, kernel.PhaseHeal)
+func (p *progressCheck) AtEnd(v sim.View) {
+	heal, ok := preset.PhaseStart(v, sim.PhaseHeal)
 	v.Assert().Always(ok, kernelAnnouncedHeal)
-	after := heal + kernel.Time(preset.ProgressGraceTime)
+	after := heal + sim.Time(preset.ProgressGraceTime)
 	var produced, reads int
 	for _, operation := range p.hist.Ops() {
 		v.Assert().Always(operation.Outcome != history.Pending, noOpPendingAtEnd, assert.Pair{Key: "op", Value: operation.Op})

@@ -5,36 +5,35 @@ package preset
 import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/dst/core/rng"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 // Preset is the fault defaults and the phase schedule shared by the scenarios.
 type Preset struct {
 	Settings     cluster.Settings
-	Phases       kernel.Phases
-	QuiesceEvery machine.Duration
+	Phases       sim.Phases
+	QuiesceEvery actor.Duration
 }
 
-func ms(n int64) machine.Duration { return machine.Duration(n) * machine.Millisecond }
+func ms(n int64) actor.Duration { return actor.Duration(n) * actor.Millisecond }
 
-func slowTail(fmin, fmax, smin, smax int64, p float64) kernel.FastWithRareSlow {
-	return kernel.FastWithRareSlow{
+func slowTail(fmin, fmax, smin, smax int64, p float64) sim.FastWithRareSlow {
+	return sim.FastWithRareSlow{
 		FastMin: ms(fmin), FastMax: ms(fmax),
 		SlowMin: ms(smin), SlowMax: ms(smax), SlowProb: p,
 	}
 }
 
 // Phases is Faults 30s, Heal 10s, Drain 5s.
-func Phases() kernel.Phases {
-	return kernel.Phases{Faults: 30 * machine.Second, Heal: 10 * machine.Second, Drain: 5 * machine.Second}
+func Phases() sim.Phases {
+	return sim.Phases{Faults: 30 * actor.Second, Heal: 10 * actor.Second, Drain: 5 * actor.Second}
 }
 
-// New returns a Preset. PartialIOMax and MaxCommitItems stay zero.
+// New returns a Preset. MaxCommitItems stays zero.
 func New() Preset {
 	return Preset{
 		Settings: cluster.Settings{
@@ -43,7 +42,7 @@ func New() Preset {
 					ApplyLatency:   slowTail(1, 5, 50, 200, 0.05),
 					RespondLatency: slowTail(1, 3, 20, 100, 0.05),
 					Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.02,
-					Outage:        faulty.Outage{Prob: 0.002, Dur: [2]machine.Duration{ms(200), 2 * machine.Second}},
+					Outage:        faulty.Outage{Prob: 0.002, Dur: [2]actor.Duration{ms(200), 2 * actor.Second}},
 					CallerTimeout: ms(500),
 				},
 				GetCorruptProb: 0.03,
@@ -53,37 +52,29 @@ func New() Preset {
 					ApplyLatency:   slowTail(1, 5, 50, 200, 0.05),
 					RespondLatency: slowTail(1, 3, 20, 100, 0.05),
 					Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.03,
-					Outage:        faulty.Outage{Prob: 0.002, Dur: [2]machine.Duration{ms(200), 2 * machine.Second}},
+					Outage:        faulty.Outage{Prob: 0.002, Dur: [2]actor.Duration{ms(200), 2 * actor.Second}},
 					CallerTimeout: ms(500),
 				},
 			},
-			Network: fakenetwork.Faults{
-				Latency: kernel.FastWithRareSlow{
-					FastMin: 200 * machine.Microsecond, FastMax: 2 * machine.Millisecond,
-					SlowMin: ms(20), SlowMax: ms(100), SlowProb: 0.03,
-				},
-				PartitionProb: 0.002, PartitionDur: [2]machine.Duration{ms(300), 3 * machine.Second},
-				ClogProb: 0.003, ClogDur: [2]machine.Duration{ms(100), ms(500)},
-				RandomCloseProb: 0.002, BlackHoleProb: 0.002,
-				PairLatencyMax: ms(5),
-			},
+			NetDelay:      [2]actor.Duration{200 * actor.Microsecond, 2 * actor.Millisecond},
+			ConnResetProb: 0.002,
 			ClockSkewMax:  ms(100),
-			Attrition:     kernel.Attrition{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1, StopGrace: 5 * machine.Second},
-			RecoveryDelay: [2]machine.Duration{ms(200), ms(1500)},
-			Cost:          kernel.CostParams{PerEvent: 50 * machine.Microsecond, PauseProb: 0.001, Pause: slowTail(1, 5, 20, 100, 0.1)},
+			Attrition:     sim.AttritionPlan{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1, StopGrace: 5 * actor.Second},
+			RecoveryDelay: [2]actor.Duration{ms(200), ms(1500)},
+			Cost:          sim.CostParams{PerEvent: 50 * actor.Microsecond, PauseProb: 0.001, Pause: slowTail(1, 5, 20, 100, 0.1)},
 		},
 		Phases:       Phases(),
-		QuiesceEvery: machine.Second,
+		QuiesceEvery: actor.Second,
 	}
 }
 
 // ProgressGraceTime is the Heal offset used by the liveness rules.
-const ProgressGraceTime = 6 * machine.Second
+const ProgressGraceTime = 6 * actor.Second
 
-// PhaseStart reports when the kernel announced phase p, from its sim_phase fact.
-func PhaseStart(v kernel.View, p kernel.Phase) (kernel.Time, bool) {
+// PhaseStart reports when the System announced phase p, from its sim_phase fact.
+func PhaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
 	for _, tf := range v.Timeline().Snapshot("sim_phase") {
-		if ph, ok := tf.Fact.Field("phase").(machine.Uint64Value); ok && kernel.Phase(ph) == p {
+		if ph, ok := tf.Fact.Field("phase").(actor.Uint64Value); ok && sim.Phase(ph) == p {
 			return tf.At, true
 		}
 	}
@@ -105,23 +96,23 @@ var (
 	}
 )
 
-// FaultCoverageCheck reports a hard crash and a graceful stop from kernel facts.
-func FaultCoverageCheck(names FaultCoverage) kernel.Rule {
+// FaultCoverageCheck reports a hard crash and a graceful stop from System facts.
+func FaultCoverageCheck(names FaultCoverage) sim.Rule {
 	return &faultCoverage{names: names}
 }
 
 type faultCoverage struct{ names FaultCoverage }
 
-func (*faultCoverage) Name() string        { return "FaultCoverage" }
-func (*faultCoverage) Observe(kernel.View) {}
+func (*faultCoverage) Name() string     { return "FaultCoverage" }
+func (*faultCoverage) Observe(sim.View) {}
 
-func (f *faultCoverage) AtEnd(v kernel.View) {
+func (f *faultCoverage) AtEnd(v sim.View) {
 	has := func(name, key, val string) bool {
 		for _, tf := range v.Timeline().Snapshot(name) {
 			if key == "" {
 				return true
 			}
-			if s, ok := tf.Fact.Field(key).(machine.StringValue); ok && string(s) == val {
+			if s, ok := tf.Fact.Field(key).(actor.StringValue); ok && string(s) == val {
 				return true
 			}
 		}
@@ -132,9 +123,7 @@ func (f *faultCoverage) AtEnd(v kernel.View) {
 }
 
 // Swarm draws the shared fault knobs from r.
-// afterKnobs runs after those knobs and before the two slow-probability chances.
-// A nil afterKnobs draws nothing.
-func Swarm(r *rng.Rand, s *cluster.Settings, afterKnobs func()) {
+func Swarm(r *rng.Rand, s *cluster.Settings) {
 	menu := [...]float64{0.5, 1, 2, 4}
 	knob := func(p *float64) {
 		if r.Chance(0.4) {
@@ -143,7 +132,7 @@ func Swarm(r *rng.Rand, s *cluster.Settings, afterKnobs func()) {
 		}
 		*p = min(*p*menu[r.Intn(len(menu))], 0.4)
 	}
-	o, cp, n := &s.ObjectStore, &s.ControlPlane, &s.Network
+	o, cp := &s.ObjectStore, &s.ControlPlane
 	knob(&o.Unavailable503)
 	knob(&o.Timeout)
 	knob(&o.LostResponse)
@@ -153,18 +142,9 @@ func Swarm(r *rng.Rand, s *cluster.Settings, afterKnobs func()) {
 	knob(&cp.Timeout)
 	knob(&cp.LostResponse)
 	knob(&cp.Outage.Prob)
-	knob(&n.PartitionProb)
-	knob(&n.ClogProb)
-	knob(&n.RandomCloseProb)
-	knob(&n.BlackHoleProb)
+	knob(&s.ConnResetProb)
 	knob(&s.Attrition.CrashProb)
-	if afterKnobs != nil {
-		afterKnobs()
-	}
 	if r.Chance(0.3) {
 		o.ApplyLatency.SlowProb, cp.ApplyLatency.SlowProb = 0.3, 0.3
-	}
-	if r.Chance(0.3) {
-		n.Latency.SlowProb = 0.2
 	}
 }

@@ -2,129 +2,90 @@ package core
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
-// Event is the input to Step. The runtime (prod) or simulator stamps At and
-// Wall when the event is dequeued, so At never decreases in Step order.
-type Event struct {
-	At   machine.NodeTime // node-local monotonic now
-	Wall machine.RealTime // UTC now
-	Body EventData
-}
-
-// EventData is a closed set of plain-data structs.
+// EventData is every message the broker takes: lifecycle, connection events,
+// its own timers, and the answers of its IO. It is a closed set of
+// plain-data structs.
 //
-// Every case has Tag and Fold (event_fold.go): they write the case into the trace hash.
+//sumtype:decl
+//dst:sum
 type EventData interface {
-	isEvent()
-	// Tag is the frozen number of the case in the trace hash.
-	Tag() uint64
-	machine.Message
-}
-
-// IOResult is the EventData that answers an IOCall, matched by RequestID. A
-// completion with an unknown, already-finished or wrong-kind RequestID is ignored:
-// no state change (StateHash is unchanged).
-type IOResult interface {
-	EventData
-	RequestID() machine.RequestID
+	actor.Payload
+	isEventData()
 }
 
 // ---- lifecycle ----
 
-// NodeStarted is the first event of every boot, and always the first Step of every
-// incarnation. The node rebuilds what it needs from the control plane and
-// object store; nothing in memory survived.
-type NodeStarted struct{ Self machine.NodeInstance }
+// NodeStarted is the first message of every boot. The node rebuilds what it
+// needs from the control plane and the object store; nothing in memory
+// survived.
+//
+//dst:cases EventData
+type NodeStarted struct{ Self actor.Incarnation }
 
-// StopRequest asks the node to shut down gracefully by Deadline (node-local time):
-// stop admitting, finish or hand off in-flight work, then emit ShutdownDone. If the
-// deadline passes first the runtime kills the node. InboxKind: Control.
-type StopRequest struct{ Deadline machine.NodeTime }
+// StopRequest asks the node to shut down gracefully by Deadline (node-local
+// time): stop admitting, finish or hand off in-flight work, then Stop with
+// Exit. If the deadline passes first the runtime kills the node.
+//
+//dst:cases EventData
+type StopRequest struct{ Deadline actor.Mono }
 
-// ---- network (inbound) ----
+// ---- network (inbound, unsolicited) ----
 
-// ConnOpened reports that a connection was accepted.
-type ConnOpened struct {
-	Conn ConnID
-	Peer string // remote address, informational only
-}
+//dst:cases EventData
+type (
+	// ConnOpened reports that a connection was accepted.
+	ConnOpened struct {
+		Conn ConnID
+		Peer string // remote address, informational only
+	}
 
-// BytesReceived is a chunk of a TCP byte stream. Chunks may be arbitrarily
-// short. Framing is the core's job.
-type BytesReceived struct {
-	Conn ConnID
-	Data []byte
-}
+	// BytesReceived is a chunk of a TCP byte stream. Chunks may be
+	// arbitrarily short: framing is the receiver's job.
+	BytesReceived struct {
+		Conn ConnID
+		Data []byte
+	}
 
-// ConnClosed reports EOF (graceful) or reset (abort) from the peer or network.
-type ConnClosed struct {
-	Conn  ConnID
-	Abort bool
-}
+	// ConnClosed reports EOF (graceful) or reset (abort) from the peer or
+	// the network.
+	ConnClosed struct {
+		Conn  ConnID
+		Abort bool
+	}
+)
 
-// SendDone completes a Send. Err != OK means the bytes may be partially sent.
-type SendDone struct {
-	Req  machine.RequestID
-	Conn ConnID
-	Err  ErrCode
-}
+// ---- answers of IO ----
 
-// ConnectDone completes a Connect. Conn is valid only when Err == OK.
+// ConnectDone is the answer of Connect. Conn is valid only when Err == OK.
+//
+//dst:cases EventData
 type ConnectDone struct {
-	Req  machine.RequestID
 	Conn ConnID
 	Err  ErrCode
 }
 
-// ---- timers ----
-
-// TimerFired is ignored by the receiver if Gen is not the current generation
-// for ID. Timers are matched by generation, not cancelled.
-type TimerFired struct {
-	ID  machine.TimerID
-	Gen machine.TimerVersion
-}
-
-// ---- object store completions ----
-
-// ObjectDone reports that an object store call finished. Result is one of
-// objectstore.PutDone, GetDone, DeleteDone or ListDone. The case is a wrapper
-// because a sealed sum cannot get a case from another package. The trace hash gets
-// the same bytes as the four separate events had before (tags 9 to 12).
+// ObjectDone is the answer of ObjectCall. Result is one of
+// objectstore.PutDone, GetDone, DeleteDone or ListDone; its Req field is not
+// used. The case is a wrapper because a sealed sum cannot get a case from
+// another package.
+//
+//dst:cases EventData
+//dst:fold manual
 type ObjectDone struct{ Result objectstore.Result }
 
-// ---- control plane completions ----
-
-// ControlPlaneDone reports that a control-plane call finished. Resp is the in-process
-// response (nil unless Err == OK). Generated API response messages map through
-// controlplane/wireboundary. Typed *Response fields wait for the gRPC cutover so
-// core does not import grpc.
+// ControlPlaneDone is the answer of ControlPlaneCall. Resp is the in-process
+// response (nil unless Err == OK).
+//
+//dst:cases EventData
 type ControlPlaneDone struct {
-	Req     machine.RequestID
 	Resp    contract.Response
 	Err     ErrCode
 	Outcome Outcome
 }
-
-// ControlPlaneDeliver delivers one broker ControlPlaneCall to a control-plane replica process. The
-// simulator bridge engine issues this; the machine answers with ControlPlaneReply actions.
-type ControlPlaneDeliver struct {
-	From machine.NodeInstance // broker that issued the ControlPlaneCall
-	Req  machine.RequestID
-	Op   contract.Operation
-}
-
-// ---- broker live set ----
-
-// LiveBrokers gives the broker the live broker set from the control plane. The
-// production shell sends it after each heartbeat, and sends an empty list when
-// the set is stale (the control plane is down). The broker keeps the last list
-// and answers Metadata with it. Metadata always lists the broker itself, so an
-// empty list means "self only". The simulator never sends it. InboxKind: Control.
-type LiveBrokers struct{ Brokers []BrokerAddr }
 
 // ResponseAs returns d.Resp asserted to T, or the zero value.
 func ResponseAs[T any](d ControlPlaneDone) T {
@@ -132,34 +93,65 @@ func ResponseAs[T any](d ControlPlaneDone) T {
 	return r
 }
 
-func (NodeStarted) isEvent()         {}
-func (StopRequest) isEvent()         {}
-func (ConnectDone) isEvent()         {}
-func (ConnOpened) isEvent()          {}
-func (BytesReceived) isEvent()       {}
-func (ConnClosed) isEvent()          {}
-func (SendDone) isEvent()            {}
-func (TimerFired) isEvent()          {}
-func (ObjectDone) isEvent()          {}
-func (ControlPlaneDone) isEvent()    {}
-func (ControlPlaneDeliver) isEvent() {}
-func (LiveBrokers) isEvent()         {}
+// The broker hands its object store and control plane calls to Perform with
+// an adapter that puts the answer into one of these, together with the
+// segment or operation the call belongs to. Seg and Op are the broker's own
+// ids, unique within one incarnation.
+//
+//dst:cases EventData
+type (
+	// SegmentPutDone is the answer of the PUT of segment Seg.
+	SegmentPutDone struct {
+		Seg  uint64
+		Done ObjectDone
+	}
 
-// RequestID returns the request this completion answers.
-func (e SendDone) RequestID() machine.RequestID { return e.Req }
+	// SegmentCommitDone is the answer of the CommitSegment of segment Seg.
+	SegmentCommitDone struct {
+		Seg  uint64
+		Done ControlPlaneDone
+	}
 
-// RequestID returns the request this completion answers.
-func (e ConnectDone) RequestID() machine.RequestID { return e.Req }
+	// OpReadDone is the answer of an object store read of operation Op.
+	OpReadDone struct {
+		Op   uint64
+		Done ObjectDone
+	}
 
-// RequestID returns the request this completion answers.
-func (e ObjectDone) RequestID() machine.RequestID { return e.Result.RequestID() }
-
-// RequestID returns the request this completion answers.
-func (e ControlPlaneDone) RequestID() machine.RequestID { return e.Req }
-
-var (
-	_ IOResult = SendDone{}
-	_ IOResult = ConnectDone{}
-	_ IOResult = ObjectDone{}
-	_ IOResult = ControlPlaneDone{}
+	// OpCallDone is the answer of a control-plane call of operation Op.
+	OpCallDone struct {
+		Op   uint64
+		Done ControlPlaneDone
+	}
 )
+
+// ---- timers ----
+
+//dst:cases EventData
+type (
+	// FlushDue says that the batch window of the open segment has passed.
+	FlushDue struct{}
+
+	// SegmentRetryDue says that the backoff of segment Seg has passed: its
+	// PUT or its commit goes out again.
+	SegmentRetryDue struct{ Seg uint64 }
+
+	// OpDue says that operation Op has waited long enough: its backoff
+	// has passed, or a parked Fetch part polls again.
+	OpDue struct{ Op uint64 }
+
+	// ClientDue is a timer of a simulated client, named by the client's own
+	// Key. The broker never receives it.
+	ClientDue struct{ Key string }
+)
+
+// ---- broker live set ----
+
+// LiveBrokers gives the broker the live broker set from the control plane. The
+// production shell sends it after each heartbeat, and sends an empty list when
+// the set is stale (the control plane is down). The broker keeps the last list
+// and answers Metadata with it. Metadata always lists the broker itself, so an
+// empty list means "self only". The simulator never sends it.
+//
+//dst:cases EventData
+type LiveBrokers struct{ Brokers []BrokerAddr }

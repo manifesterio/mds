@@ -20,11 +20,11 @@ const authOpsOmitted = math.MinInt32
 
 // describeGroups answers DescribeGroups. Every name gets an entry, in request
 // order. A group the control plane does not know is "Dead" with no error.
-func (b *Broker) describeGroups(s *slot, r *kmsg.DescribeGroupsRequest) []core.Action {
+func (b *Broker) describeGroups(s *slot, r *kmsg.DescribeGroupsRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrDescribeGroupsResponse()
 	s.response = response
 	if len(r.Groups) == 0 {
-		return nil
+		return
 	}
 	response.Groups = make([]kmsg.DescribeGroupsResponseGroup, len(r.Groups))
 	for i, name := range r.Groups {
@@ -43,7 +43,7 @@ func (b *Broker) describeGroups(s *slot, r *kmsg.DescribeGroupsRequest) []core.A
 			}
 		}
 	}
-	return b.groupCall(s, contract.DescribeGroups{Groups: r.Groups}, 0, fill)
+	b.groupCall(s, contract.DescribeGroups{Groups: r.Groups}, 0, fill, outbox)
 }
 
 // describedGroup writes one group of a DescribeGroups answer.
@@ -78,7 +78,7 @@ func inStates(filter []string, state string) bool {
 // listGroups answers ListGroups. It lists the groups this broker coordinates
 // (FindCoordinator hash), and a states filter (version 4 and up) narrows them.
 // With no other live broker, this broker coordinates every group.
-func (b *Broker) listGroups(s *slot, r *kmsg.ListGroupsRequest) []core.Action {
+func (b *Broker) listGroups(s *slot, r *kmsg.ListGroupsRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrListGroupsResponse()
 	s.response = response
 	fill := func(e core.ControlPlaneDone) {
@@ -94,5 +94,5 @@ func (b *Broker) listGroups(s *slot, r *kmsg.ListGroupsRequest) []core.Action {
 			response.Groups = append(response.Groups, kmsg.ListGroupsResponseGroup{Group: g.Name, ProtocolType: g.ProtocolType, GroupState: state})
 		}
 	}
-	return b.groupCall(s, contract.ListGroups{}, 0, fill)
+	b.groupCall(s, contract.ListGroups{}, 0, fill, outbox)
 }

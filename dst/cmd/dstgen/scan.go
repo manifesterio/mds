@@ -215,7 +215,7 @@ func (s *scanned) validateSum(a *annotated, errs *errorList) {
 		errs.add(a.pos, "%s: //dst:sum open means no exhaustiveness check: remove //sumtype:decl", a.name)
 	}
 	if !hasFold(iface) {
-		errs.add(a.pos, "%s: a //dst:sum must embed actor.Payload (or machine.Message): it has no Fold(*trace.Hash)", a.name)
+		errs.add(a.pos, "%s: a //dst:sum must embed actor.Payload: it has no Fold(*trace.Hash)", a.name)
 	}
 	if marker(iface, a.name) == nil {
 		errs.add(a.pos, "%s: a //dst:sum needs the marker method %s()", a.name, markerName(a.name))

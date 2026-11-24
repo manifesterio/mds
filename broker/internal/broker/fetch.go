@@ -6,30 +6,29 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.
-const maxFetchWait = 30 * machine.Second
+const maxFetchWait = 30 * actor.Second
 
 // fetch serves each partition independently. It runs FindSegments, then ranged
 // GETs (one per run of adjacent batches in a segment), verified and patched to
 // each batch's committed offset.
 // A part that finds no data is parked and polled again (long poll). The Fetch
 // answers once it has MinBytes, or when MaxWait ends.
-func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
+func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrFetchResponse()
 	s.response = response
 	if r.SessionEpoch > 0 { // incremental sessions are never granted
 		response.ErrorCode = int16(errFetchSessionNotFound)
-		return nil
+		return
 	}
 	s.fetchMax = r.MaxBytes
 	s.fetchMin = r.MinBytes
-	s.fetchUntil = b.now + machine.NodeTime(fetchWait(r.MaxWaitMillis))
+	s.fetchUntil = b.now + actor.Mono(fetchWait(r.MaxWaitMillis))
 	fillFetchSkeleton(response, r)
-	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &response.Topics[i].Partitions[j]
@@ -44,11 +43,10 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 				if lim <= 0 {
 					lim = b.config.DefaultFetchBytes
 				}
-				acts = append(acts, b.startOp(&operation{kind: opFetch, s: s, topicPartition: topicPartition, from: core.Offset(p.FetchOffset), maxBytes: lim, fpart: rp})...)
+				b.startOp(&operation{kind: opFetch, s: s, topicPartition: topicPartition, from: core.Offset(p.FetchOffset), maxBytes: lim, fpart: rp}, outbox)
 			}
 		}
 	}
-	return acts
 }
 
 func fillFetchSkeleton(response *kmsg.FetchResponse, r *kmsg.FetchRequest) {
@@ -67,11 +65,12 @@ func fillFetchSkeleton(response *kmsg.FetchResponse, r *kmsg.FetchRequest) {
 
 // onLookup picks the ranges that fit the partition limit (at least one) and
 // starts reading them.
-func (b *Broker) onLookup(o *operation, r contract.FindSegmentsResp) []core.Action {
+func (b *Broker) onLookup(o *operation, r contract.FindSegmentsResp, outbox *brokerOutbox) {
 	o.fpart.HighWatermark, o.fpart.LastStableOffset = int64(r.End), int64(r.End)
 	if o.from > r.End {
 		o.fpart.ErrorCode = int16(errOffsetOutOfRange)
-		return b.endOp(o)
+		b.endOp(o)
+		return
 	}
 	var total int64
 	for _, rg := range r.Ranges {
@@ -82,18 +81,19 @@ func (b *Broker) onLookup(o *operation, r contract.FindSegmentsResp) []core.Acti
 		total += rg.Loc.Len
 	}
 	if o.from == r.End || len(o.ranges) == 0 {
-		return b.waitOrEnd(o)
+		b.waitOrEnd(o, outbox)
+		return
 	}
 	o.state, o.attempts, o.next = opGet, 0, 0
-	return b.issue(o)
+	b.issue(o, outbox)
 }
 
 // fetchWait is how long a Fetch may wait: MaxWait, capped. Zero means answer at once.
-func fetchWait(maxWaitMillis int32) machine.Duration {
+func fetchWait(maxWaitMillis int32) actor.Duration {
 	if maxWaitMillis <= 0 {
 		return 0
 	}
-	return min(machine.Duration(maxWaitMillis)*machine.Millisecond, maxFetchWait)
+	return min(actor.Duration(maxWaitMillis)*actor.Millisecond, maxFetchWait)
 }
 
 // fetchOver reports whether a Fetch must answer now: it has MinBytes, its
@@ -104,54 +104,57 @@ func (b *Broker) fetchOver(s *slot) bool {
 }
 
 // waitOrEnd parks a part that found no data, or ends it if the Fetch is over.
-func (b *Broker) waitOrEnd(o *operation) []core.Action {
+func (b *Broker) waitOrEnd(o *operation, outbox *brokerOutbox) {
 	if b.fetchOver(o.s) {
-		return b.endOp(o)
+		b.endOp(o)
+		return
 	}
 	b.env.Reachable(fetchParkedForPoll)
-	return b.park(o)
+	b.park(o, outbox)
 }
 
 // fetchPartData runs when a part has its batches. The bytes count toward
 // MinBytes. If that meets MinBytes, the Fetch answers now: parked parts end
 // too. If not, this part waits with its data (held), and the Fetch answers
 // once MinBytes is reached or MaxWait ends.
-func (b *Broker) fetchPartData(o *operation) []core.Action {
+func (b *Broker) fetchPartData(o *operation, outbox *brokerOutbox) {
 	s := o.s
 	s.fetchGot += len(o.fpart.RecordBatches)
 	if s.fetchGot >= int(s.fetchMin) {
 		b.endParked(func(p *operation) bool { return p.s == s })
-		return b.endOp(o)
+		b.endOp(o)
+		return
 	}
 	if b.fetchOver(s) {
-		return b.endOp(o)
+		b.endOp(o)
+		return
 	}
 	o.held = true
-	return b.park(o)
+	b.park(o, outbox)
 }
 
 // park waits until the next poll of o: FetchPollInterval, or the end of
 // MaxWait if that comes first.
-func (b *Broker) park(o *operation) []core.Action {
+func (b *Broker) park(o *operation, outbox *brokerOutbox) {
 	o.state, o.attempts = opWait, 0
-	after := min(b.config.FetchPollInterval, machine.Duration(o.s.fetchUntil-b.now))
-	b.timerGen++
-	o.gen = b.timerGen
-	return []core.Action{core.SetTimer{ID: machine.TimerID(o.id), Gen: o.gen, After: after}}
+	after := min(b.config.FetchPollInterval, actor.Duration(o.s.fetchUntil-b.now))
+	outbox.StartTimer(opTimer(o), after, core.OpDue{Op: o.id})
 }
 
 // pollOp runs when a parked part's timer fires. A part that holds data only
 // waits for the clock. A part with no data runs its next Lookup, so only the
 // partitions still short are polled.
-func (b *Broker) pollOp(o *operation) []core.Action {
+func (b *Broker) pollOp(o *operation, outbox *brokerOutbox) {
 	if b.fetchOver(o.s) {
-		return b.endOp(o)
+		b.endOp(o)
+		return
 	}
 	if o.held {
-		return b.park(o)
+		b.park(o, outbox)
+		return
 	}
 	o.state = opControlPlane
-	return b.issue(o)
+	b.issue(o, outbox)
 }
 
 // endParked ends each parked part that match, with no further polls. A held
@@ -198,34 +201,41 @@ func readRef(rgs []contract.BatchRange) contract.SegmentRef {
 // onFetchGet verifies one read from the object store. A read holds one or
 // more batches (see readRanges). A corrupt read is never returned. The whole
 // read is retried. The object itself is intact. S3 checksums cover whole
-// objects but not byte ranges.
-func (b *Broker) onFetchGet(o *operation, e objectstore.GetDone) []core.Action {
+// objects but not byte ranges. Any other kind of answer is ignored.
+func (b *Broker) onFetchGet(o *operation, d core.ObjectDone, outbox *brokerOutbox) {
+	e, ok := d.Result.(objectstore.GetDone)
+	if !ok {
+		return
+	}
 	rgs := o.readRanges()
 	if e.Err == core.ErrNotFound { // committed segments are never deleted
 		b.env.Unreachable(committedSegmentMissing)
-		return b.failOp(o, errKafkaStorage)
+		b.failOp(o, errKafkaStorage, outbox)
+		return
 	}
 	if e.Err != core.OK {
 		o.corrupt = false
-		return b.retryOp(o)
+		b.retryOp(o, outbox)
+		return
 	}
 	parts := splitRead(e.Data, rgs)
 	if b.config.InjectedBug != InjectedBugServeCorrupt && !allIntact(e.Data, parts, rgs) {
-		return b.retryCorrupt(o, rgs[0])
+		b.retryCorrupt(o, rgs[0], outbox)
+		return
 	}
-	return b.acceptFetch(o, parts, rgs)
+	b.acceptFetch(o, parts, rgs, outbox)
 }
 
-func (b *Broker) retryCorrupt(o *operation, rg contract.BatchRange) []core.Action {
+func (b *Broker) retryCorrupt(o *operation, rg contract.BatchRange, outbox *brokerOutbox) {
 	b.env.Reachable(corruptGetDetected)
 	o.corrupt = true
-	acts := []core.Action{recordFact("corruption_detected", machine.Field{Key: "segment", Value: machine.StringValue(rg.Loc.Key)})}
-	return append(acts, b.retryOp(o)...)
+	recordFact(outbox, "corruption_detected", actor.Field{Key: "segment", Value: actor.StringValue(rg.Loc.Key)})
+	b.retryOp(o, outbox)
 }
 
 // acceptFetch takes the batches of one read, patches each one to its
 // committed offset, and moves on to the next read.
-func (b *Broker) acceptFetch(o *operation, parts [][]byte, rgs []contract.BatchRange) []core.Action {
+func (b *Broker) acceptFetch(o *operation, parts [][]byte, rgs []contract.BatchRange, outbox *brokerOutbox) {
 	for i, rg := range rgs {
 		base := int64(rg.Base)
 		if b.config.InjectedBug == InjectedBugWrongOffset {
@@ -236,10 +246,11 @@ func (b *Broker) acceptFetch(o *operation, parts [][]byte, rgs []contract.BatchR
 	o.next += len(rgs)
 	o.attempts, o.corrupt = 0, false
 	if o.next < len(o.ranges) {
-		return b.issue(o)
+		b.issue(o, outbox)
+		return
 	}
 	o.fpart.RecordBatches = o.out
-	return b.fetchPartData(o)
+	b.fetchPartData(o, outbox)
 }
 
 // splitRead cuts the bytes of one read into one part per range, by Loc.Len.

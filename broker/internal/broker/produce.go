@@ -12,10 +12,9 @@ import (
 
 // produce admits one batch per partition into the open segment. Acks 1 and -1
 // both mean "committed" (acks=0 never gets here: the connection is closed).
-func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
+func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest, outbox *brokerOutbox) {
 	response := produceSkeleton(r)
 	s.response = response
-	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &response.Topics[i].Partitions[j]
@@ -26,10 +25,9 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 				continue
 			}
 			s.pending++
-			acts = append(acts, b.addBatch(pb)...)
+			b.addBatch(pb, outbox)
 		}
 	}
-	return acts
 }
 
 func produceSkeleton(r *kmsg.ProduceRequest) *kmsg.ProduceResponse {

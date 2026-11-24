@@ -8,13 +8,13 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 func planeBase() fakeservices.ControlPlaneFaults {
-	ts := kernel.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return fakeservices.ControlPlaneFaults{Faults: faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}}
 }
 
@@ -24,18 +24,13 @@ var tp = contract.NewTopicPartition("t", 0)
 func planeSetup(t *testing.T, f fakeservices.ControlPlaneFaults, seed uint64) (*fakeservices.ControlPlane, *servicetest.Harness) {
 	t.Helper()
 	h := servicetest.New(t, seed, "a")
-	e := fakeservices.NewControlPlane(h.W, f)
-	svc := kernel.AddService[core.ControlPlaneCall, core.EventData](h.W, e)
-	h.Route = func(r *servicetest.Router, out core.Action) {
-		if c, ok := out.(core.ControlPlaneCall); ok {
-			kernel.Call(r, svc, c)
-		}
-	}
+	e := fakeservices.NewControlPlane(f)
+	h.ControlPlane = sim.AddService[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, e.Name(), e)
 	return e, h
 }
 
-func call(h *servicetest.Harness, request machine.RequestID, operation contract.Operation) {
-	h.Do("a", core.ControlPlaneCall{Req: request, Op: operation})
+func call(h *servicetest.Harness, request uint64, operation contract.Operation) {
+	h.Do("a", request, core.ControlPlaneCall{Op: operation})
 }
 
 func commit(key string) contract.CommitSegment {
@@ -94,12 +89,12 @@ func TestControlPlaneFaultFamilies(t *testing.T) {
 		err     core.ErrCode
 		outcome core.Outcome
 		applied bool
-		at      kernel.Time
+		at      sim.Time
 	}{
 		{"503", func(f *fakeservices.ControlPlaneFaults) { f.Unavailable503 = 1 }, "cp_503", core.ErrUnavailable, core.NotApplied, false, 0},
-		{"lost", func(f *fakeservices.ControlPlaneFaults) { f.LostResponse = 1 }, "cp_lost_response", core.ErrTimeout, core.MaybeApplied, true, kernel.Time(1000 * ms)},
+		{"lost", func(f *fakeservices.ControlPlaneFaults) { f.LostResponse = 1 }, "cp_lost_response", core.ErrTimeout, core.MaybeApplied, true, sim.Time(1000 * ms)},
 		{"outage", func(f *fakeservices.ControlPlaneFaults) {
-			f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
+			f.Outage = faulty.Outage{Prob: 1, Dur: [2]actor.Duration{ms, 2 * ms}}
 		}, "cp_outage", core.ErrUnavailable, core.NotApplied, false, 0},
 	}
 	for _, tc := range cases {
@@ -205,7 +200,7 @@ func TestControlPlaneLandsAfterCrash(t *testing.T) {
 func TestControlPlaneRecoveryStopsFaults(t *testing.T) {
 	f := planeBase()
 	f.Unavailable503, f.Timeout, f.LostResponse = 1, 1, 1
-	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]actor.Duration{ms, 2 * ms}}
 	_, h := planeSetup(t, f, 1)
 	call(h, 1, commit("s"))
 	h.Step() // issued: the plan is a 503
@@ -223,19 +218,19 @@ func TestControlPlaneRecoveryStopsFaults(t *testing.T) {
 func TestControlPlaneDeterminism(t *testing.T) {
 	f := planeBase()
 	f.Unavailable503, f.Timeout, f.LostResponse = 0.2, 0.2, 0.2
-	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
+	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]actor.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, h := planeSetup(t, f, seed)
 		for i := range 60 {
-			after := machine.Duration(i) * ms
+			after := actor.Duration(i) * ms
 			switch i % 2 {
 			case 0:
-				h.DoAfter(after, "a", core.ControlPlaneCall{Req: machine.RequestID(i), Op: commit(string(rune('a' + i%7)))})
+				h.DoAfter(after, "a", uint64(i), core.ControlPlaneCall{Op: commit(string(rune('a' + i%7)))})
 			default:
-				h.DoAfter(after, "a", core.ControlPlaneCall{Req: machine.RequestID(i), Op: contract.FindSegments{TopicPartition: tp}})
+				h.DoAfter(after, "a", uint64(i), core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: tp}})
 			}
 		}
-		h.RunTo(30 * kernel.Time(ms))
+		h.RunTo(30 * sim.Time(ms))
 		mid := e.StateHash()
 		h.Run()
 		return h.Trace(), e.StateHash(), mid
@@ -277,7 +272,7 @@ func TestControlPlaneCommitSizeLimit(t *testing.T) {
 	call(h, 2, many("ok", 4))
 	call(h, 3, many("many", 400))
 	h.Run()
-	for _, request := range []machine.RequestID{2, 3} {
+	for _, request := range []uint64{2, 3} {
 		if d := h.Find(request).(core.ControlPlaneDone); d.Err != core.OK {
 			t.Fatal(request, d)
 		}

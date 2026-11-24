@@ -79,7 +79,7 @@ type Node struct {
 // New builds a Node. Call Start then serve gRPC with Register.
 func New(config Config) *Node {
 	if config.Clock == nil {
-		config.Clock = live.FromMachineClock(clock.NewReal())
+		config.Clock = clock.NewReal()
 	}
 	if config.Log == nil {
 		config.Log = executor.NewMemoryLog()

@@ -14,7 +14,6 @@ import (
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
 	"github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // fake makes a scenario from a function. The function gets the seed and
@@ -87,8 +86,8 @@ func TestRegistryAddPanics(t *testing.T) {
 	}
 }
 
-func TestFromKernelNamesTheCounterAndKeepsFailures(t *testing.T) {
-	r := FromKernel(kernelResult(), "")
+func TestFromSimNamesTheCounterAndKeepsFailures(t *testing.T) {
+	r := FromSim(simResult(), "")
 	if r.OK || r.Counters["steps"] != 40 || r.Steps != 40 || r.RandCalls != 9 || r.Hash != 0xabc {
 		t.Fatalf("result %+v", r)
 	}
@@ -103,14 +102,14 @@ func TestFromKernelNamesTheCounterAndKeepsFailures(t *testing.T) {
 	}
 }
 
-// kernelResult is a failed kernel run with one failure, one coverage entry
+// simResult is a failed sim run with one failure, one coverage entry
 // and one tail line.
-func kernelResult() kernel.Result {
-	return kernel.Result{
+func simResult() sim.Result {
+	return sim.Result{
 		Seed: 3, Steps: 40, RandCalls: 9, Hash: 0xabc,
-		Failures: []kernel.Failure{{Kind: kernel.FailViolation, Property: "p", Detail: "d", Step: 7, At: kernel.Time(2500 * time.Millisecond), Repeats: 3}},
+		Failures: []sim.Failure{{Kind: sim.FailViolation, Property: "p", Detail: "d", Step: 7, At: sim.Time(2500 * time.Millisecond), Repeats: 3}},
 		Coverage: map[string]assert.Coverage{"x": {Kind: assert.KindSometimes, Checks: 4, Passes: 1}},
-		Tail:     []kernel.LogEntry{{Step: 40, At: 1, Text: "last step"}},
+		Tail:     []sim.LogEntry{{Step: 40, At: 1, Text: "last step"}},
 	}
 }
 

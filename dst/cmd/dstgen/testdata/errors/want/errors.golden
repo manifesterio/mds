@@ -1,5 +1,5 @@
 errors.go:9: noDecl: a //dst:sum also needs //sumtype:decl (for the exhaustive switch linter), or use //dst:sum open
-errors.go:16: noFold: a //dst:sum must embed actor.Payload (or machine.Message): it has no Fold(*trace.Hash)
+errors.go:16: noFold: a //dst:sum must embed actor.Payload: it has no Fold(*trace.Hash)
 errors.go:20: noMarker: a //dst:sum needs the marker method isNoMarker()
 errors.go:23: notIface: //dst:sum needs an interface
 errors.go:34: ptr: cannot fold a *int

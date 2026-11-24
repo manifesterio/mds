@@ -61,7 +61,7 @@ func (s *Spec) Exec(call Call) Result {
 
 func (s *Spec) execPut(c Put) Result {
 	if c.Key == "" {
-		return PutDone{Req: c.Req, Key: c.Key, Err: status.ErrInvalid}
+		return PutDone{Key: c.Key, Err: status.ErrInvalid}
 	}
 	i, found := slices.BinarySearch(s.keys, c.Key)
 	if !found {
@@ -69,19 +69,19 @@ func (s *Spec) execPut(c Put) Result {
 	}
 	s.touch(i)
 	s.objs[c.Key] = clone(c.Data)
-	return PutDone{Req: c.Req, Key: c.Key, Outcome: status.Applied}
+	return PutDone{Key: c.Key, Outcome: status.Applied}
 }
 
 func (s *Spec) execGet(c Get) Result {
 	data, ok := s.objs[c.Ref.Key]
 	if !ok {
-		return GetDone{Req: c.Req, Err: status.ErrNotFound}
+		return GetDone{Err: status.ErrNotFound}
 	}
 	got, ok := cutRange(data, c.Ref)
 	if !ok {
-		return GetDone{Req: c.Req, Err: status.ErrInvalid}
+		return GetDone{Err: status.ErrInvalid}
 	}
-	return GetDone{Req: c.Req, Data: clone(got)}
+	return GetDone{Data: clone(got)}
 }
 
 func cutRange(data []byte, ref SegmentRef) ([]byte, bool) {
@@ -97,13 +97,13 @@ func cutRange(data []byte, ref SegmentRef) ([]byte, bool) {
 
 func (s *Spec) execDelete(c Delete) Result {
 	if _, ok := s.objs[c.Key]; !ok {
-		return DeleteDone{Req: c.Req, Err: status.ErrNotFound}
+		return DeleteDone{Err: status.ErrNotFound}
 	}
 	i, _ := slices.BinarySearch(s.keys, c.Key)
 	s.keys = slices.Delete(s.keys, i, i+1)
 	s.touch(i)
 	delete(s.objs, c.Key)
-	return DeleteDone{Req: c.Req, Outcome: status.Applied}
+	return DeleteDone{Outcome: status.Applied}
 }
 
 func (s *Spec) execList(c List) Result {
@@ -113,7 +113,7 @@ func (s *Spec) execList(c List) Result {
 			keys = append(keys, k)
 		}
 	}
-	return ListDone{Req: c.Req, Keys: keys}
+	return ListDone{Keys: keys}
 }
 
 // Keys returns every key, sorted.

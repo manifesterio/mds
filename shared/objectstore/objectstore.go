@@ -18,7 +18,6 @@ package objectstore
 import (
 	"context"
 
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/status"
 )
 
@@ -30,36 +29,31 @@ type SegmentRef struct {
 }
 
 // Call is one request to the object store. Only the four cases in this file
-// exist. Every Call has a RequestID, and its Result carries the same one.
+// exist. The caller matches a Result to its Call (an actor through Perform).
 //
 //sumtype:decl
 type Call interface {
 	isCall()
-	RequestID() machine.RequestID
 }
 
 // Put uploads Data under Key.
 type Put struct {
-	Req  machine.RequestID
 	Key  string // unique per upload, so a MaybeApplied PUT is safe to retry
 	Data []byte
 }
 
 // Get reads the byte range Ref.
 type Get struct {
-	Req machine.RequestID
 	Ref SegmentRef
 }
 
 // Delete removes the object at Key.
 type Delete struct {
-	Req machine.RequestID
 	Key string
 }
 
 // List lists the keys under Prefix.
 type List struct {
-	Req    machine.RequestID
 	Prefix string
 }
 
@@ -68,29 +62,15 @@ func (Get) isCall()    {}
 func (Delete) isCall() {}
 func (List) isCall()   {}
 
-// RequestID returns the request this call carries.
-func (c Put) RequestID() machine.RequestID { return c.Req }
-
-// RequestID returns the request this call carries.
-func (c Get) RequestID() machine.RequestID { return c.Req }
-
-// RequestID returns the request this call carries.
-func (c Delete) RequestID() machine.RequestID { return c.Req }
-
-// RequestID returns the request this call carries.
-func (c List) RequestID() machine.RequestID { return c.Req }
-
 // Result is the answer to one Call. Only the four cases in this file exist.
 //
 //sumtype:decl
 type Result interface {
 	isResult()
-	RequestID() machine.RequestID
 }
 
 // PutDone reports that a Put finished.
 type PutDone struct {
-	Req     machine.RequestID
 	Key     string
 	Err     status.ErrCode
 	Outcome status.Outcome
@@ -98,21 +78,18 @@ type PutDone struct {
 
 // GetDone reports that a Get finished.
 type GetDone struct {
-	Req  machine.RequestID
 	Data []byte
 	Err  status.ErrCode
 }
 
 // DeleteDone reports that a Delete finished.
 type DeleteDone struct {
-	Req     machine.RequestID
 	Err     status.ErrCode
 	Outcome status.Outcome
 }
 
 // ListDone reports that a List finished.
 type ListDone struct {
-	Req  machine.RequestID
 	Keys []string // sorted
 	Err  status.ErrCode
 }
@@ -121,18 +98,6 @@ func (PutDone) isResult()    {}
 func (GetDone) isResult()    {}
 func (DeleteDone) isResult() {}
 func (ListDone) isResult()   {}
-
-// RequestID returns the request this result answers.
-func (r PutDone) RequestID() machine.RequestID { return r.Req }
-
-// RequestID returns the request this result answers.
-func (r GetDone) RequestID() machine.RequestID { return r.Req }
-
-// RequestID returns the request this result answers.
-func (r DeleteDone) RequestID() machine.RequestID { return r.Req }
-
-// RequestID returns the request this result answers.
-func (r ListDone) RequestID() machine.RequestID { return r.Req }
 
 // Store is the object store as a Go interface. An adapter over real I/O (S3) and
 // an in-memory fake both implement it. A failure that the store knows has a

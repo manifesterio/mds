@@ -680,6 +680,25 @@ These are choices the plan did not spell out. All five were approved at the P1 g
 
 ---
 
+## 11. Flow helper: not needed (P8)
+
+The plan allowed a `dst/core/actor/flow` helper only if at least two products repeat one
+multi-step pattern after the migration. They do not:
+
+- broker: `operation` (control-plane call or object Get, retried with backoff, or parked until a
+  poll) and `segment` (Put, retry, wait for turn, CommitSegment, retry) are two "call, retry with
+  backoff" state machines, both inside the broker.
+- controlplane replica: the checkpoint lane is a two-step sequence (upload, then trim) with no
+  retry; reads and catch-up are one request at a time (`pendingKind`).
+- controlplane rebalance: one write per group guarded by a write timeout that ends the term.
+
+The only repeated shape is the broker's call-with-backoff, inside one product. Each state enum
+is small, named for its domain, and reads well with keyed timers and Perform adapters carrying
+the context. A generic flow helper would add a concept without removing code from two products.
+Revisit when a second product (SQS-like queue, workflow service) shows the same shape.
+
+---
+
 ## Appendix A. Frozen API (verbatim copy of `api.go`)
 
 ```go

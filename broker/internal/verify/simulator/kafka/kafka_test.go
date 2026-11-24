@@ -15,10 +15,10 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -36,7 +36,7 @@ func seeds(from uint64, n int) []uint64 {
 var expectedReachable = []string{
 	"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
 	"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
-	"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
+	"net: conn reset injected",
 	"broker: commit retried", "broker: commit succeeded after the old retry budget",
 	"broker: corrupt GET detected",
 	"broker: fetch parked for a poll",
@@ -54,9 +54,9 @@ var expectedReachable = []string{
 // runSeeds runs the seeds one after another. Like the campaign, it runs every 10th
 // seed a second time with Log flipped, and the two runs must give the same hash,
 // steps and random calls.
-func runSeeds(t *testing.T, ss []uint64, cfgFor func(seed uint64) Config) []kernel.Result {
+func runSeeds(t *testing.T, ss []uint64, cfgFor func(seed uint64) Config) []sim.Result {
 	t.Helper()
-	var out []kernel.Result
+	var out []sim.Result
 	for i, seed := range ss {
 		cfg := cfgFor(seed)
 		res := Run(cfg)
@@ -75,7 +75,7 @@ func runSeeds(t *testing.T, ss []uint64, cfgFor func(seed uint64) Config) []kern
 // report fails the test for each failure of a seed, and, when coverage is true, for each
 // path that no seed reached (a Sometimes or a Reachable with no pass, or a path
 // of expectedReachable).
-func report(t *testing.T, results []kernel.Result, coverage bool) {
+func report(t *testing.T, results []sim.Result, coverage bool) {
 	t.Helper()
 	total := map[string]assert.Coverage{}
 	for _, r := range results {
@@ -137,7 +137,7 @@ func violated(cfg Config) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, f := range Run(cfg).Failures {
-		if f.Kind == kernel.FailViolation && !seen[f.Property] {
+		if f.Kind == sim.FailViolation && !seen[f.Property] {
 			seen[f.Property] = true
 			out = append(out, f.Property)
 		}
@@ -204,9 +204,9 @@ type tallyRule struct {
 	hist history.Reader[Op, Res]
 }
 
-func (*tallyRule) Name() string        { return "tally" }
-func (*tallyRule) Observe(kernel.View) {}
-func (i *tallyRule) AtEnd(v kernel.View) {
+func (*tallyRule) Name() string     { return "tally" }
+func (*tallyRule) Observe(sim.View) {}
+func (i *tallyRule) AtEnd(v sim.View) {
 	i.t.ackFacts += len(v.Timeline().Snapshot("produce_acked"))
 	for _, operation := range i.hist.Ops() {
 		switch r := operation.Result.(type) {
@@ -242,8 +242,8 @@ func (i *tallyRule) AtEnd(v kernel.View) {
 func TestCampaignIsNotVacuous(t *testing.T) {
 	var tl tally
 	for s := uint64(1); s <= 20; s++ {
-		Run(Config{Seed: s, ExtraRules: func(_ *cluster.Cluster, h *History) []kernel.Rule {
-			return []kernel.Rule{&tallyRule{t: &tl, hist: h}}
+		Run(Config{Seed: s, ExtraRules: func(_ *cluster.Cluster, h *History) []sim.Rule {
+			return []sim.Rule{&tallyRule{t: &tl, hist: h}}
 		}})
 	}
 	t.Logf("20 seeds: %+v", tl)
@@ -257,12 +257,23 @@ type fakeEnv struct{ n uint64 }
 
 func (e *fakeEnv) Uint64() uint64 { e.n++; return e.n }
 func (e *fakeEnv) Intn(n int) int { e.n++; return int(e.n % uint64(n)) }
-func (e *fakeEnv) NewID() machine.ID {
+func (e *fakeEnv) NewID() actor.ID {
 	e.n++
-	var id machine.ID
+	var id actor.ID
 	id[0], id[1] = byte(e.n), byte(e.n>>8)
 	return id
 }
+func (e *fakeEnv) Between(lo, hi int64) int64 {
+	if hi <= lo {
+		return lo
+	}
+	return lo + int64(e.Intn(int(hi-lo+1)))
+}
+func (e *fakeEnv) Duration(lo, hi actor.Duration) actor.Duration {
+	return actor.Duration(e.Between(int64(lo), int64(hi)))
+}
+func (*fakeEnv) Chance(float64) bool                                                  { return false }
+func (*fakeEnv) Self() actor.Incarnation                                              { return actor.Incarnation{Name: "w"} }
 func (*fakeEnv) Maybe(fault.Site) bool                                                { return false }
 func (*fakeEnv) MaybeP(fault.Site, float64) bool                                      { return false }
 func (*fakeEnv) Fault(fault.Site, float64) bool                                       { return false }
@@ -274,7 +285,7 @@ func (*fakeEnv) Unreachable(assert.Unreachable, ...assert.Pair)                 
 
 // newTestHistory is a history for a workload that is driven by hand.
 func newTestHistory() *History {
-	return history.New[Op, Res](func() kernel.Time { return 0 }, func(string) {})
+	return history.New[Op, Res](func() sim.Time { return 0 }, func(string) {})
 }
 
 // The real broker never answers a fatal code to a plain batch, so the give-up
@@ -283,17 +294,15 @@ func newTestHistory() *History {
 func TestFatalProduceErrorGivesUp(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
 		h := newTestHistory()
-		w := NewWorkload(&fakeEnv{}, machine.NodeInstance{Node: "w"}, []machine.NodeID{"b"}, h, DefaultOpts())
-		c := w.loop.Clients[0]
-		c.State, c.stage = session.Connected, stateRunning
-		w.newBatches(c)
+		c := newTestClient(&fakeEnv{}, h)
+		c.newBatches()
 		if len(h.Ops()) == 0 || len(c.p.cur) != len(h.Ops()) {
 			t.Fatalf("no batches built: %d ops", len(h.Ops()))
 		}
 		for _, b := range c.p.cur {
 			b.ambiguous, b.idem = ambiguous, false
 		}
-		w.onProduce(c, produceResp(w, c, 45))
+		record(func(o *outbox) { c.onProduce(produceResp(c, 45), o) })
 		want := history.GivenUp
 		if ambiguous {
 			want = history.ResultUnknown
@@ -309,10 +318,25 @@ func TestFatalProduceErrorGivesUp(t *testing.T) {
 	}
 }
 
-func produceResp(w *Workload, c *client, code int16) *kmsg.ProduceResponse {
+// newTestClient is producer 0, connected and running, driven by hand.
+func newTestClient(env actor.Env, h *History) *client {
+	c := newClient(env, 0, []string{"b"}, h, DefaultOpts())
+	c.sess.State, c.stage = session.Connected, stateRunning
+	return c
+}
+
+// record runs fn with a fresh session outbox and returns its effects.
+func record(fn func(o *outbox)) []actor.Effect {
+	n := uint64(0)
+	o := actor.NewOutbox[session.Msg, core.IO](actor.Binding{Next: func() uint64 { n++; return n }})
+	fn(o)
+	return actor.Close(o)
+}
+
+func produceResp(c *client, code int16) *kmsg.ProduceResponse {
 	response := kmsg.NewPtrProduceResponse()
 	for _, b := range c.p.cur {
-		topicPartition := w.tps[b.tpIdx]
+		topicPartition := c.tps[b.tpIdx]
 		response.Topics = append(response.Topics, kmsg.ProduceResponseTopic{Topic: topicPartition.Topic,
 			Partitions: []kmsg.ProduceResponseTopicPartition{{Partition: topicPartition.Partition, ErrorCode: code, BaseOffset: -1}}})
 	}
@@ -324,14 +348,12 @@ func produceResp(w *Workload, c *client, code int16) *kmsg.ProduceResponse {
 func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
 		h := newTestHistory()
-		w := NewWorkload(&fakeEnv{}, machine.NodeInstance{Node: "w"}, []machine.NodeID{"b"}, h, DefaultOpts())
-		c := w.loop.Clients[0]
-		c.State, c.stage = session.Connected, stateRunning
-		w.newBatches(c)
+		c := newTestClient(&fakeEnv{}, h)
+		c.newBatches()
 		for _, b := range c.p.cur {
 			b.ambiguous, b.idem = ambiguous, true
 		}
-		acts := w.onProduce(c, produceResp(w, c, codeInvalidRequest))
+		acts := record(func(o *outbox) { c.onProduce(produceResp(c, codeInvalidRequest), o) })
 		for i, operation := range h.Ops() {
 			res, _ := operation.Result.(ProduceRes)
 			if operation.Outcome != history.GivenUp || res.Why != "rejected" || res.Base != -1 {
@@ -360,12 +382,11 @@ func (e *rngEnv) Intn(n int) int {
 
 // Only the batches built with idem set carry a producer id on the wire.
 func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
-	w := NewWorkload(&rngEnv{x: 88172645463325252}, machine.NodeInstance{Node: "w"}, []machine.NodeID{"b"}, newTestHistory(), DefaultOpts())
-	c := w.loop.Clients[0]
+	c := newTestClient(&rngEnv{x: 88172645463325252}, newTestHistory())
 	idem, plain := 0, 0
 	for range 400 {
 		c.p.cur = nil
-		w.newBatches(c)
+		c.newBatches()
 		for _, b := range c.p.cur {
 			if b.corrupt {
 				continue
@@ -438,8 +459,8 @@ func wideCampaign(t *testing.T, capParts, batches int) int64 {
 		return Config{
 			Seed: seed, Opts: opts,
 			Tune: func(s *Settings) { s.Broker, s.ControlPlane.MaxCommitItems = prod, items },
-			ExtraRules: func(c *cluster.Cluster, _ *History) []kernel.Rule {
-				return []kernel.Rule{&widestRule{widest: &widest, tps: opts.topicPartitions(), cp: c.ControlPlane}}
+			ExtraRules: func(c *cluster.Cluster, _ *History) []sim.Rule {
+				return []sim.Rule{&widestRule{widest: &widest, tps: opts.topicPartitions(), cp: c.ControlPlane}}
 			},
 		}
 	})
@@ -472,9 +493,9 @@ type widestRule struct {
 	cp     truth.ControlPlane
 }
 
-func (*widestRule) Name() string        { return "widest" }
-func (*widestRule) Observe(kernel.View) {}
-func (i *widestRule) AtEnd(kernel.View) {
+func (*widestRule) Name() string     { return "widest" }
+func (*widestRule) Observe(sim.View) {}
+func (i *widestRule) AtEnd(sim.View) {
 	parts := map[string]map[core.TopicPartition]bool{}
 	for _, topicPartition := range i.tps {
 		for _, r := range i.cp.Committed(topicPartition) {
@@ -498,13 +519,12 @@ func (i *widestRule) AtEnd(kernel.View) {
 // broker but decodable by the simulated consumer), plus damaged batches.
 func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 	h := newTestHistory()
-	w := NewWorkload(&rngEnv{x: 88172645463325252}, machine.NodeInstance{Node: "w"}, []machine.NodeID{"b"}, h, DefaultOpts())
-	c := w.loop.Clients[0]
+	c := newTestClient(&rngEnv{x: 88172645463325252}, h)
 	seen := map[int]int{}
 	corrupt := 0
 	for range 400 {
 		c.p.cur = nil
-		w.newBatches(c)
+		c.newBatches()
 		for _, b := range c.p.cur {
 			if b.corrupt {
 				corrupt++
@@ -543,14 +563,12 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 // code for a good batch stays fatal.
 func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
 	h := newTestHistory()
-	w := NewWorkload(&fakeEnv{}, machine.NodeInstance{Node: "w"}, []machine.NodeID{"b"}, h, DefaultOpts())
-	c := w.loop.Clients[0]
-	c.State, c.stage = session.Connected, stateRunning
-	w.newBatches(c)
+	c := newTestClient(&fakeEnv{}, h)
+	c.newBatches()
 	for _, b := range c.p.cur {
 		b.idem, b.corrupt = false, true
 	}
-	w.onProduce(c, produceResp(w, c, codeCorruptMessage))
+	record(func(o *outbox) { c.onProduce(produceResp(c, codeCorruptMessage), o) })
 	for i, operation := range h.Ops() {
 		res, _ := operation.Result.(ProduceRes)
 		if operation.Outcome != history.GivenUp || res.Why != "rejected" {

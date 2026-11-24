@@ -9,7 +9,6 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/dst/verify/check/spectest"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
@@ -18,11 +17,6 @@ import (
 // framework ran lists of exactly 120 operations; rapid draws lists whose length
 // is random, with this average.
 const suiteSteps = 120
-
-// extraReqBase is the first request number of the extra calls that the suites
-// make for invariants. The calls of the lockstep list use small numbers (1, 2,
-// 3 and so on), so the two groups never share a request number.
-const extraReqBase machine.RequestID = 1 << 30
 
 // ObjectStoreLockstep returns the lockstep check of the object store suite for
 // profile p. Rapid draws a list of operations (ObjectOps), and each one runs on
@@ -76,20 +70,13 @@ func equalObject(want, got ObjectResult) error {
 type ObjectPair struct {
 	mirror  *objectstore.Spec
 	subject ObjectSubject
-	calls   machine.RequestID // calls made so far
-	extra   machine.RequestID // extra calls made so far
+	calls   uint64 // calls made so far
 }
 
-func (p *ObjectPair) nextReq() machine.RequestID {
-	p.extra++
-	return extraReqBase + p.extra
-}
-
-// Apply numbers the call, runs it on the mirror and on the subject, and
-// returns the subject result.
+// Apply runs the call on the mirror and on the subject, and returns the
+// subject result.
 func (p *ObjectPair) Apply(operation objectstore.Call) (ObjectResult, error) {
 	p.calls++
-	operation = withRequest(operation, p.calls)
 	p.mirror.Exec(operation)
 	subjectOp, overwrite := objectOpForSubject(operation)
 	result, err := p.subject.Apply(subjectOp)
@@ -105,25 +92,6 @@ func (p *ObjectPair) StateHash() uint64 {
 		return h.StateHash()
 	}
 	return p.mirror.StateHash()
-}
-
-// withRequest returns operation with the request number n.
-func withRequest(operation objectstore.Call, n machine.RequestID) objectstore.Call {
-	switch operation := operation.(type) {
-	case objectstore.Put:
-		operation.Req = n
-		return operation
-	case objectstore.Get:
-		operation.Req = n
-		return operation
-	case objectstore.Delete:
-		operation.Req = n
-		return operation
-	case objectstore.List:
-		operation.Req = n
-		return operation
-	}
-	return operation
 }
 
 // objectOpForSubject returns op with its own copy of the Put data, and a
@@ -143,7 +111,7 @@ func objectOpForSubject(operation objectstore.Call) (objectstore.Call, func()) {
 }
 
 func (p *ObjectPair) invariant() error {
-	result, err := p.subject.Apply(objectstore.List{Req: p.nextReq()})
+	result, err := p.subject.Apply(objectstore.List{})
 	if err != nil {
 		return fmt.Errorf("the subject could not list all keys: %w", err)
 	}

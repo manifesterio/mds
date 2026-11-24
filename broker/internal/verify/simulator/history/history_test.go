@@ -3,17 +3,17 @@ package history
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
-func id(b byte) machine.ID { return machine.ID{b} }
+func id(b byte) actor.ID { return actor.ID{b} }
 
 func TestInvokeAndReturnStampSequenceAndTime(t *testing.T) {
-	now := kernel.Time(10)
+	now := sim.Time(10)
 	var bad []string
-	h := New[string, int](func() kernel.Time { return now }, func(m string) { bad = append(bad, m) })
-	client := machine.NodeInstance{Node: "w"}
+	h := New[string, int](func() sim.Time { return now }, func(m string) { bad = append(bad, m) })
+	client := actor.Incarnation{Name: "w"}
 	h.Invoke(client, id(1), id(1), "put")
 	now = 20
 	h.Invoke(client, id(2), id(2), "get")
@@ -40,8 +40,8 @@ func TestInvokeAndReturnStampSequenceAndTime(t *testing.T) {
 }
 
 func TestPendingUntilReturned(t *testing.T) {
-	h := New[string, int](func() kernel.Time { return 0 }, func(string) {})
-	h.Invoke(machine.NodeInstance{}, id(1), id(1), "put")
+	h := New[string, int](func() sim.Time { return 0 }, func(string) {})
+	h.Invoke(actor.Incarnation{}, id(1), id(1), "put")
 	if h.Ops()[0].Outcome != Pending {
 		t.Fatal("a new operation is not Pending")
 	}
@@ -49,9 +49,9 @@ func TestPendingUntilReturned(t *testing.T) {
 
 func TestProtocolBreaksAreReported(t *testing.T) {
 	var bad []string
-	h := New[string, int](func() kernel.Time { return 0 }, func(m string) { bad = append(bad, m) })
-	h.Invoke(machine.NodeInstance{}, id(1), id(1), "put")
-	h.Invoke(machine.NodeInstance{}, id(1), id(1), "put again") // the same id
+	h := New[string, int](func() sim.Time { return 0 }, func(m string) { bad = append(bad, m) })
+	h.Invoke(actor.Incarnation{}, id(1), id(1), "put")
+	h.Invoke(actor.Incarnation{}, id(1), id(1), "put again") // the same id
 	if h.Return(id(9), 0, GivenUp) {
 		t.Error("Return of an unknown id succeeded")
 	}

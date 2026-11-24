@@ -26,21 +26,13 @@ func newTopic(name string, parts int32, rf int16) kmsg.CreateTopicsRequestTopic 
 // cpTopics is the topic table of the control plane spec.
 func cpTopics(h *harness) map[string]int32 {
 	out := map[string]int32{}
-	for _, t := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: contract.DescribeTopics{}}).(core.ControlPlaneDone).Resp.(contract.DescribeTopicsResp).Topics {
+	for _, t := range h.cp.exec(contract.DescribeTopics{}).Resp.(contract.DescribeTopicsResp).Topics {
 		out[t.Name] = t.Partitions
 	}
 	return out
 }
 
-func countFacts(h *harness, name string) int {
-	n := 0
-	for _, a := range h.all {
-		if r, ok := a.(core.RecordFact); ok && r.Fact.Name == name {
-			n++
-		}
-	}
-	return n
-}
+func countFacts(h *harness, name string) int { return len(factsNamed(h.all, name)) }
 
 func TestCreateTopics(t *testing.T) {
 	tests := []struct {
@@ -175,10 +167,10 @@ func TestCreateTopicsRetriesControlPlaneErrors(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	fails := 2
-	h.cpHook = func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult {
+	h.cpHook = func(a core.ControlPlaneCall, exec func() core.ControlPlaneDone) core.ControlPlaneDone {
 		if _, ok := a.Op.(contract.CreateTopic); ok && fails > 0 {
 			fails--
-			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
 		return exec()
 	}
@@ -256,11 +248,11 @@ func TestCreateTopicsRetryAfterLostReply(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	lost := true
-	h.cpHook = func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult {
+	h.cpHook = func(a core.ControlPlaneCall, exec func() core.ControlPlaneDone) core.ControlPlaneDone {
 		if _, ok := a.Op.(contract.CreateTopic); ok && lost {
 			lost = false
 			exec() // the create takes effect
-			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
+			return core.ControlPlaneDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}
 		}
 		return exec()
 	}

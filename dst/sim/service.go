@@ -137,8 +137,11 @@ type Responder[R actor.Payload] struct {
 	answered *bool
 }
 
-// Wanted reports whether anyone waits for this answer.
-func (r Responder[R]) Wanted() bool { return r.to.set }
+// Wanted reports whether anyone still waits for this answer: a caller asked
+// for it, and the caller's incarnation is still up.
+func (r Responder[R]) Wanted() bool {
+	return r.to.set && r.sys.actors[r.to.idx].base().alive(r.to.inc)
+}
 
 // After answers after d. It is dropped if nobody waits (TellService), or if
 // the caller is gone or has forgotten the call by then. A second answer is a

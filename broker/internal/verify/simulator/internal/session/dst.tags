@@ -1,0 +1,6 @@
+# dst.tags: written by dstgen. Append-only: never change a number, never reuse one.
+# <tag> <TypeName>; a retired line has the name -
+1 Dialed
+2 Net
+3 WakeDue
+4 RequestDue

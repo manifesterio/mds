@@ -8,9 +8,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // expectedLogChecker is the invariant that owns the reconstructed logs and every check
@@ -34,7 +34,7 @@ type expectedLogChecker struct {
 
 	started                                  bool
 	controlPlaneGeneration, objectGeneration uint64
-	ackCur                                   kernel.Cursor
+	ackCur                                   sim.Cursor
 	nops                                     int
 	opIdx                                    map[[2]int]int            // (client, batch) -> history index
 	pend                                     []int                     // history indexes not yet resolved
@@ -55,7 +55,7 @@ func newOracle(o Opts, hist history.Reader[Op, Res], objs truth.ObjectStore, cp 
 
 func (*expectedLogChecker) Name() string { return "KafkaOracle" }
 
-func (o *expectedLogChecker) Observe(v kernel.View) {
+func (o *expectedLogChecker) Observe(v sim.View) {
 	o.scanOps(v)
 	o.refresh(v)
 	o.acks(v)
@@ -63,7 +63,7 @@ func (o *expectedLogChecker) Observe(v kernel.View) {
 }
 
 // scanOps indexes newly invoked ops.
-func (o *expectedLogChecker) scanOps(v kernel.View) {
+func (o *expectedLogChecker) scanOps(v sim.View) {
 	ops := o.hist.Ops()
 	for ; o.nops < len(ops); o.nops++ {
 		if operation, ok := ops[o.nops].Op.(ProduceOp); ok {
@@ -74,7 +74,7 @@ func (o *expectedLogChecker) scanOps(v kernel.View) {
 }
 
 // refresh brings every partition's log up to the current truth.
-func (o *expectedLogChecker) refresh(v kernel.View) {
+func (o *expectedLogChecker) refresh(v sim.View) {
 	cg, og := o.cp.Gen(), o.objs.Gen()
 	if o.started && cg == o.controlPlaneGeneration && og == o.objectGeneration {
 		return
@@ -95,7 +95,7 @@ func topicPartitionName(topicPartition core.TopicPartition) string {
 // at this position of its batch, never from a definitely rejected batch). A
 // value may appear again only as a retry of its batch; AtEnd bounds the count
 // by the sends.
-func (o *expectedLogChecker) record(v kernel.View, pl *partitionLog, off int64, i int, val string, det []assert.Pair) {
+func (o *expectedLogChecker) record(v sim.View, pl *partitionLog, off int64, i int, val string, det []assert.Pair) {
 	as := v.Assert()
 	if val == "?" {
 		return
@@ -117,19 +117,19 @@ func (o *expectedLogChecker) record(v kernel.View, pl *partitionLog, off int64, 
 
 // acks checks each produce_acked fact against the truth at the Step that
 // emitted it.
-func (o *expectedLogChecker) acks(v kernel.View) {
+func (o *expectedLogChecker) acks(v sim.View) {
 	for _, tf := range v.Timeline().Since("produce_acked", &o.ackCur) {
 		f := tf.Fact
-		topic, _ := f.Field("topic").(machine.StringValue)
-		part, ok1 := f.Field("partition").(machine.Int64Value)
-		base, ok2 := f.Field("base_offset").(machine.Int64Value)
-		count, ok3 := f.Field("count").(machine.Int64Value)
+		topic, _ := f.Field("topic").(actor.StringValue)
+		part, ok1 := f.Field("partition").(actor.Int64Value)
+		base, ok2 := f.Field("base_offset").(actor.Int64Value)
+		count, ok3 := f.Field("count").(actor.Int64Value)
 		v.Assert().Always(ok1 && ok2 && ok3, ackFactWellFormed)
 		if !ok1 || !ok2 || !ok3 {
 			continue
 		}
 		det := []assert.Pair{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
-			{Key: "count", Value: int64(count)}, {Key: "node", Value: string(tf.Source.Node)}}
+			{Key: "count", Value: int64(count)}, {Key: "node", Value: tf.Source.Name}}
 		ti, known := o.idx[contract.NewTopicPartition(string(topic), int32(part))]
 		bi, found := -1, false
 		if known {
@@ -141,7 +141,7 @@ func (o *expectedLogChecker) acks(v kernel.View) {
 }
 
 // reads checks every consumer fetch that has just returned.
-func (o *expectedLogChecker) reads(v kernel.View) {
+func (o *expectedLogChecker) reads(v sim.View) {
 	ops := o.hist.Ops()
 	keep := o.pend[:0]
 	for _, i := range o.pend {
@@ -157,7 +157,7 @@ func (o *expectedLogChecker) reads(v kernel.View) {
 	o.pend = keep
 }
 
-func (o *expectedLogChecker) checkRead(v kernel.View, ro ReadOp, rr ReadRes) {
+func (o *expectedLogChecker) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
 	as := v.Assert()
 	for i, part := range rr.Parts {
 		from := ro.Parts[i]
@@ -189,7 +189,7 @@ func (o *expectedLogChecker) checkRead(v kernel.View, ro ReadOp, rr ReadRes) {
 	}
 }
 
-func (o *expectedLogChecker) AtEnd(v kernel.View) {
+func (o *expectedLogChecker) AtEnd(v sim.View) {
 	o.scanOps(v)
 	o.refresh(v)
 	as := v.Assert()

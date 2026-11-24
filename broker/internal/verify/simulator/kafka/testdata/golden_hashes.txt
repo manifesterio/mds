@@ -1,5 +1,5 @@
-kafka seed=1 steps=12656 rand=57344 hash=96f1d45c08678e07
-kafka seed=2 steps=10479 rand=43697 hash=d732377f643c6f58
-kafka seed=3 steps=19579 rand=76745 hash=04d04a05d71ab2a0
-kafka seed=4 steps=12936 rand=54837 hash=83ab46da2f6a7c92
-kafka seed=5 steps=16357 rand=65576 hash=28172f1f48d94275
+kafka seed=1 steps=10502 rand=49473 hash=6a2453eb4022c76f
+kafka seed=2 steps=6933 rand=33407 hash=6ddaef7601925330
+kafka seed=3 steps=8070 rand=37504 hash=b9f62346e5fb50ae
+kafka seed=4 steps=13574 rand=65857 hash=0a34d963d92338ae
+kafka seed=5 steps=9849 rand=42250 hash=7f31b2ae73ff1dc9

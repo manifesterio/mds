@@ -4,16 +4,33 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
-type wrap struct{ Client }
+// record runs fn with a fresh outbox and returns the effects it recorded.
+func record(t *testing.T, fn func(o *Outbox)) []actor.Effect {
+	t.Helper()
+	n := uint64(0)
+	o := actor.NewOutbox[Msg, core.IO](actor.Binding{
+		Next:   func() uint64 { n++; return n },
+		Misuse: func(what string) { t.Fatalf("misuse: %s", what) },
+	})
+	fn(o)
+	return actor.Close(o)
+}
 
-func (w *wrap) session() *Client { return &w.Client }
+// kinds lists the kinds of effects.
+func kinds(effects []actor.Effect) []actor.EffectKind {
+	var out []actor.EffectKind
+	for _, e := range effects {
+		out = append(out, e.Kind)
+	}
+	return out
+}
 
 func TestRetryDelay(t *testing.T) {
 	t.Parallel()
-	if RetryWaitTime(1) != 100*machine.Millisecond {
+	if RetryWaitTime(1) != 100*actor.Millisecond {
 		t.Fatalf("RetryDelay(1) = %d", RetryWaitTime(1))
 	}
 	if RetryWaitTime(99) != RetryWaitTime(4) {
@@ -21,106 +38,79 @@ func TestRetryDelay(t *testing.T) {
 	}
 }
 
-func TestLoopDialFailAndReady(t *testing.T) {
+func TestDialFailAndReady(t *testing.T) {
 	t.Parallel()
-	c := &wrap{Client: Client{ID: 0}}
-	var ready, lost int
-	l := Loop[*wrap]{
-		Brokers:   []machine.NodeID{"b0", "b1"},
-		Clients:   []*wrap{c},
-		Connected: func(c *wrap) bool { return c.State == Connected },
-		Busy:      func(c *wrap) bool { return false },
-		Ready: func(c *wrap) []core.Action {
-			ready++
-			return nil
-		},
-		Idle:  func(*wrap) []core.Action { return nil },
-		Bytes: func(*wrap, []byte) []core.Action { return nil },
-		Lost:  func(*wrap, string) { lost++ },
+	s := &Session{ID: 0, Brokers: []string{"b0", "b1"}}
+	effects := record(t, s.Dial)
+	if len(effects) != 1 || effects[0].Kind != actor.EffectPerform || s.State != Connecting {
+		t.Fatalf("dial = %v state %d", kinds(effects), s.State)
 	}
-
-	acts := l.Step(core.Event{Body: core.NodeStarted{}})
-	if len(acts) != 1 {
-		t.Fatalf("Started acts = %#v", acts)
+	if c, ok := effects[0].Msg.(core.Connect); !ok || c.Addr != "b0" {
+		t.Fatalf("dial = %#v", effects[0].Msg)
 	}
-	d, ok := acts[0].(core.Connect)
-	if !ok || c.State != Connecting {
-		t.Fatalf("dial = %#v state %d", acts[0], c.State)
+	var ev Event
+	effects = record(t, func(o *Outbox) { ev = s.Receive(Dialed{Done: core.ConnectDone{Err: core.ErrUnavailable}}, o) })
+	if s.State != WaitingToRetry || ev.Kind != Nothing || len(effects) != 1 || effects[0].Kind != actor.EffectStartTimer {
+		t.Fatalf("dial fail state=%d effects=%v", s.State, kinds(effects))
 	}
-
-	acts = l.Step(core.Event{Body: core.ConnectDone{Req: d.Req, Err: core.ErrUnavailable}})
-	if c.State != WaitingToRetry || len(acts) != 1 {
-		t.Fatalf("dial fail state=%d acts=%#v", c.State, acts)
+	effects = record(t, func(o *Outbox) { s.Receive(WakeDue{}, o) })
+	if c, ok := effects[0].Msg.(core.Connect); !ok || c.Addr != "b1" {
+		t.Fatalf("redial = %v", kinds(effects))
 	}
-
-	acts = l.Step(core.Event{Body: core.TimerFired{ID: c.wakeID(), Gen: c.WakeGen}})
-	d, ok = acts[0].(core.Connect)
-	if !ok {
-		t.Fatalf("redial = %#v", acts)
+	record(t, func(o *Outbox) { ev = s.Receive(Dialed{Done: core.ConnectDone{Conn: 7}}, o) })
+	if s.State != Connected || s.Conn != 7 || ev.Kind != Ready {
+		t.Fatalf("ready state=%d conn=%d event=%v", s.State, s.Conn, ev)
 	}
-	_ = l.Step(core.Event{Body: core.ConnectDone{Req: d.Req, Conn: 7}})
-	if c.State != Connected || c.Conn != 7 || ready != 1 {
-		t.Fatalf("ready state=%d conn=%d ready=%d", c.State, c.Conn, ready)
+	record(t, func(o *Outbox) { ev = s.Receive(Net{Event: core.ConnClosed{Conn: 6}}, o) })
+	if s.State != Connected || ev.Kind != Nothing {
+		t.Fatal("a close of an older connection was taken")
 	}
-
-	_ = l.Step(core.Event{Body: core.ConnClosed{Conn: 7}})
-	if c.State != WaitingToRetry || lost != 1 {
-		t.Fatalf("closed state=%d lost=%d", c.State, lost)
+	effects = record(t, func(o *Outbox) { ev = s.Receive(Net{Event: core.ConnClosed{Conn: 7}}, o) })
+	if s.State != WaitingToRetry || ev.Kind != Lost || ev.Why != "conn_closed" {
+		t.Fatalf("closed state=%d event=%v", s.State, ev)
+	}
+	if k := kinds(effects); len(k) != 2 || k[0] != actor.EffectForgetPending || k[1] != actor.EffectStartTimer {
+		t.Fatalf("lost effects = %v", k)
 	}
 }
 
-func TestLoopRequestTimeout(t *testing.T) {
+func TestRequestTimeout(t *testing.T) {
 	t.Parallel()
-	c := &wrap{Client: Client{ID: 1, State: Connected, Conn: 3}}
-	busy := true
-	l := Loop[*wrap]{
-		Brokers:   []machine.NodeID{"b0"},
-		Clients:   []*wrap{c},
-		Connected: func(*wrap) bool { return true },
-		Busy:      func(*wrap) bool { return busy },
-		Ready:     func(*wrap) []core.Action { return nil },
-		Idle:      func(*wrap) []core.Action { return nil },
-		Bytes:     func(*wrap, []byte) []core.Action { return nil },
-		Lost:      func(*wrap, string) { busy = false },
+	s := &Session{ID: 1, Brokers: []string{"b0"}, State: Connected, Conn: 3}
+	effects := record(t, func(o *Outbox) { s.Request(o, []byte("x"), actor.Second) })
+	if k := kinds(effects); len(k) != 2 || k[0] != actor.EffectDo || k[1] != actor.EffectStartTimer || !s.Busy {
+		t.Fatalf("Request effects = %v", k)
 	}
-	acts := l.Request(c, []byte("x"), machine.Second)
-	if len(acts) != 2 {
-		t.Fatalf("Request acts = %#v", acts)
+	var ev Event
+	effects = record(t, func(o *Outbox) { ev = s.Receive(RequestDue{}, o) })
+	if s.State != WaitingToRetry || ev.Kind != Lost || ev.Why != "timeout" || s.Busy {
+		t.Fatalf("timeout state=%d event=%v", s.State, ev)
 	}
-	tm := acts[1].(core.SetTimer)
-	acts = l.Step(core.Event{Body: core.TimerFired{ID: tm.ID, Gen: tm.Gen}})
-	if c.State != WaitingToRetry || len(acts) < 1 {
-		t.Fatalf("timeout state=%d acts=%#v", c.State, acts)
+	if c, ok := effects[0].Msg.(core.CloseConn); !ok || c.Conn != 3 || !c.Abort {
+		t.Fatalf("timeout effects = %v", kinds(effects))
+	}
+	// A timeout with no request outstanding does nothing.
+	s.State, s.Conn = Connected, 4
+	if effects := record(t, func(o *Outbox) { ev = s.Receive(RequestDue{}, o) }); len(effects) != 0 || ev.Kind != Nothing {
+		t.Fatalf("idle timeout = %v", kinds(effects))
 	}
 }
 
-func TestLoopIdleAndBytes(t *testing.T) {
+func TestIdleAndBytes(t *testing.T) {
 	t.Parallel()
-	c := &wrap{Client: Client{ID: 2, State: Connected, Conn: 9}}
-	var idle, bytes int
-	l := Loop[*wrap]{
-		Brokers:   []machine.NodeID{"b0"},
-		Clients:   []*wrap{c},
-		Connected: func(c *wrap) bool { return c.State == Connected },
-		Busy:      func(*wrap) bool { return false },
-		Ready:     func(*wrap) []core.Action { return nil },
-		Idle: func(*wrap) []core.Action {
-			idle++
-			return nil
-		},
-		Bytes: func(_ *wrap, data []byte) []core.Action {
-			bytes += len(data)
-			return nil
-		},
-		Lost: func(*wrap, string) {},
+	s := &Session{ID: 2, Brokers: []string{"b0"}, State: Connected, Conn: 9}
+	var ev Event
+	record(t, func(o *Outbox) { ev = s.Receive(WakeDue{}, o) })
+	if ev.Kind != Idle {
+		t.Fatalf("idle = %v", ev)
 	}
-	c.WakeGen = 1
-	_ = l.Step(core.Event{Body: core.TimerFired{ID: c.wakeID(), Gen: 1}})
-	if idle != 1 {
-		t.Fatalf("idle = %d", idle)
+	record(t, func(o *Outbox) { ev = s.Receive(Net{Event: core.BytesReceived{Conn: 9, Data: []byte("ab")}}, o) })
+	if ev.Kind != Bytes || string(ev.Data) != "ab" {
+		t.Fatalf("bytes = %v", ev)
 	}
-	_ = l.Step(core.Event{Body: core.BytesReceived{Conn: 9, Data: []byte("ab")}})
-	if bytes != 2 {
-		t.Fatalf("bytes = %d", bytes)
+	s.Busy = true
+	record(t, func(o *Outbox) { ev = s.Receive(WakeDue{}, o) })
+	if ev.Kind != Nothing {
+		t.Fatal("a wake while busy was idle")
 	}
 }

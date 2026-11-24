@@ -6,12 +6,11 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/dst/core/trace"
 )
 
@@ -21,7 +20,7 @@ import (
 // producer id. The broker must reject it with INVALID_REQUEST, per partition,
 // and never commit it.
 type batch struct {
-	id        machine.ID
+	id        actor.ID
 	tpIdx     int
 	vals      []string
 	data      []byte
@@ -99,20 +98,21 @@ func clearlyRetryable(c int16) bool {
 	return c == codeUnknownTopic || c == codeLeaderUnavailable || c == codeNotLeader
 }
 
-func (w *Workload) produceNext(c *client) []core.Action {
+func (c *client) produceNext(o *outbox) {
 	p := &c.p
 	if len(p.cur) == 0 {
 		if p.noNew {
-			return nil
+			return
 		}
-		w.newBatches(c)
+		c.newBatches()
 	}
 	for _, b := range p.cur {
-		if b.attempts >= w.opts.maxAttempts() {
-			return w.giveUp(c, "retries exhausted")
+		if b.attempts >= c.opts.maxAttempts() {
+			c.giveUp("retries exhausted", o)
+			return
 		}
 	}
-	return w.sendProduce(c)
+	c.sendProduce(o)
 }
 
 // duplicateCheckEvery: one batch in duplicateCheckEvery claims a producer id and must be rejected.
@@ -124,53 +124,53 @@ const (
 
 // pickCodec draws a codec id: none for a third of the batches, otherwise gzip,
 // snappy, lz4 or zstd with equal weight.
-func (w *Workload) pickCodec() int16 {
-	if c := w.env.Intn(6); c >= 2 {
-		return int16(c - 1)
+func (c *client) pickCodec() int16 {
+	if n := c.env.Intn(6); n >= 2 {
+		return int16(n - 1)
 	}
 	return kafkawire.CodecNone
 }
 
 // newBatches builds the next request: 1 or 2 batches for distinct partitions.
-func (w *Workload) newBatches(c *client) {
+func (c *client) newBatches() {
 	p := &c.p
-	k := 1 + w.env.Intn(2)
-	first := w.env.Intn(len(w.tps))
+	k := 1 + c.env.Intn(2)
+	first := c.env.Intn(len(c.tps))
 	for j := range k {
 		idx := first
 		if j == 1 {
-			idx = (first + 1 + w.env.Intn(len(w.tps)-1)) % len(w.tps)
+			idx = (first + 1 + c.env.Intn(len(c.tps)-1)) % len(c.tps)
 		}
-		n := 1 + w.env.Intn(5)
+		n := 1 + c.env.Intn(5)
 		pad := 0
-		switch w.env.Intn(16) {
+		switch c.env.Intn(16) {
 		case 0:
-			pad = 100 + w.env.Intn(300)
-			if w.env.Intn(2) == 0 { // a batch of several KiB: larger than a small segment cap
-				pad = 2000 + w.env.Intn(2000)
+			pad = 100 + c.env.Intn(300)
+			if c.env.Intn(2) == 0 { // a batch of several KiB: larger than a small segment cap
+				pad = 2000 + c.env.Intn(2000)
 			}
 		default:
-			pad = w.env.Intn(24)
+			pad = c.env.Intn(24)
 		}
 		p.serial++
-		b := &batch{id: w.env.NewID(), tpIdx: idx}
+		b := &batch{id: c.env.NewID(), tpIdx: idx}
 		recs := make([]kmsg.Record, n)
 		for i := range recs {
-			v := fmt.Sprintf("c%d.b%d.r%d|%s", c.ID, p.serial, i, strings.Repeat("x", pad))
+			v := fmt.Sprintf("c%d.b%d.r%d|%s", c.id, p.serial, i, strings.Repeat("x", pad))
 			b.vals = append(b.vals, v)
 			recs[i] = kmsg.Record{Value: []byte(v)}
 		}
-		b.idem = w.env.Intn(duplicateCheckEvery) == 0
+		b.idem = c.env.Intn(duplicateCheckEvery) == 0
 		pp := kafkawire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1, FirstTimestamp: 1, MaxTimestamp: 1}
 		if b.idem {
 			pp.ProducerID, pp.ProducerEpoch, pp.BaseSequence = duplicateCheckProducerID, 0, 0
 		}
-		data, err := buildBatch(pp, recs, w.pickCodec())
+		data, err := buildBatch(pp, recs, c.pickCodec())
 		if err != nil {
-			w.env.Unreachable(clientBatchBuilds, assert.Pair{Key: "err", Value: err.Error()})
+			c.env.Unreachable(clientBatchBuilds, assert.Pair{Key: "err", Value: err.Error()})
 			continue
 		}
-		b.corrupt = !b.idem && w.env.Intn(corruptEvery) == 0
+		b.corrupt = !b.idem && c.env.Intn(corruptEvery) == 0
 		if b.corrupt {
 			data[len(data)-1] ^= 0x40
 		}
@@ -178,19 +178,19 @@ func (w *Workload) newBatches(c *client) {
 		dh := trace.New()
 		dh.Bytes(data)
 		b.dig = uint64(dh)
-		if w.history != nil {
-			w.history.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.ID, Batch: p.serial, TopicPartition: w.tps[idx], Vals: b.vals, Idem: b.idem})
+		if c.history != nil {
+			c.history.Invoke(c.env.Self(), b.id, b.id, ProduceOp{Client: c.id, Batch: p.serial, TopicPartition: c.tps[idx], Vals: b.vals, Idem: b.idem})
 		}
 		p.cur = append(p.cur, b)
 	}
 }
 
-func (w *Workload) sendProduce(c *client) []core.Action {
+func (c *client) sendProduce(o *outbox) {
 	r := kmsg.NewPtrProduceRequest()
 	r.Acks, r.TimeoutMillis = -1, 1000
 	for _, b := range c.p.cur {
 		b.attempts++
-		topicPartition := w.tps[b.tpIdx]
+		topicPartition := c.tps[b.tpIdx]
 		part := kmsg.ProduceRequestTopicPartition{Partition: topicPartition.Partition, Records: b.data}
 		added := false
 		for i := range r.Topics {
@@ -203,20 +203,20 @@ func (w *Workload) sendProduce(c *client) []core.Action {
 			r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: topicPartition.Topic, Partitions: []kmsg.ProduceRequestTopicPartition{part}})
 		}
 	}
-	return w.send(c, requestProduce, r)
+	c.send(requestProduce, r, o)
 }
 
-func (w *Workload) think(c *client) core.Action {
-	return c.Wake(machine.Duration(20+w.env.Intn(60)) * machine.Millisecond)
+func (c *client) think(o *outbox) {
+	c.sess.Wake(o, actor.Duration(20+c.env.Intn(60))*actor.Millisecond)
 }
 
 // onProduce resolves each batch of the request from its partition's answer.
-func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
+func (c *client) onProduce(r *kmsg.ProduceResponse, o *outbox) {
 	p := &c.p
 	var keep []*batch
 	fatal := false
 	for _, b := range p.cur {
-		topicPartition := w.tps[b.tpIdx]
+		topicPartition := c.tps[b.tpIdx]
 		code, base, found := codeUnknown, int64(-1), false
 		for _, t := range r.Topics {
 			for _, pr := range t.Partitions {
@@ -232,15 +232,15 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 			keep = append(keep, b)
 		case b.expect() != 0 && code == b.expect():
 			// Rejected at admission, however many earlier attempts were lost.
-			w.resolve(b, history.GivenUp, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
+			c.resolve(b, history.GivenUp, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
 		case b.idem && code == 0:
-			w.env.Unreachable(batchWithProducerIDAccepted)
-			w.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
+			c.env.Unreachable(batchWithProducerIDAccepted)
+			c.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case b.corrupt && code == 0:
-			w.env.Unreachable(batchWithBadCRCAccepted)
-			w.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
+			c.env.Unreachable(batchWithBadCRCAccepted)
+			c.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case code == 0:
-			w.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
+			c.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case unclearResultCode(code):
 			b.ambiguous = true
 			keep = append(keep, b)
@@ -254,31 +254,32 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 	p.cur = keep
 	switch {
 	case fatal:
-		return w.giveUp(c, "fatal produce error")
+		c.giveUp("fatal produce error", o)
 	case len(keep) > 0:
-		return []core.Action{c.Wake(session.RetryWaitTime(keep[0].attempts))}
+		c.sess.Wake(o, session.RetryWaitTime(keep[0].attempts))
+	default:
+		c.sess.Fails = 0
+		c.think(o)
 	}
-	c.Fails = 0
-	return []core.Action{w.think(c)}
 }
 
-func (w *Workload) resolve(b *batch, out history.Outcome, res ProduceRes) {
-	if w.history != nil {
-		w.history.Return(b.id, res, out)
+func (c *client) resolve(b *batch, out history.Outcome, res ProduceRes) {
+	if c.history != nil {
+		c.history.Return(b.id, res, out)
 	}
 }
 
 // giveUp abandons every unresolved batch (Indeterminate if any attempt was
 // ambiguous: it may still land at any later time).
-func (w *Workload) giveUp(c *client, why string) []core.Action {
+func (c *client) giveUp(why string, o *outbox) {
 	p := &c.p
 	for _, b := range p.cur {
 		out := history.GivenUp
 		if b.ambiguous {
 			out = history.ResultUnknown
 		}
-		w.resolve(b, out, ProduceRes{Base: -1, Code: b.lastCode, Why: why, Attempts: b.attempts})
+		c.resolve(b, out, ProduceRes{Base: -1, Code: b.lastCode, Why: why, Attempts: b.attempts})
 	}
 	p.cur = nil
-	return []core.Action{w.think(c)}
+	c.think(o)
 }

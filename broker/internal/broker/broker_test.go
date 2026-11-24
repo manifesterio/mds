@@ -14,7 +14,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -73,7 +73,7 @@ func TestMetadata(t *testing.T) {
 	if len(r.Topics) != 2 || kafkaErrorCode(r.Topics[0].ErrorCode) != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
 		t.Fatalf("topics %+v", r.Topics)
 	}
-	for _, cmd := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: contract.DescribeTopics{Topics: []string{"nope"}}}).(core.ControlPlaneDone).Resp.(contract.DescribeTopicsResp).Topics {
+	for _, cmd := range h.cp.exec(contract.DescribeTopics{Topics: []string{"nope"}}).Resp.(contract.DescribeTopicsResp).Topics {
 		t.Fatalf("topic auto-created: %v", cmd)
 	}
 	q.Topics = []kmsg.MetadataRequestTopic{}
@@ -296,17 +296,18 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 	c := h.open(1)
 	h.produceOne(c, e("t", 0, plain(t, "a", "b")))
 	n := 0
-	for i, a := range h.all {
-		e, ok := a.(core.RecordFact)
-		if !ok || e.Fact.Name != "produce_acked" {
+	for i, e := range h.all {
+		if e.Kind != actor.EffectFact || e.Fact.Name != "produce_acked" {
 			continue
 		}
 		n++
-		if _, ok := h.all[i+1].(core.Send); !ok {
-			t.Fatalf("ack fact not followed by Send: %T", h.all[i+1])
+		if next := h.all[i+1]; next.Kind != actor.EffectDo {
+			t.Fatalf("ack fact not followed by Send: %v", next)
+		} else if _, ok := next.Msg.(core.Send); !ok {
+			t.Fatalf("ack fact not followed by Send: %T", next.Msg)
 		}
 		f := e.Fact
-		if f.Field("topic") != machine.StringValue("t") || f.Field("base_offset") != machine.Int64Value(0) || f.Field("count") != machine.Int64Value(2) {
+		if f.Field("topic") != actor.StringValue("t") || f.Field("base_offset") != actor.Int64Value(0) || f.Field("count") != actor.Int64Value(2) {
 			t.Fatalf("fields %v", f.Fields)
 		}
 	}
@@ -322,11 +323,11 @@ func TestGracefulStop(t *testing.T) {
 	if len(h.puts) != 0 {
 		t.Fatal("flushed early")
 	}
-	h.do(core.StopRequest{Deadline: h.now + machine.NodeTime(machine.Second)})
+	h.do(core.StopRequest{Deadline: h.now + actor.Mono(actor.Second)})
 	if !h.exited || !h.paused[1] {
 		t.Fatalf("exited=%v paused=%v", h.exited, h.paused[1])
 	}
-	if _, ok := h.all[len(h.all)-1].(core.ShutdownDone); !ok {
+	if last := h.all[len(h.all)-1]; last.Kind != actor.EffectStop || last.How != actor.Exit {
 		t.Fatal("Exit is not last")
 	}
 	if r := produced(h.next(c))[0]; r.ErrorCode != 0 || r.BaseOffset != 0 {
@@ -369,7 +370,7 @@ func TestCorruptGetRetried(t *testing.T) {
 		c := h.open(1)
 		h.produceOne(c, e("t", 0, plain(t, "hello")))
 		corrupt := true
-		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
+		h.objHook = func(a core.ObjectCall, run func() core.ObjectDone) core.ObjectDone {
 			d := run()
 			if g, ok := getDone(d); ok && corrupt {
 				corrupt = false
@@ -405,7 +406,7 @@ func TestFetchGetsExhausted(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.produceOne(c, e("t", 0, plain(t, "hello")))
-	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
+	h.objHook = func(a core.ObjectCall, run func() core.ObjectDone) core.ObjectDone {
 		d := run()
 		if g, ok := getDone(d); ok {
 			g.Data = bytes.Clone(g.Data)
@@ -574,17 +575,60 @@ func TestStateHash(t *testing.T) {
 	}
 }
 
-func TestIgnoresStrayIOResults(t *testing.T) {
+// Answers and timers for a segment or operation that does not exist, and the
+// answers the broker never asks for, leave the state unchanged.
+func TestIgnoresStrayAnswersAndTimers(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	before := h.b.StateHash()
-	h.step(core.ControlPlaneDone{Req: 999})
-	h.step(core.ObjectDone{Result: objectstore.PutDone{Req: 999}})
-	h.step(core.ObjectDone{Result: objectstore.GetDone{Req: 999}})
-	h.step(core.SendDone{Req: 1})
-	h.step(core.TimerFired{ID: 77, Gen: 3})
-	if h.b.StateHash() != before {
-		t.Fatal("stray completion changed state")
+	put := core.ObjectDone{Result: objectstore.PutDone{}}
+	get := core.ObjectDone{Result: objectstore.GetDone{}}
+	for _, msg := range []core.EventData{
+		core.SegmentPutDone{Seg: 999, Done: put},
+		core.SegmentCommitDone{Seg: 999},
+		core.OpReadDone{Op: 999, Done: get},
+		core.OpCallDone{Op: 999},
+		core.SegmentRetryDue{Seg: 999},
+		core.OpDue{Op: 999},
+		core.FlushDue{},
+		core.ControlPlaneDone{},
+		put,
+		core.ConnectDone{Conn: 1},
+		core.ClientDue{Key: "x"},
+	} {
+		if effects := h.step(msg); len(effects) != 0 {
+			t.Fatalf("%T: effects %v", msg, effects)
+		}
 	}
+	if h.b.StateHash() != before {
+		t.Fatal("stray answer changed state")
+	}
+}
+
+// An answer of the wrong kind for a live segment (a GET answer to its PUT) is
+// ignored too, and the real answer still lands.
+func TestIgnoresAnswerOfTheWrongKind(t *testing.T) {
+	h := startedHarness(t, DefaultConfig())
+	c := h.open(1)
+	h.holdPut = true
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
+	h.flush()
+	if len(h.b.segs) != 1 || len(h.held) != 1 {
+		t.Fatalf("segments %d, held %d", len(h.b.segs), len(h.held))
+	}
+	seg := h.b.segs[0].id
+	before := h.b.StateHash()
+	h.step(core.SegmentPutDone{Seg: seg, Done: core.ObjectDone{Result: objectstore.GetDone{}}})
+	h.step(core.SegmentCommitDone{Seg: seg, Done: core.ControlPlaneDone{}})
+	h.step(core.SegmentRetryDue{Seg: seg})
+	if h.b.StateHash() != before {
+		t.Fatal("an answer of the wrong kind changed state")
+	}
+	h.holdPut = false
+	h.releaseHeld()
+	if ps := produced(h.next(c)); ps[0].ErrorCode != 0 {
+		t.Fatalf("%+v", ps)
+	}
+	h.noViolations()
 }
 
 func FuzzBrokerBytes(f *testing.F) {
@@ -664,11 +708,11 @@ func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	lose := 2
-	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.ControlPlaneDone) core.ControlPlaneDone {
 		if _, ok := a.Op.(contract.CommitSegment); ok && lose > 0 {
 			lose--
 			run() // applied, response lost
-			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
+			return core.ControlPlaneDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}
 		}
 		return run()
 	}
@@ -749,7 +793,7 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 	}
 	env := &testEnv{state: 7}
 	for _, k := range a {
-		if !segKeyRE.MatchString(k) || k != segmentformat.SegmentKey(env.NewID()) {
+		if !segKeyRE.MatchString(k) || k != segmentformat.SegmentKey([16]byte(env.NewID())) {
 			t.Fatalf("key %q", k)
 		}
 	}
@@ -769,24 +813,24 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	down := true
-	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.ControlPlaneDone) core.ControlPlaneDone {
 		if _, ok := a.Op.(contract.CommitSegment); ok && down {
-			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
 		return run()
 	}
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	start := h.now
-	for h.now-start < machine.NodeTime(10*machine.Second) {
+	for h.now-start < actor.Mono(10*actor.Second) {
 		if len(h.timers) != 1 {
 			t.Fatalf("want one backoff timer, have %d", len(h.timers))
 		}
-		var id machine.TimerID
+		var id actor.TimerKey
 		for k := range h.timers {
 			id = k
 		}
-		h.now += machine.NodeTime(2 * machine.Second)
+		h.now += actor.Mono(2 * actor.Second)
 		h.fire(id)
 	}
 	if len(c.out) != 0 {
@@ -794,7 +838,7 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	}
 	down = false
 	for id := range h.timers {
-		h.now += machine.NodeTime(2 * machine.Second)
+		h.now += actor.Mono(2 * actor.Second)
 		h.fire(id)
 		break
 	}
@@ -812,12 +856,12 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 // is released.
 func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 	config := DefaultConfig()
-	config.CommitDeadline = 5 * machine.Second
+	config.CommitDeadline = 5 * actor.Second
 	h := startedHarness(t, config)
 	c := h.open(1)
-	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.ControlPlaneDone) core.ControlPlaneDone {
 		if _, ok := a.Op.(contract.CommitSegment); ok {
-			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
 		return run()
 	}
@@ -827,11 +871,11 @@ func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 		if i > 100 {
 			t.Fatal("never gave up")
 		}
-		var id machine.TimerID
+		var id actor.TimerKey
 		for k := range h.timers {
 			id = k
 		}
-		h.now += machine.NodeTime(machine.Second)
+		h.now += actor.Mono(actor.Second)
 		h.fire(id)
 	}
 	ps := produced(h.next(c))

@@ -5,17 +5,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 func TestTimersFireInTimeOrderOnAdvance(t *testing.T) {
 	c := NewFake(time.Unix(1000, 0))
 	var order []string
-	c.AfterFunc(machine.Duration(3*time.Second), func() { order = append(order, "c") })
-	c.AfterFunc(machine.Duration(1*time.Second), func() {
+	c.AfterFunc(actor.Duration(3*time.Second), func() { order = append(order, "c") })
+	c.AfterFunc(actor.Duration(1*time.Second), func() {
 		order = append(order, "a")
 		// a timer started by a timer fires in the same Advance if it is due
-		c.AfterFunc(machine.Duration(time.Second), func() { order = append(order, "b") })
+		c.AfterFunc(actor.Duration(time.Second), func() { order = append(order, "b") })
 	})
 	if c.Pending() != 2 {
 		t.Fatalf("pending %d", c.Pending())
@@ -33,7 +33,7 @@ func TestTimersFireInTimeOrderOnAdvance(t *testing.T) {
 func TestStopAndTimeMoves(t *testing.T) {
 	c := NewFake(time.Unix(1000, 0))
 	mono, wall := c.Mono(), c.Wall()
-	tm := c.AfterFunc(machine.Duration(time.Second), func() { t.Error("a stopped timer fired") })
+	tm := c.AfterFunc(actor.Duration(time.Second), func() { t.Error("a stopped timer fired") })
 	if !tm.Stop() || tm.Stop() {
 		t.Fatal("Stop must report true once")
 	}
@@ -42,7 +42,7 @@ func TestStopAndTimeMoves(t *testing.T) {
 	if fired.Stop() {
 		t.Fatal("Stop of a fired timer must report false")
 	}
-	if c.Mono()-mono != machine.NodeTime(time.Minute) || c.Wall()-wall != machine.RealTime(time.Minute) {
+	if c.Mono()-mono != actor.Mono(time.Minute) || c.Wall()-wall != actor.Wall(time.Minute) {
 		t.Fatalf("mono moved %d, wall moved %d", c.Mono()-mono, c.Wall()-wall)
 	}
 }

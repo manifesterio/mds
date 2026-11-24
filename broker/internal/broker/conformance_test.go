@@ -288,12 +288,12 @@ func newC1(t testT, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 {
 	}
 	h := newHarness(t, config)
 	h.cp.CreateTopic("u", 3)
-	h.do(core.NodeStarted{Self: h.self})
+	h.do(core.NodeStarted{Self: testSelf})
 	s := &c1{t: t, h: h, corrupt: corrupt, seen: map[core.TopicPartition]core.Offset{}}
 	s.conns = []*client{h.open(1), h.open(2)}
 	if corrupt { // every third GET comes back with a flipped byte
 		gets := 0
-		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
+		h.objHook = func(a core.ObjectCall, run func() core.ObjectDone) core.ObjectDone {
 			d := run()
 			if g, ok := getDone(d); ok && g.Err == core.OK && len(g.Data) > 0 {
 				if gets++; gets%3 == 0 {

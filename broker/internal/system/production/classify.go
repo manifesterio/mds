@@ -10,7 +10,7 @@ import (
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
-// Classifier routes by action: ControlPlaneCall to CP, ObjectCall to Objects, anything else
+// Classifier routes by IO case: ControlPlaneCall to CP, ObjectCall to Objects, anything else
 // is a bug that classifies as ErrIO, MaybeApplied.
 type Classifier struct {
 	Objects objectstore.Classifier
@@ -20,14 +20,15 @@ type Classifier struct {
 var _ system.ErrorClassifier = Classifier{}
 
 // Classify maps an IO error to an error code and outcome.
-func (c Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
+func (c Classifier) Classify(a core.IO, err error) (core.ErrCode, core.Outcome) {
 	switch a := a.(type) {
 	case core.ControlPlaneCall:
 		return c.CP.Classify(a, err)
 	case core.ObjectCall:
 		return c.Objects.Classify(a.Call, err)
+	case core.Send, core.CloseConn, core.PauseReads, core.ResumeReads, core.Connect:
 	}
-	slog.Error("classify: unexpected action", "action", a, "err", err)
+	slog.Error("classify: unexpected IO", "io", a, "err", err)
 	return core.ErrIO, core.MaybeApplied
 }
 

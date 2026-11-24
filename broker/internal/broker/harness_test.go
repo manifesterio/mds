@@ -1,19 +1,22 @@
 package broker
 
 import (
+	"cmp"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/spec"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -34,9 +37,25 @@ func (e *testEnv) Uint64() uint64 {
 	z = (z ^ z>>27) * 0x94d049bb133111eb
 	return z ^ z>>31
 }
-func (e *testEnv) Intn(n int) int { return int(e.Uint64() % uint64(n)) }
-func (e *testEnv) NewID() machine.ID {
-	var id machine.ID
+func (e *testEnv) Intn(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return int(e.Uint64() % uint64(n))
+}
+func (e *testEnv) Between(lo, hi int64) int64 {
+	if hi <= lo {
+		return lo
+	}
+	return lo + int64(e.Intn(int(hi-lo+1)))
+}
+func (e *testEnv) Chance(p float64) bool { return p > 0 && float64(e.Uint64()%1000)/1000 < p }
+func (e *testEnv) Duration(lo, hi actor.Duration) actor.Duration {
+	return actor.Duration(e.Between(int64(lo), int64(hi)))
+}
+func (e *testEnv) Self() actor.Incarnation { return testSelf }
+func (e *testEnv) NewID() actor.ID {
+	var id actor.ID
 	for i := 0; i < 16; i += 8 {
 		v := e.Uint64()
 		for j := range 8 {
@@ -82,31 +101,48 @@ type client struct {
 	corr int32
 }
 
-// harness drives a Broker synchronously against the speccheck specs. IOResults
-// are computed when the I/O action is issued and delivered through a queue, so
-// tests can hold them back (holdCP, holdPut) or fault them (cpHook, objHook).
+// testControlPlane is the control plane spec, called the way the executor calls it.
+type testControlPlane struct{ *spec.ControlPlane }
+
+// exec answers one control plane call from the spec.
+func (c testControlPlane) exec(op contract.Operation) core.ControlPlaneDone {
+	done := c.Apply(op)
+	return core.ControlPlaneDone{Resp: done.Resp, Err: done.Err, Outcome: done.Outcome}
+}
+
+// CreateTopic makes a topic (or grows it) and returns the error code.
+func (c testControlPlane) CreateTopic(name string, partitions int32) core.ErrCode {
+	return c.Apply(contract.CreateTopic{Name: name, Partitions: partitions}).Err
+}
+
+// harness runs a Broker one Receive at a time, on a fresh Outbox each time, and
+// acts as its executor and runtime: it answers every Perform from the specs, keeps
+// the armed timers, and plays the client side of the sockets. An answer is computed
+// when the Perform is recorded, adapted with the Perform's adapter, and delivered
+// through a queue, so tests can hold it back (holdCP, holdPut) or fault it (cpHook,
+// objHook).
 type harness struct {
 	t      testT
 	b      *Broker
 	env    *testEnv
 	store  *objectstore.Spec
-	cp     *specbridge.ControlPlane
+	cp     testControlPlane
 	config Config
-	self   machine.NodeInstance
-	now    machine.NodeTime
+	now    actor.Mono
 
-	// cpHook/objHook may replace an I/O action's outcome; exec runs the spec.
-	cpHook  func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult
-	objHook func(a core.IOCall, exec func() core.IOResult) core.IOResult
+	// cpHook/objHook may replace the answer of a call; exec runs the spec.
+	cpHook  func(a core.ControlPlaneCall, exec func() core.ControlPlaneDone) core.ControlPlaneDone
+	objHook func(a core.ObjectCall, exec func() core.ObjectDone) core.ObjectDone
 	holdCP  bool
 	holdPut bool
-	held    []core.IOResult
+	held    []core.EventData
 
-	queue   []core.IOResult
-	timers  map[machine.TimerID]machine.TimerVersion
-	due     map[machine.TimerID]machine.NodeTime // when each armed timer is due (fireNext)
+	number  uint64                          // last pending number handed out
+	queue   []core.EventData                // adapted answers not yet received
+	timers  map[actor.TimerKey]actor.Effect // armed timers: the StartTimer of each key
+	due     map[actor.TimerKey]actor.Mono   // when each armed timer is due (fireNext)
 	clients map[core.ConnID]*client
-	all     []core.Action // every action emitted, in order
+	all     []actor.Effect // every effect recorded, in order
 	paused  map[core.ConnID]bool
 	closed  map[core.ConnID]bool
 	exited  bool
@@ -115,38 +151,50 @@ type harness struct {
 }
 
 func newHarness(t testT, config Config) *harness {
-	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: specbridge.New(),
-		config: config, timers: map[machine.TimerID]machine.TimerVersion{}, due: map[machine.TimerID]machine.NodeTime{},
+	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: testControlPlane{spec.New()},
+		config: config, timers: map[actor.TimerKey]actor.Effect{}, due: map[actor.TimerKey]actor.Mono{},
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
-	h.self = machine.NodeInstance{Node: "b1", Inc: machine.BootNumber{1}}
-	h.b = New(config)(h.env, h.self).(*Broker)
+	h.b = New(config)(h.env)
 	return h
 }
+
+// self is the incarnation the harness boots.
+var testSelf = actor.Incarnation{Name: "broker", Boot: actor.ID{1}}
 
 // startedHarness boots the broker.
 func startedHarness(t *testing.T, config Config) *harness {
 	h := newHarness(t, config)
-	h.do(core.NodeStarted{Self: h.self})
+	h.do(core.NodeStarted{Self: testSelf})
 	return h
 }
 
-func (h *harness) step(body core.EventData) []core.Action {
-	h.now += machine.NodeTime(machine.Millisecond)
-	acts := h.b.Step(core.Event{At: h.now, Wall: machine.RealTime(h.now), Body: body})
-	h.all = append(h.all, acts...)
-	for _, a := range acts {
-		h.exec(a)
+// step gives msg to the broker one millisecond after the last message, carries
+// out the recorded effects and returns them.
+func (h *harness) step(msg core.EventData) []actor.Effect {
+	h.now += actor.Mono(actor.Millisecond)
+	o := actor.NewOutbox[core.EventData, core.IO](actor.Binding{
+		Next:   func() uint64 { h.number++; return h.number },
+		Misuse: func(what string) { h.t.Fatalf("outbox misuse: %s", what) },
+	})
+	h.b.Receive(actor.Now{Mono: h.now, Wall: actor.Wall(h.now)}, msg, o)
+	effects := actor.Close(o)
+	h.all = append(h.all, effects...)
+	for i, e := range effects {
+		if e.Kind == actor.EffectStop && i != len(effects)-1 {
+			h.t.Fatalf("Stop is not the last effect: %v", effects)
+		}
+		h.exec(e)
 	}
-	return acts
+	return effects
 }
 
-// do steps body and then delivers queued completions until none is left.
-func (h *harness) do(body core.EventData) []core.Action {
-	acts := h.step(body)
+// do steps msg and then delivers queued answers until none is left.
+func (h *harness) do(msg core.EventData) []actor.Effect {
+	effects := h.step(msg)
 	h.run()
-	return acts
+	return effects
 }
 
 func (h *harness) run() {
@@ -157,20 +205,26 @@ func (h *harness) run() {
 	}
 }
 
-func (h *harness) deliver(c core.IOResult) {
-	_, isCP := c.(core.ControlPlaneDone)
+// deliver queues the answer of the Perform e, adapted to the broker's message,
+// or holds it back.
+func (h *harness) deliver(e actor.Effect, answer actor.Payload) {
+	_, isCP := answer.(core.ControlPlaneDone)
 	isPut := false
-	if d, ok := c.(core.ObjectDone); ok {
+	if d, ok := answer.(core.ObjectDone); ok {
 		_, isPut = d.Result.(objectstore.PutDone)
 	}
+	msg, ok := e.Adapt(answer).(core.EventData)
+	if !ok {
+		h.t.Fatalf("the answer of %T adapts to %T", e.Msg, msg)
+	}
 	if (isCP && h.holdCP) || (isPut && h.holdPut) {
-		h.held = append(h.held, c)
+		h.held = append(h.held, msg)
 		return
 	}
-	h.queue = append(h.queue, c)
+	h.queue = append(h.queue, msg)
 }
 
-// releaseHeld delivers held completions and runs to quiescence.
+// releaseHeld delivers held answers and runs to quiescence.
 func (h *harness) releaseHeld() {
 	held := h.held
 	h.held = nil
@@ -178,27 +232,55 @@ func (h *harness) releaseHeld() {
 	h.run()
 }
 
-func (h *harness) exec(a core.Action) {
-	switch a := a.(type) {
+// exec carries out one effect, as the runtime and the executor would.
+func (h *harness) exec(e actor.Effect) {
+	switch e.Kind {
+	case actor.EffectPerform:
+		h.perform(e)
+	case actor.EffectDo:
+		h.do1(e.Msg)
+	case actor.EffectStartTimer:
+		h.timers[e.StoredKey()] = e
+		h.due[e.StoredKey()] = h.now + actor.Mono(e.D)
+	case actor.EffectCancelTimer:
+		delete(h.timers, e.StoredKey())
+	case actor.EffectStop:
+		h.exited = true
+	case actor.EffectFact:
+	default:
+		h.t.Fatalf("the broker recorded an unexpected effect %d", e.Kind)
+	}
+}
+
+// perform answers one Perform from the specs, through the hooks.
+func (h *harness) perform(e actor.Effect) {
+	switch a := e.Msg.(type) {
 	case core.ObjectCall:
 		if put, ok := a.Call.(objectstore.Put); ok {
 			h.puts = append(h.puts, put.Key)
 		}
-		run := func() core.IOResult { return core.ObjectDone{Result: h.store.Exec(a.Call)} }
-		h.deliver(h.objDone(a, run))
+		run := func() core.ObjectDone { return core.ObjectDone{Result: h.store.Exec(a.Call)} }
+		if h.objHook != nil {
+			h.deliver(e, h.objHook(a, run))
+		} else {
+			h.deliver(e, run())
+		}
 	case core.ControlPlaneCall:
 		h.cpCalls = append(h.cpCalls, a.Op)
-		run := func() core.IOResult { return h.cp.Exec(a) }
+		run := func() core.ControlPlaneDone { return h.cp.exec(a.Op) }
 		if h.cpHook != nil {
-			h.deliver(h.cpHook(a, run))
+			h.deliver(e, h.cpHook(a, run))
 		} else {
-			h.deliver(run())
+			h.deliver(e, run())
 		}
-	case core.SetTimer:
-		h.timers[a.ID] = a.Gen
-		h.due[a.ID] = h.now + machine.NodeTime(a.After)
-	case core.CancelTimer:
-		delete(h.timers, a.ID)
+	default:
+		h.t.Fatalf("unexpected Perform of %T", e.Msg)
+	}
+}
+
+// do1 carries out one socket IO.
+func (h *harness) do1(io actor.Payload) {
+	switch a := io.(type) {
 	case core.Send:
 		c := h.clients[a.Conn]
 		if c == nil {
@@ -215,68 +297,85 @@ func (h *harness) exec(a core.Action) {
 		h.paused[a.Conn] = true
 	case core.ResumeReads:
 		h.paused[a.Conn] = false
-	case core.ShutdownDone:
-		h.exited = true
+	default:
+		h.t.Fatalf("unexpected Do of %T", io)
 	}
 }
 
-// putCall returns the Put inside an action, if the action is an object store Put.
-func putCall(a core.IOCall) (objectstore.Put, bool) {
-	if oc, ok := a.(core.ObjectCall); ok {
-		put, isPut := oc.Call.(objectstore.Put)
-		return put, isPut
+// performs returns the IO values of the Performs among effects, in order.
+func performs(effects []actor.Effect) []actor.Payload {
+	var out []actor.Payload
+	for _, e := range effects {
+		if e.Kind == actor.EffectPerform {
+			out = append(out, e.Msg)
+		}
 	}
-	return objectstore.Put{}, false
+	return out
 }
 
-// getDone returns the GetDone inside a completion, if the completion is an object store GetDone.
-func getDone(r core.IOResult) (objectstore.GetDone, bool) {
-	if d, ok := r.(core.ObjectDone); ok {
-		g, isGet := d.Result.(objectstore.GetDone)
-		return g, isGet
-	}
-	return objectstore.GetDone{}, false
+// getDone returns the GetDone inside an answer, if the answer is an object store GetDone.
+func getDone(d core.ObjectDone) (objectstore.GetDone, bool) {
+	g, isGet := d.Result.(objectstore.GetDone)
+	return g, isGet
 }
 
-func (h *harness) objDone(a core.IOCall, run func() core.IOResult) core.IOResult {
-	if h.objHook != nil {
-		return h.objHook(a, run)
-	}
-	return run()
-}
-
-// fire delivers the current generation of timer id.
-func (h *harness) fire(id machine.TimerID) {
-	g, ok := h.timers[id]
+// timerOrder sorts timer keys the way the broker made them: the flush timer
+// first, then the segment and operation timers by their id.
+func timerOrder(key actor.TimerKey) uint64 {
+	_, id, ok := strings.Cut(string(key), "/")
 	if !ok {
-		h.t.Fatalf("timer %d not armed", id)
+		return 0
 	}
-	delete(h.timers, id)
-	h.do(core.TimerFired{ID: id, Gen: g})
+	n, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		panic("timer key " + string(key))
+	}
+	return n
 }
 
-// fireAll fires every armed timer, lowest id first, until none is armed.
+// fire delivers the timer under key.
+func (h *harness) fire(key actor.TimerKey) {
+	e, ok := h.timers[key]
+	if !ok {
+		h.t.Fatalf("timer %q not armed", key)
+	}
+	delete(h.timers, key)
+	msg, isMsg := e.Msg.(core.EventData)
+	if !isMsg {
+		h.t.Fatalf("timer %q carries %T", key, e.Msg)
+	}
+	h.do(msg)
+}
+
+// armedKeys returns the armed timer keys in timerOrder.
+func (h *harness) armedKeys() []actor.TimerKey {
+	keys := slices.Collect(maps.Keys(h.timers))
+	slices.SortFunc(keys, func(x, y actor.TimerKey) int { return cmp.Compare(timerOrder(x), timerOrder(y)) })
+	return keys
+}
+
+// fireAll fires every armed timer, flush first, then by id, until none is armed.
 func (h *harness) fireAll() {
 	for n := 0; len(h.timers) > 0; n++ {
 		if n > 1000 {
 			h.t.Fatal("timers never settle")
 		}
-		h.fire(slices.Sorted(maps.Keys(h.timers))[0])
+		h.fire(h.armedKeys()[0])
 	}
 }
 
 // fireNext moves the clock to the earliest armed timer and fires it. Ties go
-// to the lower id, so the order is the same on every run.
+// in timerOrder, so the order is the same on every run.
 func (h *harness) fireNext() {
-	var first machine.TimerID
-	found := false
-	for id := range h.timers {
-		if !found || h.due[id] < h.due[first] || (h.due[id] == h.due[first] && id < first) {
-			first, found = id, true
-		}
-	}
-	if !found {
+	keys := h.armedKeys()
+	if len(keys) == 0 {
 		h.t.Fatal("no timer armed")
+	}
+	first := keys[0]
+	for _, k := range keys[1:] {
+		if h.due[k] < h.due[first] {
+			first = k
+		}
 	}
 	h.now = max(h.now, h.due[first])
 	h.fire(first)
@@ -410,10 +509,10 @@ func (h *harness) produceOne(c *client, e ent) kmsg.ProduceResponseTopicPartitio
 	return produced(h.next(c))[0]
 }
 
-func factsNamed(all []core.Action, name string) []machine.Fact {
-	var out []machine.Fact
-	for _, a := range all {
-		if e, ok := a.(core.RecordFact); ok && e.Fact.Name == name {
+func factsNamed(all []actor.Effect, name string) []actor.Fact {
+	var out []actor.Fact
+	for _, e := range all {
+		if e.Kind == actor.EffectFact && e.Fact.Name == name {
 			out = append(out, e.Fact)
 		}
 	}

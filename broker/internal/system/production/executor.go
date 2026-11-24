@@ -2,23 +2,14 @@ package production
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/runtime/live"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
-
-// AsyncConnections is the connection set the Executor writes to: system.Connections plus a
-// write that reports when the bytes left (Net implements it).
-type AsyncConnections interface {
-	system.Connections
-	WriteAsync(conn core.ConnID, data []byte, done func(error)) error
-}
 
 // ExecConfig bounds each kind of I/O. Zero fields take the defaults.
 type ExecConfig struct {
@@ -49,69 +40,53 @@ func (c ExecConfig) withDefaults() ExecConfig {
 	return c
 }
 
-// Executor is the production system.Executor: each IOCall runs on its own
-// goroutine under a timeout and yields exactly one IOResult on the InboxWriter.
-// Sends go through the connection's ordered writer queue instead.
+// Executor carries out the broker's IO: it is the exec function of the
+// broker actor on the live Host. Socket IO (Send, CloseConn, PauseReads,
+// ResumeReads) goes to the connections; a Send is queued behind earlier
+// writes on its connection. Each object store and control plane call runs on
+// its own goroutine under a timeout and is answered exactly once with
+// live.Answer.
 type Executor struct {
 	ctx    context.Context
 	config ExecConfig
 	objs   system.ObjectStore
 	cp     system.ControlPlane
-	conns  AsyncConnections
+	conns  system.Connections
 	class  system.ErrorClassifier
-	sink   system.InboxWriter
 }
-
-var _ system.Executor = (*Executor)(nil)
 
 // NewExecutor builds an Executor; cancelling ctx aborts calls in flight.
 func NewExecutor(ctx context.Context, config ExecConfig, objs system.ObjectStore, cp system.ControlPlane,
-	conns AsyncConnections, class system.ErrorClassifier, sink system.InboxWriter) *Executor {
-	return &Executor{ctx: ctx, config: config.withDefaults(), objs: objs, cp: cp, conns: conns, class: class, sink: sink}
+	conns system.Connections, class system.ErrorClassifier) *Executor {
+	return &Executor{ctx: ctx, config: config.withDefaults(), objs: objs, cp: cp, conns: conns, class: class}
 }
 
-func (e *Executor) deliver(c core.IOResult) {
-	select {
-	case <-e.sink.Closed():
-		return
-	default:
-	}
-	e.sink.Deliver(machine.Control, c)
-}
-
-// Execute never blocks: it queues a write or starts a goroutine.
-func (e *Executor) Execute(a core.IOCall) {
-	switch a := a.(type) {
+// Exec is the exec function of live.Spawn. It never blocks: it queues a write,
+// changes a connection, or starts a goroutine. An IO case it does not know is
+// an error, which ends the Host.
+func (e *Executor) Exec(ctx *live.ExecCtx, io core.IO) error {
+	switch a := io.(type) {
 	case core.Send:
-		e.send(a)
+		// A write to a connection that is gone is dropped: its reader reports
+		// the close.
+		_ = e.conns.Write(a.Conn, a.Data)
+	case core.CloseConn:
+		_ = e.conns.Close(a.Conn, a.Abort)
+	case core.PauseReads:
+		e.conns.PauseReads(a.Conn)
+	case core.ResumeReads:
+		e.conns.ResumeReads(a.Conn)
 	case core.Connect:
-		go e.deliver(core.ConnectDone{Req: a.Req, Err: core.ErrInvalid}) // brokers reach the CP through ControlPlaneCall
+		// Brokers reach the control plane through ControlPlaneCall, not raw dials.
+		go live.Answer(ctx, a, core.ConnectDone{Err: core.ErrInvalid})
 	case core.ObjectCall:
-		go func() { e.deliver(core.ObjectDone{Result: e.object(a)}) }()
+		go func() { live.Answer(ctx, a, core.ObjectDone{Result: e.object(a)}) }()
 	case core.ControlPlaneCall:
-		go func() { e.deliver(e.control(a)) }()
+		go func() { live.Answer(ctx, a, e.control(a)) }()
 	default:
-		//nolint:forbidigo // impossible: machine emits only known IOCall types
-		panic(fmt.Sprintf("prod: unknown IOCall %T", a))
+		return fmt.Errorf("production: unknown IO %T", io)
 	}
-}
-
-func (e *Executor) send(a core.Send) {
-	done := func(err error) { e.deliver(core.SendDone{Req: a.Req, Conn: a.Conn, Err: sendErr(err)}) }
-	if err := e.conns.WriteAsync(a.Conn, a.Data, done); err != nil {
-		go done(err)
-	}
-}
-
-func sendErr(err error) core.ErrCode {
-	ne, isNet := errors.AsType[net.Error](err)
-	switch {
-	case err == nil:
-		return core.OK
-	case isNet && ne.Timeout():
-		return core.ErrTimeout
-	}
-	return core.ErrConnClosed
+	return nil
 }
 
 func mutateOutcome(err error, fail func(error) (core.ErrCode, core.Outcome)) (core.ErrCode, core.Outcome) {
@@ -146,29 +121,29 @@ func (e *Executor) object(a core.ObjectCall) objectstore.Result {
 	switch c := a.Call.(type) {
 	case objectstore.Put:
 		code, outcome := mutateOutcome(e.objs.Put(ctx, c.Key, c.Data), fail)
-		return objectstore.PutDone{Req: c.Req, Key: c.Key, Err: code, Outcome: outcome}
+		return objectstore.PutDone{Key: c.Key, Err: code, Outcome: outcome}
 	case objectstore.Get:
 		data, err := e.objs.Get(ctx, c.Ref)
 		if code, bad := failCode(err, fail); bad {
-			return objectstore.GetDone{Req: c.Req, Err: code}
+			return objectstore.GetDone{Err: code}
 		}
-		return objectstore.GetDone{Req: c.Req, Data: data}
+		return objectstore.GetDone{Data: data}
 	case objectstore.Delete:
 		code, outcome := mutateOutcome(e.objs.Delete(ctx, c.Key), fail)
-		return objectstore.DeleteDone{Req: c.Req, Err: code, Outcome: outcome}
+		return objectstore.DeleteDone{Err: code, Outcome: outcome}
 	case objectstore.List:
 		keys, err := e.objs.List(ctx, c.Prefix)
 		code, bad := failCode(err, fail)
 		if !bad {
-			return objectstore.ListDone{Req: c.Req, Keys: keys}
+			return objectstore.ListDone{Keys: keys}
 		}
-		return objectstore.ListDone{Req: c.Req, Err: code}
+		return objectstore.ListDone{Err: code}
 	}
 	//nolint:forbidigo // impossible: Call is a sealed sum and the switch lists every case
 	panic("production: unknown object store call")
 }
 
-func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {
+func (e *Executor) control(a core.ControlPlaneCall) core.ControlPlaneDone {
 	limit := e.config.CPTimeout
 	if a.Timeout > 0 { // group joins and syncs wait for a rebalance (core.ControlPlaneCall)
 		limit = time.Duration(a.Timeout)
@@ -178,7 +153,7 @@ func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {
 	response, err := e.cp.Call(ctx, a.Op)
 	if err != nil {
 		c, o := e.class.Classify(a, err)
-		return core.ControlPlaneDone{Req: a.Req, Err: c, Outcome: o}
+		return core.ControlPlaneDone{Err: c, Outcome: o}
 	}
-	return core.ControlPlaneDone{Req: a.Req, Resp: response, Outcome: core.Applied}
+	return core.ControlPlaneDone{Resp: response, Outcome: core.Applied}
 }

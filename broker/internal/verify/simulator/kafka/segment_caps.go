@@ -6,14 +6,14 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // timerExtraTime is how late a flush may fire past its window: a node busy with a
 // paused Step (CostParams.Pause, up to 100 ms) runs its timer late.
-const timerExtraTime = 150 * machine.Millisecond
+const timerExtraTime = 150 * actor.Millisecond
 
 // segmentCaps checks every sealed segment (the broker's segment_sealed fact)
 // against this seed's flush rule. At most MaxSegmentBatches batches and
@@ -29,7 +29,7 @@ type segmentCaps struct {
 	config broker.Config
 	tps    []core.TopicPartition
 	items  int // the store's commit item limit; 0 = unbounded (the log store)
-	seal   kernel.Cursor
+	seal   sim.Cursor
 	cp     truth.ControlPlane // what the control plane really committed
 }
 
@@ -45,7 +45,7 @@ func (*segmentCaps) Name() string { return "SegmentCaps" }
 
 // AtEnd checks every committed segment: at most MaxSegmentBatches batches and
 // MaxSegmentPartitions distinct partitions, so at most 1 + partitions items.
-func (i *segmentCaps) AtEnd(v kernel.View) {
+func (i *segmentCaps) AtEnd(v sim.View) {
 	type use struct {
 		batches int
 		parts   []int
@@ -79,11 +79,11 @@ func (i *segmentCaps) AtEnd(v kernel.View) {
 	}
 }
 
-func (i *segmentCaps) Observe(v kernel.View) {
+func (i *segmentCaps) Observe(v sim.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
-		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(machine.Int64Value); return int64(x) }
+		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(actor.Int64Value); return int64(x) }
 		a := v.Assert()
-		why, _ := tf.Fact.Field("reason").(machine.StringValue)
+		why, _ := tf.Fact.Field("reason").(actor.StringValue)
 		d := assert.Pair{Key: "reason", Value: string(why)}
 		a.Always(n("batches") <= int64(i.config.MaxSegmentBatches), sealedSegmentWithinBatchCap,
 			d, assert.Pair{Key: "batches", Value: n("batches")}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentBatches})

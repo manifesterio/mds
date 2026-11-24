@@ -3,8 +3,7 @@
 Deterministic simulation tools for Go tests. A product writes **actors** (`core/actor`): state machines that
 take one message at a time and record effects on an outbox, and do no IO. The **simulator** (`sim`) runs many
 actors in one goroutine, with one seeded `rng`, virtual time, a `fault` injector, an `assert` log and a `trace`
-fingerprint per run. The same actors run in production on `runtime/live`. The older machine API
-(`core/machine`, `sim/kernel`) stays until controlplane and broker have moved.
+fingerprint per run. The same actors run in production on `runtime/live`.
 
 Module: `github.com/manifesterio/mds/dst`
 
@@ -23,8 +22,6 @@ determinism check. The determinism tool is in `cmd/determinismcheck`.
 |---|---|
 | `core/actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Product actor code imports this package. |
 | `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. |
-| `core/machine` | The machine contract: `Machine[In, Out]` (`Step(now, in) []Out`, `StateHash`), `Factory`, `Env` (random stream, buggify, assertions), time types, node names, boot numbers, `Fact`. Product machine code imports only this package. Old API, removed when controlplane and broker migrate. |
-| `sim/kernel` | The simulation world: `Spawn` nodes, `AddService` services, typed `Addr[In]` and `Ref[In]`, a `Router[In]` per Step, `Send` / `SendOn` / `Call`, timers, lanes (`Lanes[K]`), two inboxes per node, the cost model, phases, incarnations, crash / restart / stop / pause, attrition, rules, the fact timeline and the trace hash. Old API, removed when controlplane and broker migrate. |
 | `runtime/live` | The production loop for the same machines: one goroutine, a two-queue `Inbox[In]` (Control before Data, Data may be bounded), real timers, a `Route` function of the product for the outputs. Real time and goroutines: it is not in the determinism gate. |
 | `core/rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`), and `Derive(label)` for an independent stream that draws nothing |
 | `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap |
@@ -34,7 +31,6 @@ determinism check. The determinism tool is in `cmd/determinismcheck`.
 | `core/assert` | Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable with coverage; typed handles and the catalog |
 | `core/fault` | Maybe / MaybeP / Fault with per-site latch and Quiet; declared sites (`NewSite`) and the catalog |
 | `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
-| `verify/check` | The log oracle of a simulator (`Replay`, `NoHole`, `Holders`, `Prefixes`, `Monotonic`, `Converged`) and the crash checks by hand (`Persistence`, `ForwardProgress`, `DirtyReboot`) |
 | `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
 | `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
@@ -129,9 +125,6 @@ return system.Run()
 
 `sim.Workload()` marks the driver of the script (its panic halts the run). The same seed gives the same
 trace hash. `examples/kv` is the full example.
-
-The old machine API (`core/machine`, `sim/kernel`) still exists for controlplane and broker until they
-migrate. New code uses `actor` and `sim`.
 
 ## Docs
 

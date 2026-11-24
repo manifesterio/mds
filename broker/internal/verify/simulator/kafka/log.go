@@ -9,7 +9,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // The oracle's model of one partition's committed log: the control plane's
@@ -50,7 +50,7 @@ func parseVal(v string) (int, int, int, bool) {
 // ingest reads the committed ranges of pl that it has not seen yet and
 // appends them to the log. Every structural problem is a violation: the log
 // must be contiguous, every segment readable, every batch intact.
-func (o *expectedLogChecker) ingest(v kernel.View, pl *partitionLog) {
+func (o *expectedLogChecker) ingest(v sim.View, pl *partitionLog) {
 	rs := o.cp.Committed(pl.topicPartition)
 	for ; pl.ranges < len(rs); pl.ranges++ {
 		r := rs[pl.ranges]
@@ -84,7 +84,7 @@ func (o *expectedLogChecker) ingest(v kernel.View, pl *partitionLog) {
 // checkWhole: a committed range is one produced batch, whole: it starts at
 // record 0 and holds all of the batch's records (a retry duplicates a batch,
 // never part of one).
-func (o *expectedLogChecker) checkWhole(v kernel.View, vals []string, det []assert.Pair) {
+func (o *expectedLogChecker) checkWhole(v sim.View, vals []string, det []assert.Pair) {
 	if len(vals) == 0 || vals[0] == "?" {
 		return
 	}
@@ -99,7 +99,7 @@ func (o *expectedLogChecker) checkWhole(v kernel.View, vals []string, det []asse
 
 // readRange returns the record values of one committed range, or nil after
 // reporting why it is unreadable.
-func (o *expectedLogChecker) readRange(v kernel.View, r contract.BatchRange, det []assert.Pair) []string {
+func (o *expectedLogChecker) readRange(v sim.View, r contract.BatchRange, det []assert.Pair) []string {
 	as := v.Assert()
 	obj, ok := o.objs.Object(r.Loc.Key)
 	as.Always(ok, committedSegmentExistsObjectStore, det...)

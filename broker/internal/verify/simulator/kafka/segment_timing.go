@@ -1,9 +1,9 @@
 package kafka
 
 import (
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // segmentTiming checks the timing facts that the production metrics are built
@@ -12,14 +12,14 @@ import (
 // (segments in flight, buffered bytes) are never negative. A wrong metric would
 // send a performance investigation the wrong way.
 type segmentTiming struct {
-	put, commit, fail, off kernel.Cursor
+	put, commit, fail, off sim.Cursor
 }
 
-func (*segmentTiming) Name() string      { return "SegmentTiming" }
-func (*segmentTiming) AtEnd(kernel.View) {}
+func (*segmentTiming) Name() string   { return "SegmentTiming" }
+func (*segmentTiming) AtEnd(sim.View) {}
 
-func (i *segmentTiming) Observe(v kernel.View) {
-	n := func(f machine.Fact, k string) int64 { x, _ := f.Field(k).(machine.Int64Value); return int64(x) }
+func (i *segmentTiming) Observe(v sim.View) {
+	n := func(f actor.Fact, k string) int64 { x, _ := f.Field(k).(actor.Int64Value); return int64(x) }
 	a := v.Assert()
 	tl := v.Timeline()
 	for _, tf := range tl.Since("segment_put_done", &i.put) {

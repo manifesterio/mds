@@ -1,6 +1,7 @@
 // Package fakeservices holds the simulated outside systems of the broker
-// simulation: the object store and the control plane (here), and the network
-// (package fakenetwork).
+// simulation: the object store and the control plane. The connections between
+// the clients and the brokers are a small table in the cluster executor
+// (package cluster).
 //
 // The object store and the control plane have no state or fault logic of their
 // own. Each one is its spec (shared/objectstore.Spec, controlplane/spec through

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 func TestMonoGoesForwardAndWallIsNow(t *testing.T) {
@@ -22,13 +22,13 @@ func TestMonoGoesForwardAndWallIsNow(t *testing.T) {
 func TestAfterFuncFiresAndStops(t *testing.T) {
 	c := NewReal()
 	fired := make(chan struct{})
-	c.AfterFunc(machine.Duration(1), func() { close(fired) })
+	c.AfterFunc(actor.Duration(1), func() { close(fired) })
 	select {
 	case <-fired:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timer did not fire")
 	}
-	never := c.AfterFunc(machine.Duration(time.Hour), func() { t.Error("a stopped timer fired") })
+	never := c.AfterFunc(actor.Duration(time.Hour), func() { t.Error("a stopped timer fired") })
 	if !never.Stop() {
 		t.Fatal("Stop of a pending timer must report true")
 	}
