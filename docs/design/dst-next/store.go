@@ -9,6 +9,7 @@ package kv
 import (
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/trace"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -17,7 +18,10 @@ var putIsStored = assert.NewAlways("kv: a put is stored")
 // ---- what the store accepts, and what it answers ----
 
 //dst:sum
-type storeReq interface{ isStoreReq() }
+type storeReq interface {
+	actor.Payload
+	isStoreReq()
+}
 
 //dst:cases storeReq
 type (
@@ -34,9 +38,9 @@ type store struct {
 	values map[string]string
 }
 
-func (s *store) StateHash() uint64 { return actor.HashMap(s.values) }
+func (s *store) StateHash() uint64 { return trace.StringMap(s.values) }
 
-func (s *store) Handle(ctx *sim.ServiceCtx, req storeReq, reply sim.ReplyTo[storeReply]) {
+func (s *store) Handle(ctx *sim.ServiceCtx, req storeReq, reply sim.Responder[storeReply]) {
 	switch r := req.(type) {
 	case storePut:
 		s.values[r.Key] = r.Value

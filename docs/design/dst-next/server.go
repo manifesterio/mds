@@ -12,7 +12,10 @@ import "github.com/manifesterio/mds/dst/core/actor"
 // ---- what the server accepts, and what it answers ----
 
 //dst:sum
-type serverReq interface{ isServerReq() }
+type serverReq interface {
+	actor.Payload
+	isServerReq()
+}
 
 //dst:cases serverReq
 type (
@@ -39,14 +42,14 @@ type server struct {
 // The server keeps no state of its own: the store holds every value.
 func (*server) StateHash() uint64 { return 0 }
 
-func (s *server) Receive(_ actor.Now, msg serverReq, out *actor.Out[serverReq, actor.NoIO]) {
+func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, actor.NoIO]) {
 	switch m := msg.(type) {
 	case putValue:
-		actor.Tell(out, s.store, storePut{Key: m.Key, Value: m.Value})
+		actor.TellService(outbox, s.store, storePut{Key: m.Key, Value: m.Value})
 	case getValue:
-		actor.Call(out, s.store, storeGet{Key: m.Key}, thenAnswer(m.ReplyTo))
+		actor.Call(outbox, s.store, storeGet{Key: m.Key}, thenAnswer(m.ReplyTo))
 	case storeAnswered:
-		actor.Reply(out, m.Asker, serverReply(m.Answer))
+		actor.Reply(outbox, m.Asker, serverReply(m.Answer))
 	}
 }
 

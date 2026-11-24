@@ -17,7 +17,10 @@ var readSeesLastWrite = assert.NewAlways("kv: a read sees the last write")
 // ---- what the client receives ----
 
 //dst:sum
-type clientMsg interface{ isClientMsg() }
+type clientMsg interface {
+	actor.Payload
+	isClientMsg()
+}
 
 //dst:cases clientMsg
 type (
@@ -46,10 +49,10 @@ type client struct {
 
 func (c *client) StateHash() uint64 { return uint64(c.played) }
 
-func (c *client) Receive(_ actor.Now, msg clientMsg, out *actor.Out[clientMsg, actor.NoIO]) {
+func (c *client) Receive(_ actor.Now, msg clientMsg, outbox *actor.Outbox[clientMsg, actor.NoIO]) {
 	switch m := msg.(type) {
 	case start, timeForNextOp:
-		c.playNextStep(out)
+		c.playNextStep(outbox)
 	case serverAnswered:
 		c.env.Always(m.Answer.Value == m.Expected, readSeesLastWrite,
 			assert.Pair{Key: "key", Value: m.Answer.Key},
@@ -58,7 +61,7 @@ func (c *client) Receive(_ actor.Now, msg clientMsg, out *actor.Out[clientMsg, a
 	}
 }
 
-func (c *client) playNextStep(out *actor.Out[clientMsg, actor.NoIO]) {
+func (c *client) playNextStep(outbox *actor.Outbox[clientMsg, actor.NoIO]) {
 	if c.finished() {
 		return
 	}
@@ -66,13 +69,13 @@ func (c *client) playNextStep(out *actor.Out[clientMsg, actor.NoIO]) {
 	c.played++
 
 	if s.isPut {
-		actor.Tell(out, c.server, putValue{Key: s.key, Value: s.value})
+		actor.Tell(outbox, c.server, putValue{Key: s.key, Value: s.value})
 	} else {
-		actor.Ask(out, c.server, getValueOf(s.key), expecting(s.value))
+		actor.Ask(outbox, c.server, getValueOf(s.key), expecting(s.value))
 	}
 
 	if !c.finished() {
-		out.After(c.env.Duration(1*ms, 20*ms), timeForNextOp{})
+		outbox.After(c.env.Duration(1*ms, 20*ms), timeForNextOp{})
 	}
 }
 

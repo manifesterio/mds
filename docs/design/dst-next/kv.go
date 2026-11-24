@@ -16,15 +16,16 @@
 // accepts) and <name>Reply (what it answers). Messages are named for what they
 // mean: putValue, getValue, storeAnswered, timeForNextOp.
 //
-// The four ways to send, in one line each:
-//   - actor.Tell(out, to, msg): send, expect no answer.
-//   - actor.Ask(out, actor, makeReq, adapt): ask an actor; the answer comes back as
+// The five ways to send, in one line each:
+//   - actor.Tell(outbox, actor, msg): send to an actor, expect no answer.
+//   - actor.TellService(outbox, service, req): the same, to a service.
+//   - actor.Ask(outbox, actor, makeReq, adapt): ask an actor; the answer comes back as
 //     one of my own messages, built by adapt.
-//   - actor.Call(out, service, req, adapt): the same, for a service (it gets its
+//   - actor.Call(outbox, service, req, adapt): ask a service (it gets its
 //     reply handle from Handle, so the request needs no ReplyTo).
-//   - actor.Reply(out, replyTo, answer): answer an Ask I received.
+//   - actor.Reply(outbox, replyTo, answer): answer an Ask I received.
 //
-// Other effects: out.After(delay, msg) sends msg to myself later. A ReplyTo dies
+// Other effects: outbox.After(delay, msg) sends msg to myself later. A ReplyTo dies
 // with the asking incarnation, so a late answer to a crashed asker is dropped.
 // actor.EntityRef[P] is the stable handle that survives restarts.
 package kv
@@ -40,7 +41,8 @@ const ms = actor.Millisecond
 func Run(seed uint64, script []step) sim.Result {
 	system := sim.NewSystem(sim.Config{Seed: seed})
 
-	theStore := sim.AddService(system, "store", &store{values: map[string]string{}})
+	// Go cannot infer Req and Rep from a concrete type, so they are spelled out.
+	theStore := sim.AddService[storeReq, storeReply](system, "store", &store{values: map[string]string{}})
 
 	theServer := sim.Spawn(system, actor.Props[serverReq, actor.NoIO]{
 		Name: "server",
@@ -51,7 +53,7 @@ func Run(seed uint64, script []step) sim.Result {
 
 	sim.Spawn(system, actor.Props[clientMsg, actor.NoIO]{
 		Name: "client",
-		Boot: start{},
+		Boot: func(actor.Incarnation) clientMsg { return start{} },
 		New: func(env actor.Env) actor.Actor[clientMsg, actor.NoIO] {
 			return &client{env: env, server: theServer, script: script}
 		},
