@@ -60,7 +60,7 @@ func (sys *System) replyToActor(source string, r actor.ReplyID, answer actor.Pay
 	sys.q.add(e)
 }
 
-// ---- watches (G6) ----
+// ---- watches ----
 
 // watch is one Watch of one incarnation.
 type watch struct {

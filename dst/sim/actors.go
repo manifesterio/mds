@@ -18,7 +18,7 @@ const (
 
 // owned is one timer or awaited answer of an incarnation. It is checked when
 // the message is taken from the inbox, so a cancelled, replaced or forgotten
-// one is dropped even if it already arrived (G3, G5).
+// one is dropped even if it already arrived.
 type owned struct {
 	scope string
 	key   actor.TimerKey // keyed timers only: the stored key
@@ -118,7 +118,7 @@ func (b *actorBase) take(n uint64) bool {
 	return true
 }
 
-// cancelKey drops the live timer of a stored key, pending or fired (G3).
+// cancelKey drops the live timer of a stored key, pending or fired.
 func (b *actorBase) cancelKey(key actor.TimerKey) {
 	if n, ok := b.keyed[key]; ok {
 		delete(b.owned, n)
@@ -127,7 +127,7 @@ func (b *actorBase) cancelKey(key actor.TimerKey) {
 	}
 }
 
-// forget drops every timer and awaited answer in scope or below it (G5).
+// forget drops every timer and awaited answer in scope or below it.
 func (b *actorBase) forget(scope string) {
 	b.forgets++
 	for n, o := range b.owned { //determinismcheck:ok deletes only; the order does not matter
@@ -146,7 +146,7 @@ func inScope(path, scope string) bool {
 }
 
 // actorLane is the lane of messages from source to actor idx: one lane per
-// (source, target) pair, so they keep their order at one time (ADR 3.4).
+// (source, target) pair, so they keep their order at one time.
 func (sys *System) actorLane(source string, idx int) Lane {
 	k := laneKey2{source: source, target: idx}
 	if l, ok := sys.pairLanes[k]; ok {

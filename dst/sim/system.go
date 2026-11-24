@@ -5,7 +5,6 @@
 // trace hash, so one seed always gives one hash.
 //
 // Test code only: production runs the same actors on dst/runtime/live.
-// The contract is docs/design/dst-next/ADR.md (runtime model and G1..G10).
 package sim
 
 import (
@@ -457,7 +456,7 @@ func (sys *System) foldEntry(e *entry) {
 
 // foldState folds, for every actor, up or down and (if up) its state hash,
 // inbox lengths, busy-until time and the number of its timers, awaited
-// answers and watches (G9); then the state hash of every service. A cached
+// answers and watches; then the state hash of every service. A cached
 // hash is recomputed only when the System called into its owner.
 func (sys *System) foldState() {
 	h := &sys.hash

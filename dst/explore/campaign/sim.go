@@ -20,7 +20,7 @@ var simKindNames = map[sim.FailKind]string{
 // counter "steps" is set. A scenario may add its own counters to the
 // returned value. When reproduce is empty, the campaign makes the replay
 // command from Options.Tool.
-func FromSim(r sim.Result, reproduce string) Result { //nolint:dupl // FromKernel is deleted with sim/kernel in P7
+func FromSim(r sim.Result, reproduce string) Result { //nolint:dupl // FromKernel is the same for kernel results
 	out := Result{
 		Seed: r.Seed, Hash: r.Hash, Steps: r.Steps, RandCalls: r.RandCalls,
 		OK: r.OK(), Reproduce: reproduce,

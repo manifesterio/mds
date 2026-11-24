@@ -117,9 +117,9 @@ func (sys *System) refuseWorkload(s slot, what string) bool {
 	return true
 }
 
-// end ends the incarnation that is up (G7): its queued entries, timers,
-// awaited answers and watches are dropped, its asks die (G4) and watches on
-// them fire (G6). Then the restart policy decides the next boot.
+// end ends the incarnation that is up: its queued entries, timers,
+// awaited answers and watches are dropped, its asks die and watches on
+// them fire. Then the restart policy decides the next boot.
 func (sys *System) end(s slot, how actor.End, cause string) {
 	b := s.base()
 	if !b.up {

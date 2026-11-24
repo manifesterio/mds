@@ -23,7 +23,7 @@ type Request[IO, Rep Payload] interface {
 	AsRequest() (IO, Rep)
 }
 
-// Trace-hash tags of refs (ADR section 5). They are frozen.
+// Trace-hash tags of refs. They are frozen.
 const (
 	tagEntityRef  = 2101
 	tagReplyTo    = 2102
@@ -98,7 +98,7 @@ type ReplyID struct {
 }
 
 // ReplyTo is the handle an Ask puts into its request. It names one ask of
-// one asker incarnation and dies with it (G4). Only runtimes make one. It is
+// one asker incarnation and dies with it. Only runtimes make one. It is
 // comparable.
 type ReplyTo[R Payload] struct{ id ReplyID }
 

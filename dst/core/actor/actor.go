@@ -7,9 +7,6 @@
 // Wiring is typed: an EntityRef[P] sends P to an actor, a ReplyTo[R] answers
 // one ask with R, a ServiceRef[Req, Rep] calls a simulated service. Strings
 // are only identity labels (names, timer keys).
-//
-// The contract of every identifier is in docs/design/dst-next/ADR.md; the
-// numbers G1..G10 in comments refer to its runtime guarantees.
 package actor
 
 import (
@@ -55,7 +52,7 @@ type Incarnation struct {
 // Actor is one state machine with one input protocol In and one product IO
 // sum IO. Receive is the only place its state changes; it never blocks and
 // never does IO. Everything it wants done is recorded on outbox and carried
-// out by the runtime after Receive returns (G1).
+// out by the runtime after Receive returns.
 //
 // StateHash is a hash of the whole state; the simulator folds it into the
 // trace hash after every Receive.

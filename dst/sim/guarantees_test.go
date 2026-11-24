@@ -1,6 +1,6 @@
 package sim_test
 
-// One test per runtime guarantee G1..G10 of docs/design/dst-next/ADR.md.
+// One test per runtime guarantee: what an actor may rely on.
 
 import (
 	"slices"
@@ -22,7 +22,7 @@ func hasFailure(r sim.Result, property string) bool {
 	return slices.ContainsFunc(r.Failures, func(f sim.Failure) bool { return f.Property == property })
 }
 
-// G1: effects take effect after Receive, in record order; a panicking
+// effects take effect after Receive, in record order; a panicking
 // Receive applies none of its effects.
 func TestEffectsAppliedInOrder(t *testing.T) {
 	w := newWorld(1)
@@ -60,7 +60,7 @@ func TestEffectsAppliedInOrder(t *testing.T) {
 	}
 }
 
-// G2: same-time events run in seeded order; per-pair FIFO holds; the same
+// same-time events run in seeded order; per-pair FIFO holds; the same
 // seed gives the same order and hash.
 func TestSameTimeOrderIsSeeded(t *testing.T) {
 	run := func(seed uint64) (string, uint64) {
@@ -107,7 +107,7 @@ func TestSameTimeOrderIsSeeded(t *testing.T) {
 	}
 }
 
-// G3: CancelTimer and StartTimer drop a timer that fired but is not yet
+// CancelTimer and StartTimer drop a timer that fired but is not yet
 // received.
 func TestCancelDropsFiredTimer(t *testing.T) {
 	if got := cancelScenario(nil); !slices.Equal(got, []string{"start{}", "note{S:cancel}", "note{S:restart}", "tick{N:2}"}) {
@@ -141,7 +141,7 @@ func cancelScenario(plant func(*sim.System)) []string {
 	return w.lines("a")
 }
 
-// The planted bug: a runtime that forgets to drop fired timers. G3's
+// The planted bug: a runtime that forgets to drop fired timers. The cancel
 // scenario must catch it.
 func TestG3CatchesPlantedBug(t *testing.T) {
 	got := cancelScenario(sim.PlantKeepFiredTimers)
@@ -151,7 +151,7 @@ func TestG3CatchesPlantedBug(t *testing.T) {
 	t.Fatalf("the planted bug was not caught: %v", got)
 }
 
-// G4: a Reply to an asker whose incarnation ended is dropped, even if the
+// a Reply to an asker whose incarnation ended is dropped, even if the
 // asker restarted.
 func TestReplyToCrashedAskerDropped(t *testing.T) {
 	w := newWorld(4)
@@ -192,7 +192,7 @@ func TestReplyToCrashedAskerDropped(t *testing.T) {
 	}
 }
 
-// G5: ForgetPending drops pending timers and answers, also those already
+// ForgetPending drops pending timers and answers, also those already
 // waiting in the inbox; effects recorded after it are kept.
 func TestForgetPendingDropsAnswers(t *testing.T) {
 	w := newWorld(5)
@@ -240,7 +240,7 @@ func TestForgetPendingDropsAnswers(t *testing.T) {
 	}
 }
 
-// G6: Watch delivers gone once when the asker ends before a Reply; never
+// Watch delivers gone once when the asker ends before a Reply; never
 // after a Reply; at once when the asker is already gone.
 func TestWatchFiresOnce(t *testing.T) {
 	w := newWorld(6)
@@ -285,7 +285,7 @@ func TestWatchFiresOnce(t *testing.T) {
 	}
 }
 
-// G6 with an actor asker that crashes.
+// Watch also fires when the asker is an actor that crashes.
 func TestWatchFiresWhenAskingActorEnds(t *testing.T) {
 	w := newWorld(7)
 	var a actor.EntityRef[msg]
@@ -307,7 +307,7 @@ func TestWatchFiresWhenAskingActorEnds(t *testing.T) {
 	}
 }
 
-// G7: Stop ends the incarnation; everything it owned is dropped; the restart
+// Stop ends the incarnation; everything it owned is dropped; the restart
 // policy boots a fresh one. An effect after Stop is a protocol failure.
 func TestStopDropsEverything(t *testing.T) {
 	w := newWorld(8)
@@ -346,7 +346,7 @@ func TestStopDropsEverything(t *testing.T) {
 	}
 }
 
-// G8: effects through a Sub behave like the parent's, wrapped; its timers
+// effects through a Sub behave like the parent's, wrapped; its timers
 // and ForgetPending are scoped; Stop through a Sub is refused.
 func TestSubWrapsMessages(t *testing.T) {
 	w := newWorld(9)
@@ -378,7 +378,7 @@ func TestSubWrapsMessages(t *testing.T) {
 	}
 }
 
-// G9: a pending timer is part of the trace hash, even if it never fires.
+// a pending timer is part of the trace hash, even if it never fires.
 func TestTraceFoldsPendingTimers(t *testing.T) {
 	run := func(arm bool) uint64 {
 		sys := sim.NewSystem(sim.Config{Seed: 10, End: sim.Time(5 * ms)})
@@ -401,7 +401,7 @@ func TestTraceFoldsPendingTimers(t *testing.T) {
 	}
 }
 
-// G10: a Perform answer reaches only the incarnation that issued it; a second
+// a Perform answer reaches only the incarnation that issued it; a second
 // executor answer is a protocol failure.
 func TestPerformAnswerScoped(t *testing.T) {
 	w := newWorld(11)

@@ -1,5 +1,12 @@
-// Package live runs one machine in production. It is the real-time twin of the
-// simulation kernel (package kernel): one goroutine owns the machine, inputs for it
+// Package live runs actors in production: a Host runs several actors of
+// package actor in one process, one goroutine each, with real timers, an exec
+// function per actor for product IO (answers come back through Answer), and
+// outside callers through Ask, Tell and OnLoop. The same actors run in tests
+// on package sim. When one actor ends, the Host stops the others; Run returns
+// nil (Exit), ErrTripped (Trip), ErrKilled (a stop missed StopGrace), or the
+// crash or protocol error.
+//
+// The rest of this package runs one machine of the older machine API: one goroutine owns the machine, inputs for it
 // arrive in an inbox, timers are real timers, and the outputs of the machine go to a
 // Route function of the product, which starts the real work (calls to a log, an object
 // store, a network) and sends the answers back to the inbox.

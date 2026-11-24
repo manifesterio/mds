@@ -210,7 +210,7 @@ func (h *host[In, IO]) pump() {
 
 // receive runs one Receive with msg and carries out its effects. It reports
 // false when Receive panicked: then a workload halts the run and any other
-// actor crashes (G1: no effect of the panicking Receive is applied).
+// actor crashes: no effect of the panicking Receive is applied.
 func (h *host[In, IO]) receive(msg In) bool {
 	sys := h.sys
 	h.invalidateHash()

@@ -68,7 +68,7 @@ Priority:   Low
 Component:  broker/test/integrationtest (compression_test.go:52, cpproc_test.go)
 Reporter:   (dst redesign, P3 commit hook)
 Created:    2026-11-24
-Status:     Open
+Status:     Fixed (P5 commit)
 
 Summary
 -------
@@ -78,8 +78,14 @@ right after mdscontrolplane logged "listening". The same test passed when re-run
 (go test -tags integration -run TestCompressionRoundTrip ./test/integrationtest/, 38 s).
 The commit under test (P3: dstgen) changed no broker or controlplane code.
 
-Likely cause (not verified)
----------------------------
+Cause (verified)
+----------------
+cpproc_test.go waitReady treated any role but "down" as ready, so the test started while
+the control plane was still standby; a standby answers CreateTopic with ErrUnavailable.
+waitReady now waits for role "active". Passed 3/3 runs after the fix.
+
+First guess (superseded)
+------------------------
 The test's first control-plane call races the control plane's readiness: "listening" is
 logged before the replica is active (claimed its epoch), and a call in that window is
 answered ErrUnavailable. The test does not retry or wait for GetStatus to report ready.

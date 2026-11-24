@@ -44,7 +44,7 @@ determinism check. The determinism tool is in `cmd/determinismcheck`.
 
 An actor is a state machine. It takes one message at a time, does no IO, and records what it wants on
 an `Outbox`. The runtime carries the effects out after `Receive` returns. `sim` runs the same actor code
-in tests; `live` runs it in production (`dst/runtime/live` is the next phase).
+in tests; `live` (`dst/runtime/live`) runs it in production with a `Host`.
 
 ```go
 func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, actor.NoIO]) {

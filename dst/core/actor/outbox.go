@@ -1,7 +1,7 @@
 package actor
 
 // Outbox records the effects of one Receive, in order. The runtime carries
-// them out after Receive returns, in that order (G1). An Outbox is lent for
+// them out after Receive returns, in that order. An Outbox is lent for
 // one Receive only: using it later is a protocol failure.
 //
 // An Outbox never performs anything itself; it only appends to a list.
@@ -35,13 +35,13 @@ func (o *Outbox[In, IO]) After(d Duration, msg In) {
 }
 
 // StartTimer delivers msg after d, under key. A timer with the same key is
-// replaced, including one that fired but is not yet received (G3).
+// replaced, including one that fired but is not yet received.
 func (o *Outbox[In, IO]) StartTimer(key TimerKey, d Duration, msg In) {
 	o.record(Effect{Kind: EffectStartTimer, Key: key, D: max(d, 0), Msg: o.up(msg)})
 }
 
 // CancelTimer drops the timer key, including one that fired but is not yet
-// received (G3). An unknown key is a no-op.
+// received. An unknown key is a no-op.
 func (o *Outbox[In, IO]) CancelTimer(key TimerKey) {
 	o.record(Effect{Kind: EffectCancelTimer, Key: key})
 }
@@ -54,7 +54,7 @@ func (o *Outbox[In, IO]) Do(io IO) {
 }
 
 // Stop ends this incarnation; how is Trip or Exit. Everything it owned is
-// dropped (G7). It must be the last effect of the Receive, and it cannot be
+// dropped. It must be the last effect of the Receive, and it cannot be
 // recorded through a Sub.
 func (o *Outbox[In, IO]) Stop(how End, cause string) {
 	if o.scope != "" {
@@ -72,7 +72,7 @@ func (o *Outbox[In, IO]) Fact(f Fact) {
 
 // ForgetPending drops every timer and every Ask, Call and Perform answer
 // this actor (or, through a Sub, this component) is still waiting for,
-// without ending the incarnation (G5). Watches stay.
+// without ending the incarnation. Watches stay.
 func (o *Outbox[In, IO]) ForgetPending() {
 	o.record(Effect{Kind: EffectForgetPending})
 }
@@ -131,8 +131,8 @@ func Call[In, IO, Rep Payload](o *Outbox[In, IO], call ServiceRequest[Rep], adap
 }
 
 // Reply answers an Ask I received. A second Reply to the same ReplyTo, or a
-// Reply to an asker that is gone, is dropped (G4). It removes any Watch on
-// that ReplyTo (G6).
+// Reply to an asker that is gone, is dropped. It removes any Watch on
+// that ReplyTo.
 func Reply[In, IO, R Payload](o *Outbox[In, IO], to ReplyTo[R], answer R) {
 	o.record(Effect{Kind: EffectReply, Reply: to.id, Msg: answer})
 }
@@ -140,7 +140,7 @@ func Reply[In, IO, R Payload](o *Outbox[In, IO], to ReplyTo[R], answer R) {
 // Perform hands req to the executor and turns its one answer into my message
 // with adapt. Req must be a case of IO that declares its answer with
 // //dst:answer; a wrong adapt type does not compile. The answer reaches only
-// this incarnation and only if not forgotten (G10).
+// this incarnation and only if not forgotten.
 func Perform[In, IO, Rep Payload, Req Request[IO, Rep]](o *Outbox[In, IO], req Req, adapt func(Rep) In) {
 	io, _ := req.AsRequest()
 	o.record(Effect{Kind: EffectPerform, Number: o.rec.next(), Msg: io, Adapt: lift(o, adapt)})
@@ -150,7 +150,7 @@ func Perform[In, IO, Rep Payload, Req Request[IO, Rep]](o *Outbox[In, IO], req R
 type Asked interface{ ID() ReplyID }
 
 // Watch delivers gone to me once if the asker behind who ends before I Reply
-// to it (G6).
+// to it.
 func (o *Outbox[In, IO]) Watch(who Asked, gone In) {
 	o.record(Effect{Kind: EffectWatch, Reply: who.ID(), Msg: o.up(gone)})
 }

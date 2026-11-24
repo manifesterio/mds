@@ -15,7 +15,7 @@ generate:
 	go generate ./...
 
 # Generated files and dst.tags must match the annotations, and dst.tags must not have
-# lost or renumbered a line since DSTGEN_BASE (ADR section 6.6).
+# lost or renumbered a line since DSTGEN_BASE.
 DSTGEN_BASE ?= mainline
 gen-check:
 	go run ./cmd/dstgen -check -base $(DSTGEN_BASE) ./...

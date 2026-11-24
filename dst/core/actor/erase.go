@@ -7,7 +7,7 @@ package actor
 import "github.com/manifesterio/mds/dst/core/trace"
 
 // EffectKind says what an Effect does. The numbers are the frozen trace-hash
-// tags of ADR section 5.
+// tags of the effects.
 type EffectKind uint16
 
 // The effects an Outbox records.
@@ -64,7 +64,7 @@ func (e Effect) StoredKey() TimerKey {
 	return TimerKey(e.Scope + "/" + string(e.Key))
 }
 
-// Fold writes the effect into the trace hash (ADR section 5). The epoch of a
+// Fold writes the effect into the trace hash. The epoch of a
 // ForgetPending is runtime state: the runtime folds it after this.
 func (e Effect) Fold(h *trace.Hash) {
 	if e.Scope != "" {

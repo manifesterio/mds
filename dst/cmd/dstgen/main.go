@@ -20,8 +20,6 @@
 // generated file or dst.tags is stale. -import reads today's hand-written
 // Tag methods (and Fold methods that start with h.Uint64(N)) into dst.tags.
 // -base rev also fails when dst.tags lost or renumbered a line since rev.
-//
-// The specification is docs/design/dst-next/ADR.md, section 6.
 package main
 
 import (

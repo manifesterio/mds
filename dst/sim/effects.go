@@ -4,7 +4,7 @@ import (
 	"github.com/manifesterio/mds/dst/core/actor"
 )
 
-// apply carries out the effects of one Receive in record order (G1). Each is
+// apply carries out the effects of one Receive in record order. Each is
 // folded into the trace hash before it takes effect. Stop must be last: an
 // effect after it is a protocol failure and is not applied.
 func (h *host[In, IO]) apply(effects []actor.Effect) {
@@ -65,7 +65,7 @@ func (h *host[In, IO]) applyOne(e actor.Effect) {
 }
 
 // startTimer arms a self message: TellSelf and After are one-shot, StartTimer
-// replaces the live timer of its key (G3).
+// replaces the live timer of its key.
 func (h *host[In, IO]) startTimer(e actor.Effect) {
 	sys := h.sys
 	sys.counters[countTimersSet]++
@@ -120,7 +120,7 @@ func (h *host[In, IO]) execute(io actor.Payload, n uint64) {
 
 // answerArrives handles an answer (from a service, an executor or a Reply)
 // for number n of incarnation inc: it is adapted and queued if still
-// awaited, else dropped (G4, G5, G10).
+// awaited, else dropped.
 func (h *host[In, IO]) answerArrives(answer actor.Payload, inc actor.ID, n uint64) {
 	sys := h.sys
 	if !h.alive(inc) {

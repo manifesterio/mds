@@ -13,7 +13,7 @@ type ExecCtx struct {
 	answered bool
 }
 
-// System is the run, for executors that Tell actors (O5) or use services.
+// System is the run, for executors that Tell actors or use services.
 func (c *ExecCtx) System() *System { return c.sys }
 
 // Issuer is the incarnation that recorded the IO.
@@ -82,7 +82,7 @@ type outsideAsk struct {
 
 // Ask asks an actor from host code (a scenario step, a simulated gRPC
 // client). done runs as a host task with the answer, or with ok=false once
-// within passes; then the asker counts as gone and Watches on it fire (G6).
+// within passes; then the asker counts as gone and Watches on it fire.
 func Ask[Req, Rep actor.Payload](sys *System, to actor.EntityRef[Req], makeReq func(actor.ReplyTo[Rep]) Req,
 	within actor.Duration, done func(answer Rep, ok bool)) {
 	sys.outsideAsks++
