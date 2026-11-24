@@ -15,10 +15,10 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 func seeds(from uint64, n int) []uint64 {

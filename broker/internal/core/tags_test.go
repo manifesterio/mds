@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/trace"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -113,7 +113,7 @@ func sampleResponses() map[string]contract.Response {
 	}
 }
 
-// sampleFieldValues has one value of every field value case. They live in dst/machine and
+// sampleFieldValues has one value of every field value case. They live in dst/core/machine and
 // have no Tag method: Fold writes the tag.
 func sampleFieldValues() map[string]machine.FieldValue {
 	return map[string]machine.FieldValue{

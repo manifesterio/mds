@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 // eventSamples has one value of every EventData case, with every field set.

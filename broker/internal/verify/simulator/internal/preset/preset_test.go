@@ -3,10 +3,10 @@ package preset
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // stubAssert keeps the names of the Sometimes properties that held.

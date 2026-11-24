@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/conformance"
-	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 )
 
 // stateHashBugName is the name of the planted bug that only a state hash can

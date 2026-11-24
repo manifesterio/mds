@@ -16,10 +16,10 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 var (

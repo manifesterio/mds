@@ -6,8 +6,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // The host of the rebalance machine (docs/architecture.md section 11). In

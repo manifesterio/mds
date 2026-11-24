@@ -193,9 +193,10 @@ dst/
     actor/         (new) Actor, Props, Outbox, refs, effects, Env, Now, Fact
     rng/ trace/ assert/ fault/
     clock/         (moved; clock, syncclock, realclock stay separate packages under core/ for now)
+    sched/         (moved; used only by the clocks and shared/clock, so it is core, not sim; see issues.txt DST-1)
   runtime/
     live/          production host
-  sim/             simulator (System, services, executors); sched moves to sim/sched
+  sim/             simulator (System, services, executors)
   verify/
     check/ spectest/ faulty/ golden/
   explore/
@@ -211,7 +212,8 @@ Rules (depguard in `dst/.golangci.yml`, plus a product-side rule):
 - `core/**` imports only `core/**` and the standard library.
 - `runtime/**` imports `core/**`.
 - `sim/**` imports `core/**`.
-- `verify/**`, `explore/**` import `core/**`, `sim/**`.
+- `explore/**` imports `core/**`, `sim/**`.
+- `verify/**` imports `core/**`, `sim/**`, `explore/**` (spectest runs campaigns). Order: core <- sim <- explore <- verify. (Changed in P2.)
 - Product non-test code may import `core/**` and `runtime/**` only; `sim/**`, `verify/**`,
   `explore/**` only from test code and from `internal/verify/**` and `cmd/*sim*`.
 - Determinism gate is opt-out: every package under `core/` and `sim/` is checked, except an

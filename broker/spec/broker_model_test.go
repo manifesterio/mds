@@ -10,7 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/conformance"
 	"github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 )
 
 // This file checks spec.Broker against a naive model: a plain slice of values.

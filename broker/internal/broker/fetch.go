@@ -6,7 +6,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

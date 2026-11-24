@@ -1,0 +1,6 @@
+# Import paths of dst packages that are NOT in the determinism gate, one per line.
+# Every other package under dst/core/... and dst/sim/... is checked by
+# ops/dst/scripts/ci-determinism.sh. Blank lines and # comments are ignored; a
+# trailing # comment gives the reason.
+github.com/manifesterio/mds/dst/core/syncclock   # goroutines and wall time on purpose
+github.com/manifesterio/mds/dst/core/realclock   # real time on purpose

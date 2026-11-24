@@ -51,10 +51,10 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/span"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // Cx is the context the kernel lends to this service. The network answers nodes

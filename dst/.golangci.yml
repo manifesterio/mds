@@ -60,6 +60,77 @@ linters:
               desc: "dst must not import controlplane (order: dst <- shared <- controlplane <- broker)"
             - pkg: "github.com/manifesterio/mds/broker"
               desc: "dst must not import broker (order: dst <- shared <- controlplane <- broker)"
+        core:
+          list-mode: lax
+          files:
+            - "**/dst/core/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/runtime"
+              desc: "core is production-safe: it must not import runtime (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/sim"
+              desc: "core is production-safe: it must not import sim (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/verify"
+              desc: "core is production-safe: it must not import verify (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/explore"
+              desc: "core is production-safe: it must not import explore (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/cmd"
+              desc: "core is production-safe: it must not import cmd (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "core is production-safe: it must not import examples (layer rule, plan section 6)"
+        runtime:
+          list-mode: lax
+          files:
+            - "**/dst/runtime/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/sim"
+              desc: "runtime is the production loop: it must not import sim (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/verify"
+              desc: "runtime is the production loop: it must not import verify (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/explore"
+              desc: "runtime is the production loop: it must not import explore (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/cmd"
+              desc: "runtime is the production loop: it must not import cmd (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "runtime is the production loop: it must not import examples (layer rule, plan section 6)"
+        sim:
+          list-mode: lax
+          files:
+            - "**/dst/sim/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/runtime"
+              desc: "sim is the simulator: it must not import runtime (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/verify"
+              desc: "sim is the simulator: it must not import verify (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/explore"
+              desc: "sim is the simulator: it must not import explore (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/cmd"
+              desc: "sim is the simulator: it must not import cmd (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "sim is the simulator: it must not import examples (layer rule, plan section 6)"
+        explore:
+          list-mode: lax
+          files:
+            - "**/dst/explore/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/runtime"
+              desc: "explore runs campaigns over sim: it must not import runtime (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/verify"
+              desc: "explore is below verify: it must not import verify (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/cmd"
+              desc: "explore is a library: it must not import cmd (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "explore is a library: it must not import examples (layer rule, plan section 6)"
+        verify:
+          list-mode: lax
+          files:
+            - "**/dst/verify/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/runtime"
+              desc: "verify is test-side: it must not import runtime (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/cmd"
+              desc: "verify is a library: it must not import cmd (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "verify is a library: it must not import examples (layer rule, plan section 6)"
     gosec:
       excludes:
         - G115

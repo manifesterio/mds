@@ -8,8 +8,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // The oracle's model of one partition's committed log: the control plane's

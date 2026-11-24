@@ -6,7 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // join handles a JoinGroup call (rules 3 to 11). The call parks until its round ends.

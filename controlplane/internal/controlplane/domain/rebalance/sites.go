@@ -1,8 +1,8 @@
 package rebalance
 
 import (
-	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // The buggify sites of the machine. Each takes a path that is valid but rare

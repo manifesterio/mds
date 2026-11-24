@@ -20,21 +20,21 @@ determinism check. The determinism tool is in `cmd/determinismcheck`.
 
 | Package | Role |
 |---|---|
-| `machine` | The machine contract: `Machine[In, Out]` (`Step(now, in) []Out`, `StateHash`), `Factory`, `Env` (random stream, buggify, assertions), time types, node names, boot numbers, `Fact`. Product machine code imports only this package. |
-| `kernel` | The simulation world: `Spawn` nodes, `AddService` services, typed `Addr[In]` and `Ref[In]`, a `Router[In]` per Step, `Send` / `SendOn` / `Call`, timers, lanes (`Lanes[K]`), two inboxes per node, the cost model, phases, incarnations, crash / restart / stop / pause, attrition, rules, the fact timeline and the trace hash. |
-| `live` | The production loop for the same machines: one goroutine, a two-queue `Inbox[In]` (Control before Data, Data may be bounded), real timers, a `Route` function of the product for the outputs. Real time and goroutines: it is not in the determinism gate. |
-| `rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`), and `Derive(label)` for an independent stream that draws nothing |
-| `sched` | Virtual mono clock and `(at, tie, seq)` event heap |
-| `clock` | Wall offset over `sched`, `AfterFunc` / `Advance` on the same heap |
-| `syncclock`, `realclock` | Clock adapters for code that needs a real or synchronised clock outside a run |
-| `trace` | Running FNV-1a `Hash`, optional `Ring[T]` |
-| `assert` | Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable with coverage; typed handles and the catalog |
-| `fault` | Maybe / MaybeP / Fault with per-site latch and Quiet; declared sites (`NewSite`) and the catalog |
-| `campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
-| `check` | The log oracle of a simulator (`Replay`, `NoHole`, `Holders`, `Prefixes`, `Monotonic`, `Converged`) and the crash checks by hand (`Persistence`, `ForwardProgress`, `DirtyReboot`) |
-| `check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
-| `check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
-| `golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
+| `core/machine` | The machine contract: `Machine[In, Out]` (`Step(now, in) []Out`, `StateHash`), `Factory`, `Env` (random stream, buggify, assertions), time types, node names, boot numbers, `Fact`. Product machine code imports only this package. |
+| `sim/kernel` | The simulation world: `Spawn` nodes, `AddService` services, typed `Addr[In]` and `Ref[In]`, a `Router[In]` per Step, `Send` / `SendOn` / `Call`, timers, lanes (`Lanes[K]`), two inboxes per node, the cost model, phases, incarnations, crash / restart / stop / pause, attrition, rules, the fact timeline and the trace hash. |
+| `runtime/live` | The production loop for the same machines: one goroutine, a two-queue `Inbox[In]` (Control before Data, Data may be bounded), real timers, a `Route` function of the product for the outputs. Real time and goroutines: it is not in the determinism gate. |
+| `core/rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`), and `Derive(label)` for an independent stream that draws nothing |
+| `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap |
+| `core/clock` | Wall offset over `core/sched`, `AfterFunc` / `Advance` on the same heap |
+| `core/syncclock`, `core/realclock` | Clock adapters for code that needs a real or synchronised clock outside a run |
+| `core/trace` | Running FNV-1a `Hash`, optional `Ring[T]` |
+| `core/assert` | Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable with coverage; typed handles and the catalog |
+| `core/fault` | Maybe / MaybeP / Fault with per-site latch and Quiet; declared sites (`NewSite`) and the catalog |
+| `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
+| `verify/check` | The log oracle of a simulator (`Replay`, `NoHole`, `Holders`, `Prefixes`, `Monotonic`, `Converged`) and the crash checks by hand (`Persistence`, `ForwardProgress`, `DirtyReboot`) |
+| `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
+| `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
+| `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
 
 ## How to write a machine
 
@@ -114,7 +114,7 @@ A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and t
 
 ```bash
 go test ./examples/kv -run TestCampaign -count=1
-go test ./campaign ./check/... ./...
+go test ./explore/campaign ./verify/check/... ./...
 ```
 
 ## Stay out
@@ -126,11 +126,11 @@ These stay out of this module on purpose:
 - Product I/O fakes beyond the tiny KV examples
 - Full network-partition simulators
 
-Generic spec machinery is in: `check/spectest` and `check/faulty` work on any spec with `Apply` and
+Generic spec machinery is in: `verify/check/spectest` and `verify/check/faulty` work on any spec with `Apply` and
 `StateHash`. They have no product words. A product brings its own spec, its own fault numbers and its
 own message types.
 
-Product wall clocks, product fault policy, and domain IDs belong in the importing project. Use `clock` only for virtual time over `sched`.
+Product wall clocks, product fault policy, and domain IDs belong in the importing project. Use `core/clock` only for virtual time over `core/sched`.
 
 ## License
 

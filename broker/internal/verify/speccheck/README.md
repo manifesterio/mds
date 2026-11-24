@@ -67,7 +67,7 @@ The rules of each spec are in the comment above its type. Read that first.
 | Check | What is tested | Compared with | Real or simulated |
 | --- | --- | --- | --- |
 | C1 | broker answers: produce, fetch, ListOffsets | `spec.Broker` | broker is real; storage and control plane are specs |
-| C2 | deleted: the simulated object store and control plane are `dst/check/faulty` around the spec itself, so there is nothing to compare | - | - |
+| C2 | deleted: the simulated object store and control plane are `dst/verify/check/faulty` around the spec itself, so there is nothing to compare | - | - |
 | C3 | S3 adapter (the control plane is checked by its simulator, `controlplane/internal/verify/simulator`) | `objectstore.Spec` | real |
 | C4 | the Kafka oracle in `internal/verify/simulator/kafka` | `spec.Broker`, `spec.ControlPlane` | simulation side |
 
@@ -83,8 +83,8 @@ go test ./internal/verify/simulator/kafka -run C4 -count=1      # C4
 
 The S3 test in C3 needs `MDS_S3_ENDPOINT`; without it, it skips.
 
-Every suite is a `spectest.Lockstep` (package `dst/check/spectest`, on rapid).
-The variables are read by the one parser in `dst/campaign` (`campaign.ReadEnv`),
+Every suite is a `spectest.Lockstep` (package `dst/verify/check/spectest`, on rapid).
+The variables are read by the one parser in `dst/explore/campaign` (`campaign.ReadEnv`),
 with the prefix `MDS` (`conformance.EnvPrefix`):
 
 | Variable | Meaning |

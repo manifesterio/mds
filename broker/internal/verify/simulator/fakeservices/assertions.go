@@ -1,13 +1,13 @@
 package fakeservices
 
 import (
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/check/faulty"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 // The assertions of the simulated services. Each one is declared once here, as a
 // value of its own kind (Reachable, Sometimes), and the code uses the value. The
-// declaration puts the name in the catalog of dst/assert. A name is never built at
+// declaration puts the name in the catalog of dst/core/assert. A name is never built at
 // run time, and it must not change: reports and replays use it.
 var (
 	objectAsserts = faulty.Asserts{ //determinismcheck:ok catalog handles, set once at start

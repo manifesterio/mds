@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/span"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/rng"
 )
 
 // Between must leave out the upper end.

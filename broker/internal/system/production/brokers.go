@@ -10,7 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // LeaseClient is the control plane call behind a broker's heartbeat (Q4). It

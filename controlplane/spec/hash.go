@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 // StateHash is a hash of the committed segments (sorted by key, with their

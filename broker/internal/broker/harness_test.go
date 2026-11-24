@@ -11,15 +11,15 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
-// own SplitMix64 copy and not dst/rng, for two reasons. Intn here uses a plain
-// modulo and dst/rng uses Lemire, so the streams of the seeds would change.
+// own SplitMix64 copy and not dst/core/rng, for two reasons. Intn here uses a plain
+// modulo and dst/core/rng uses Lemire, so the streams of the seeds would change.
 // Also, broker_test.go sets the state field directly to reseed the environment.
 type testEnv struct {
 	state uint64

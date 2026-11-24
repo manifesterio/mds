@@ -9,10 +9,10 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/spec"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
 )
 
 // The tests drive the machine with inputs at explicit times and look at its

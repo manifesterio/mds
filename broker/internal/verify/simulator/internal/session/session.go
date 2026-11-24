@@ -6,7 +6,7 @@ package session
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // State is a client's connection state. A scenario may define connected

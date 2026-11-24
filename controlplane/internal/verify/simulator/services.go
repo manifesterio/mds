@@ -9,10 +9,10 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/check"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 // Bug names one planted fault. The tests use it to prove that the simulator

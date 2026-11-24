@@ -1,7 +1,7 @@
 //nolint:dupl // Fold methods are flat lists of fields. They look alike on purpose.
 package runtime
 
-import "github.com/manifesterio/mds/dst/trace"
+import "github.com/manifesterio/mds/dst/core/trace"
 
 // Tag and Fold of every EventData case. Fold writes the tag, then the fields in the
 // order that is written here. See fold.go for the tag ranges.

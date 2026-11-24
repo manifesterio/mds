@@ -2,8 +2,8 @@ package runtime
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 // Trace-hash tags and folds of the replica machine.

@@ -6,7 +6,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // brokerFrom is the sender of the requests in these tests.

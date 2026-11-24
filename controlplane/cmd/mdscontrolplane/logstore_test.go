@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/controlplanemetrics"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
 

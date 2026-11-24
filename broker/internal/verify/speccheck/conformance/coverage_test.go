@@ -10,7 +10,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

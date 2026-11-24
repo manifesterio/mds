@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 type recordingMachine struct{ got []Event }

@@ -2,8 +2,8 @@ package cluster
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // The core machines (the broker, the workloads) take one core.Event, with the

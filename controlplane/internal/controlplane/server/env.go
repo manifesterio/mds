@@ -5,10 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
 )
 
 // productionEnvironment is a minimal runtime.Environment for production mdscontrolplane (no buggify).

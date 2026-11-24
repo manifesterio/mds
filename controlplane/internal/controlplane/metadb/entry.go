@@ -11,7 +11,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/memory"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // A log entry is the protobuf message logv1.Entry: an id and at most one

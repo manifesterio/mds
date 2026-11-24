@@ -6,11 +6,11 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/check/faulty"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 // Preset is the fault defaults and the phase schedule shared by the scenarios.

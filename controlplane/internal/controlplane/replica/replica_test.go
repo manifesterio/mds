@@ -1,13 +1,13 @@
 package replica_test
 
 import (
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/fault"
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 type alwaysHit struct {

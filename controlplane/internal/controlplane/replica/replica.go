@@ -5,8 +5,8 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 const (

@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/check"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 // Config is one run.
@@ -159,7 +159,7 @@ func (s *sim) violation(property assert.Always, format string, args ...any) {
 	s.env.Always(false, property, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
 }
 
-// check returns the checker of dst/check. It records its own verdicts (a log with
+// check returns the checker of dst/verify/check. It records its own verdicts (a log with
 // no hole, log entries that decode) as "sim: ..." properties.
 func (s *sim) check() check.Checker { return check.Checker{Log: s.w.Assert(), Prefix: "sim: "} }
 

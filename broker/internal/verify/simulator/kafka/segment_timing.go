@@ -1,9 +1,9 @@
 package kafka
 
 import (
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // segmentTiming checks the timing facts that the production metrics are built

@@ -8,7 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // The topics RPCs: CommitSegment, FindSegments, DescribeTopics and CreateTopic. Each

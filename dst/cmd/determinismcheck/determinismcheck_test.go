@@ -17,8 +17,8 @@ func TestDetcheck(t *testing.T) {
 }
 
 func TestAllowList(t *testing.T) {
-	al := allowedImports{exact: map[string]bool{"fmt": true}, prefix: []string{"github.com/manifesterio/mds/dst/rng"}}
-	for path, want := range map[string]bool{"fmt": true, "os": false, "github.com/manifesterio/mds/dst/rng": true, "github.com/manifesterio/mds/dst/rng/x": true, "github.com/manifesterio/mds/dst/rngx": false} {
+	al := allowedImports{exact: map[string]bool{"fmt": true}, prefix: []string{"github.com/manifesterio/mds/dst/core/rng"}}
+	for path, want := range map[string]bool{"fmt": true, "os": false, "github.com/manifesterio/mds/dst/core/rng": true, "github.com/manifesterio/mds/dst/core/rng/x": true, "github.com/manifesterio/mds/dst/rngx": false} {
 		if got := al.allows(path); got != want {
 			t.Errorf("allows(%q) = %v", path, got)
 		}
@@ -29,12 +29,12 @@ func TestLoadAllowFile(t *testing.T) {
 	old := allowedImportsFile
 	defer func() { allowedImportsFile = old }()
 	f := filepath.Join(t.TempDir(), "allow.txt")
-	if err := os.WriteFile(f, []byte("# c\n\nfmt\ngithub.com/manifesterio/mds/dst/rng/...\n"), 0o600); err != nil {
+	if err := os.WriteFile(f, []byte("# c\n\nfmt\ngithub.com/manifesterio/mds/dst/core/rng/...\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	allowedImportsFile = f
 	al, err := loadAllow()
-	if err != nil || !al.allows("fmt") || !al.allows("github.com/manifesterio/mds/dst/rng/a") || al.allows("os") {
+	if err != nil || !al.allows("fmt") || !al.allows("github.com/manifesterio/mds/dst/core/rng/a") || al.allows("os") {
 		t.Fatal(al, err)
 	}
 	allowedImportsFile = filepath.Join(t.TempDir(), "missing")

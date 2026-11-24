@@ -4,7 +4,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
-	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // Test-only hooks for the C4 conformance check (c4_test.go, package

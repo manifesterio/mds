@@ -2,10 +2,10 @@
 // that go into a dst process (inbox values) and the calls it returns for the
 // log and the object store, and the Environment through which the only permitted
 // nondeterminism (randomness, buggify) and assertion recording enter. The process
-// contract itself is dst machine.Machine (package dst/machine); see docs/process-contract.md.
+// contract itself is dst machine.Machine (package dst/core/machine); see docs/process-contract.md.
 //
 // The base types (the time types, the ids, NodeInstance, Clock) are not defined here.
-// They come from dst/machine, which the broker and the control plane share.
+// They come from dst/core/machine, which the broker and the control plane share.
 //
 // Rules (enforced by depguard/forbidigo in CI):
 //   - no imports of time, math/rand, crypto/rand, os, net, sync, or any SDK;

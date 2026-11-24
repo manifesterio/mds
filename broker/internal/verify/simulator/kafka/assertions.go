@@ -1,10 +1,10 @@
 package kafka
 
-import "github.com/manifesterio/mds/dst/assert"
+import "github.com/manifesterio/mds/dst/core/assert"
 
 // The assertions of this package. Each one is declared once here, as a value of
 // its own kind (Always, Sometimes, Reachable, ...), and the code uses the value.
-// The declaration puts the name in the catalog of dst/assert. A name is never
+// The declaration puts the name in the catalog of dst/core/assert. A name is never
 // built at run time, and it must not change: reports and replays use it.
 var (
 	backpressurePauseNonNegative            = assert.NewAlways("kafka: a backpressure pause has a non-negative duration")                                           //determinismcheck:ok catalog handle, set once at start

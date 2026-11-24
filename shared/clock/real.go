@@ -1,18 +1,18 @@
 // Package clock has the two implementations of machine.Clock that the broker and
 // the control plane share outside the simulator:
 //
-//   - Real is the production clock. It only converts types over dst/realclock.
+//   - Real is the production clock. It only converts types over dst/core/realclock.
 //     It is nondeterministic by design and is not in the determinism gate.
 //   - Fake is the test clock. It only converts types: the timers, the lock and
-//     Advance are dst/syncclock. Time moves only when the caller calls Advance.
+//     Advance are dst/core/syncclock. Time moves only when the caller calls Advance.
 //     Do not use it inside the simulator, which has its own single-goroutine
-//     dst/clock.
+//     dst/core/clock.
 package clock
 
 import (
-	"github.com/manifesterio/mds/dst/machine"
-	dstreal "github.com/manifesterio/mds/dst/realclock"
-	"github.com/manifesterio/mds/dst/sched"
+	"github.com/manifesterio/mds/dst/core/machine"
+	dstreal "github.com/manifesterio/mds/dst/core/realclock"
+	"github.com/manifesterio/mds/dst/core/sched"
 )
 
 // Real is the process clock.

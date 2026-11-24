@@ -1,10 +1,10 @@
 package simulator
 
-import "github.com/manifesterio/mds/dst/assert"
+import "github.com/manifesterio/mds/dst/core/assert"
 
 // The assertions of this package. Each one is declared once here, as a value of
 // its own kind (Always, Sometimes, Reachable, ...), and the code uses the value.
-// The declaration puts the name in the catalog of dst/assert. A name is never
+// The declaration puts the name in the catalog of dst/core/assert. A name is never
 // built at run time, and it must not change: reports and replays use it.
 var (
 	callAbandoned                 = assert.NewReachable("rebalance-sim: a call is abandoned")                          //determinismcheck:ok catalog handle, set once at start
@@ -51,7 +51,7 @@ var (
 	segmentListsNeverGoBackwards  = assert.NewAlwaysOnFailure("sim: segment lists never go backwards")                 //determinismcheck:ok catalog handle, set once at start
 )
 
-// These two are recorded by dst/check (Checker.NoHole and check.Replay), which
+// These two are recorded by dst/verify/check (Checker.NoHole and check.Replay), which
 // builds the name from the prefix "sim: " (see sim.check). The check code does not
 // use a handle yet, so the names are declared here only to put them in the catalog.
 var (

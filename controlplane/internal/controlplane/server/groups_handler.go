@@ -8,8 +8,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/live"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/runtime/live"
 )
 
 // The host (docs/architecture.md section 11). The machine runs in a second

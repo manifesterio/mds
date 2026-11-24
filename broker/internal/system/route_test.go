@@ -10,12 +10,12 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/dst/live"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/runtime/live"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
-// These tests run the broker loop as production does: dst/live with system.Route
+// These tests run the broker loop as production does: dst/runtime/live with system.Route
 // and the core inbox classes. They are the tests of the old system.Run, on the new loop.
 
 type fakeClock struct{}

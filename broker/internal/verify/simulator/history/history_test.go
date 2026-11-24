@@ -3,8 +3,8 @@ package history
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 func id(b byte) machine.ID { return machine.ID{b} }

@@ -2,8 +2,8 @@ package fakeservices
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/check/faulty"
-	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/verify/check/faulty"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

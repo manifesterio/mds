@@ -1,6 +1,6 @@
 package replica
 
-import "github.com/manifesterio/mds/dst/fault"
+import "github.com/manifesterio/mds/dst/core/fault"
 
 // The buggify sites of the replica. Both are Fault sites: they fire only in the
 // fault phase, with the probability that the config gives (StallProb, CrashProb).

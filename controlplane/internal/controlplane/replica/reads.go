@@ -2,7 +2,7 @@ package replica
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // readWaiter is one lookup or describe that waits for a fresh view.

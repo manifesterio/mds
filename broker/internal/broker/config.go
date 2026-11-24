@@ -3,7 +3,7 @@ package broker
 import (
 	"cmp"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // InjectedBug selects a deliberately broken behaviour for mutant tests. TEST ONLY: the

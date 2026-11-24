@@ -15,9 +15,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the

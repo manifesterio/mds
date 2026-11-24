@@ -1,14 +1,14 @@
 package conformance
 
 import (
-	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // EnvPrefix is the prefix of the environment variables of the lockstep
 // checks: MDS_SEED (run one seed), MDS_SEEDS (the number of checks) and
 // MDS_CAMPAIGN (run until a time has passed). The parser is the one in
-// dst/campaign; see spectest.Lockstep.Check.
+// dst/explore/campaign; see spectest.Lockstep.Check.
 const EnvPrefix = "MDS"
 
 // ObjectSubject is an object store under test. It is a spectest.Subject: Apply runs one operation and

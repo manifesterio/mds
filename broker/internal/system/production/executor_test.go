@@ -10,8 +10,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/live"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/runtime/live"
 	"github.com/manifesterio/mds/shared/objectstore"
 	"github.com/manifesterio/mds/shared/objectstore/s3"
 )

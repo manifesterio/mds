@@ -1,6 +1,6 @@
 package kv
 
-import "github.com/manifesterio/mds/dst/trace"
+import "github.com/manifesterio/mds/dst/core/trace"
 
 // Every message has a fixed tag number and a Fold method that writes the tag
 // first, then the fields. A test checks that no two tags are equal. The trace

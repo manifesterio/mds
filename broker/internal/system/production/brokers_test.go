@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/live"
+	"github.com/manifesterio/mds/dst/runtime/live"
 )
 
 // fakeLease answers the first beats with live and then fails, or always fails.

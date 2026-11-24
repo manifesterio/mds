@@ -8,7 +8,7 @@ package spec
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 // Broker is the spec of the broker for one Kafka partition: one part of the

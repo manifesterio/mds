@@ -1,6 +1,6 @@
 package rebalance
 
-import "github.com/manifesterio/mds/dst/machine"
+import "github.com/manifesterio/mds/dst/core/machine"
 
 // base32 is the RFC 4648 base32 alphabet.
 const base32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	dstcampaign "github.com/manifesterio/mds/dst/campaign"
+	dstcampaign "github.com/manifesterio/mds/dst/explore/campaign"
 )
 
 // TestCampaignReachesReplicaPaths: over a campaign of four scenarios the replica

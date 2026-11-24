@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
-	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // C4 (speccheck/doc.go) is the at-least-once Kafka oracle against the broker

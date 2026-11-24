@@ -9,7 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/live"
+	"github.com/manifesterio/mds/dst/runtime/live"
 )
 
 func TestMemLogRoundTrip(t *testing.T) {

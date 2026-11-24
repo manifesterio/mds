@@ -18,7 +18,7 @@ package objectstore
 import (
 	"context"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/status"
 )
 

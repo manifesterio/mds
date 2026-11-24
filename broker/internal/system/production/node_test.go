@@ -12,7 +12,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
-	"github.com/manifesterio/mds/dst/live"
+	"github.com/manifesterio/mds/dst/runtime/live"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 )

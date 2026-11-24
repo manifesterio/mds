@@ -1,4 +1,4 @@
-// Package cluster is the host of one broker simulation run on dst/kernel. It
+// Package cluster is the host of one broker simulation run on dst/sim/kernel. It
 // builds the world of a seed: the three fake outside systems (object store,
 // control plane, network), the broker nodes, the workload node (a test client),
 // the phases, the node attrition and the quiesce task. A scenario (kafka)
@@ -18,9 +18,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/span"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 // wallStart is the virtual UTC time at the start of every run (2023-11-14).

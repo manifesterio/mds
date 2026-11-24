@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // Config bounds each kind of I/O. Zero fields take the defaults.

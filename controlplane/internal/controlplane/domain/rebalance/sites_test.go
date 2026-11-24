@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/core/fault"
 )
 
 // everyOther is a fault injector for tests: each site that is on fires on

@@ -5,7 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // leave handles a LeaveGroup call (rule 26): one code per listed member, and

@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // EventData is the input of the replica machine: a closed set of plain-data structs.

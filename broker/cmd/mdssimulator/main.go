@@ -1,5 +1,5 @@
 // Command mdssimulator runs a scenario campaign (the Kafka broker) through the
-// deterministic simulator. It is a thin main over dst/campaign: the flags, the environment variables (MDS_SEEDS, MDS_SEED,
+// deterministic simulator. It is a thin main over dst/explore/campaign: the flags, the environment variables (MDS_SEEDS, MDS_SEED,
 // MDS_CAMPAIGN), the report and the determinism check come from there. It reads
 // flags and the clock and runs seeds on many goroutines, so it is not a
 // deterministic package.
@@ -14,8 +14,8 @@ import (
 	"os"
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
-	"github.com/manifesterio/mds/dst/campaign"
-	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/explore/campaign"
+	"github.com/manifesterio/mds/dst/sim/kernel"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }

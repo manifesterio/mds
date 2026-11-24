@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 func fact(name string, keyValue ...any) machine.Fact {

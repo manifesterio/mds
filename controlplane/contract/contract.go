@@ -14,7 +14,7 @@ package contract
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // Offset is a partition log offset.

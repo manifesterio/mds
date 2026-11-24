@@ -17,7 +17,7 @@
 // converts between the two and adds no rule. The package specsystem puts the
 // specs behind the production seams, so a production Executor can run against
 // them. The package conformance compares a subject with a spec, step by step, with
-// spectest.Lockstep (dst/check/spectest); the package injectedbug holds the
+// spectest.Lockstep (dst/verify/check/spectest); the package injectedbug holds the
 // planted bugs that prove that it can fail.
 //
 // A spec is also used as a test fake. The main use is as an oracle: a checker
@@ -32,9 +32,9 @@
 //	    Test: internal/broker/conformance_test.go.
 //	C2  (deleted in T1.15) The simulated object store and control plane ran
 //	    with all faults off and were compared with their specs. They are now
-//	    dst/check/faulty around the spec itself, so there is nothing left to
+//	    dst/verify/check/faulty around the spec itself, so there is nothing left to
 //	    compare: the service IS the spec plus faults. Each fault kind has its
-//	    own test in dst/check/faulty and in internal/verify/simulator/fakeservices.
+//	    own test in dst/verify/check/faulty and in internal/verify/simulator/fakeservices.
 //	C3  The real adapters are compared with the specs: the S3 object store
 //	    against the object store spec. The control plane is checked against
 //	    its spec by controlplane/internal/verify/simulator.

@@ -2,7 +2,7 @@
 // production Executor calls from goroutines. SDK and HTTP types never leak past
 // an adapter. The simulator does NOT implement these; it implements simulator.Engine
 // over the same Action/Event vocabulary (docs/contribute/determinism.md). The production
-// loop is dst/live; this package has its Route function.
+// loop is dst/runtime/live; this package has its Route function.
 package system
 
 import (
@@ -10,8 +10,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/live"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/runtime/live"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

@@ -2,7 +2,7 @@ package simulator
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // Faults are the probabilities and rates of one scenario. A zero value means no

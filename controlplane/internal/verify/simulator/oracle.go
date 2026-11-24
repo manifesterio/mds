@@ -10,8 +10,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/spec"
-	"github.com/manifesterio/mds/dst/check"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 // oracle judges the answers that clients see. It has two parts.

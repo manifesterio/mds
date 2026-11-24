@@ -6,7 +6,7 @@
 // a fresh spec, compares every result and the state hash after every step, and
 // checks the invariants of the spec.
 //
-// The suites are thin: the machinery is dst/check/spectest. A suite is a
+// The suites are thin: the machinery is dst/verify/check/spectest. A suite is a
 // spectest.Lockstep, made by ObjectStoreLockstep or BrokerLockstep. Rapid draws
 // the list of operations and shrinks a failing list; spectest compares the results and prints the seed, the shrunk list as
 // Go code and the command that runs it again. This package adds what is

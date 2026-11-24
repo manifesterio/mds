@@ -1,5 +1,5 @@
 // Command cpsim runs the deterministic simulation of the replicated control plane.
-// It is a thin main over dst/campaign: the scenarios, the flags, the report and
+// It is a thin main over dst/explore/campaign: the scenarios, the flags, the report and
 // the determinism check come from there. The flags of the control plane itself
 // are -nodes, -steps and -bug.
 //
@@ -13,7 +13,7 @@ import (
 	"os"
 
 	"github.com/manifesterio/mds/controlplane/internal/verify/simulator"
-	"github.com/manifesterio/mds/dst/campaign"
+	"github.com/manifesterio/mds/dst/explore/campaign"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }

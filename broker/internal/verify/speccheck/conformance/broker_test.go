@@ -7,7 +7,7 @@ import (
 
 	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 )
 
 // The spec is the correct subject, so the broker suite must report no failure.

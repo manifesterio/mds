@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/golden"
+	"github.com/manifesterio/mds/dst/verify/golden"
 )
 
 // goldenHashes pins named scenario/seed traces. An accidental determinism

@@ -3,7 +3,7 @@ package core
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // The inbox class (machine.Class) selects which of a node's two inboxes an event goes to
@@ -17,8 +17,8 @@ import (
 // Data is the class of everything a connection sends, one ordered stream per connection.
 // Bounded; real backpressure is PauseReads.
 //
-// The pick between the two queues is the rule of dst/live.Inbox.Pop in production and of
-// dst/kernel in simulation: Control first, then Data, and a queue is first in, first out.
+// The pick between the two queues is the rule of dst/runtime/live.Inbox.Pop in production and of
+// dst/sim/kernel in simulation: Control first, then Data, and a queue is first in, first out.
 
 // InboxKindOf is the fixed classification table. Events that must stay ordered
 // relative to each other share a queue: ConnClosed is Data so a client's EOF

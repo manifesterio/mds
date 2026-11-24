@@ -58,6 +58,20 @@ linters:
               desc: "shared must not import controlplane (order: dst <- shared <- controlplane <- broker)"
             - pkg: "github.com/manifesterio/mds/broker"
               desc: "shared must not import broker (order: dst <- shared <- controlplane <- broker)"
+        dst-layers:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/internal/verify/**"
+            - "!**/cmd/*sim*/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/sim"
+              desc: "production code may import dst/core and dst/runtime only; sim, verify and explore are for tests and simulators (plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/verify"
+              desc: "production code may import dst/core and dst/runtime only; sim, verify and explore are for tests and simulators (plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/explore"
+              desc: "production code may import dst/core and dst/runtime only; sim, verify and explore are for tests and simulators (plan section 6)"
     gosec:
       excludes:
         - G115

@@ -6,10 +6,10 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/check/faulty"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/verify/check/faulty"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -25,7 +25,7 @@ func noisy() faulty.Faults {
 // These two tests keep the old guard against a stale cached spec hash, now for
 // the two specs behind Faulty: the hooks Mutating and Changed (and Bump) must
 // clear the cache on every path that can change the spec. The generic test of
-// the cache is in dst/check/faulty.
+// the cache is in dst/verify/check/faulty.
 
 func TestSpecHashCacheObjectStore(t *testing.T) {
 	h := servicetest.New(t, 5, "a", "b", "c")

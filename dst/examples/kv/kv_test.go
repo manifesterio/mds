@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/golden"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/verify/golden"
 )
 
 func TestDeterministic(t *testing.T) {

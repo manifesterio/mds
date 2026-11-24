@@ -1,6 +1,6 @@
 // Package broker is the Kafka broker state machine: stateless, pure and
 // deterministic (core.Machine), with S3 as the data plane and the control
-// plane assigning offsets. The simulator and the production loop (dst/live) drive the same code.
+// plane assigning offsets. The simulator and the production loop (dst/runtime/live) drive the same code.
 //
 // Pipeline of a produce: the batch joins the open segment buffer; a flush
 // (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,
@@ -20,7 +20,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

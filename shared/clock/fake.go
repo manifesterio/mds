@@ -3,9 +3,9 @@ package clock
 import (
 	"time"
 
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/sched"
-	"github.com/manifesterio/mds/dst/syncclock"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/sched"
+	"github.com/manifesterio/mds/dst/core/syncclock"
 )
 
 // Fake is a machine.Clock that moves only on Advance.

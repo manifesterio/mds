@@ -15,8 +15,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/check/spectest"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 )
 
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the

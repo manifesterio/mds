@@ -15,7 +15,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // DefaultTTL is the lease length when the configuration leaves it zero. Brokers

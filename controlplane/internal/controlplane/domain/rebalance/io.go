@@ -3,7 +3,7 @@ package rebalance
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 // CallID names one RPC. The host gives each call its own id, unique in one

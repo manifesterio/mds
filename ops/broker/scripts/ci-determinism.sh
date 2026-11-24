@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI gate for the deterministic packages (internal/core, internal/verify/simulator (the tree on dst/kernel), internal/wire/segmentformat, the broker spec in
+# CI gate for the deterministic packages (internal/core, internal/verify/simulator (the tree on dst/sim/kernel), internal/wire/segmentformat, the broker spec in
 # spec, internal/verify/speccheck (the spec bridge) except its system adapters in internal/verify/speccheck/specsystem,
 # plus internal/wire/kafkawire and internal/broker).
 # Control-plane replica lives in the controlplane module; see docs/contribute/determinism.md.
@@ -17,10 +17,10 @@ echo "== determinismcheck"
 go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ../ops/broker/determinism-allow.txt "${pkgs[@]}"
 
 echo "== real time stays out of the gated packages"
-# Only dst/live (the production loop) and the production adapters may read real time
+# Only dst/runtime/live (the production loop) and the production adapters may read real time
 # or real randomness. The import allow-list lets every package of this module in, so
 # check the whole dependency tree of each gated package for the real-time packages.
-realtime='manifesterio/mds/dst/live$|manifesterio/mds/shared/clock$|manifesterio/mds/dst/(realclock|syncclock)$'
+realtime='manifesterio/mds/dst/runtime/live$|manifesterio/mds/shared/clock$|manifesterio/mds/dst/core/(realclock|syncclock)$'
 for p in "${pkgs[@]}"; do
   if bad=$(go list -deps "$p" | grep -E "$realtime"); then
     echo "gated package $p depends on a real-time package:" >&2

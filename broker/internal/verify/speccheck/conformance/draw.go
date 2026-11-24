@@ -8,7 +8,7 @@ import (
 
 // Rand is where the generators get their random whole numbers. A test run
 // uses a drawer, which draws from rapid. The helper Batches uses a plain
-// seeded stream (dst/rng), because its answer must depend only on its
+// seeded stream (dst/core/rng), because its answer must depend only on its
 // arguments.
 type Rand interface {
 	// Intn returns a whole number from 0 to n-1, and every value has the same

@@ -6,7 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/conformance"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/injectedbug"
-	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 )
 
 const seedBudget = 60

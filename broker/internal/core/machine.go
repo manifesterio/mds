@@ -1,6 +1,6 @@
 package core
 
-import "github.com/manifesterio/mds/dst/machine"
+import "github.com/manifesterio/mds/dst/core/machine"
 
 // StateMachine is the shape of every stateful component (broker, sim workload).
 // Step is the only place state changes. It never blocks and never does I/O.
@@ -28,7 +28,7 @@ type MachineFactory func(env Environment, self machine.NodeInstance) Machine
 
 // A core machine takes one Event, with the time inside it. The dst contract
 // (machine.Machine) is Step(now, in). OnContract and ContractFactory change the form
-// of the call and nothing else. The simulator and the production loop (dst/live) both
+// of the call and nothing else. The simulator and the production loop (dst/runtime/live) both
 // use them, so a broker runs the same code in both.
 
 type contractMachine struct{ m Machine }

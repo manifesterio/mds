@@ -1,7 +1,7 @@
 package rebalance
 
 import (
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 // StateHash implements machine.Machine. It folds the state that decides what the

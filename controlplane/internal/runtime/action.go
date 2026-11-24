@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/manifesterio/mds/dst/machine"
+import "github.com/manifesterio/mds/dst/core/machine"
 
 // Action is output of Step: a request for the outside world to do something.
 // Every I/O action carries a RequestID; its result returns as a completion event.

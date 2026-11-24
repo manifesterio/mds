@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/core/machine"
 )
 
 func TestKeyRoundTrip(t *testing.T) {

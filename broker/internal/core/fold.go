@@ -2,8 +2,8 @@ package core
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 // Trace-hash tags and folds.
@@ -21,8 +21,8 @@ import (
 //	actions                   101 to 199
 //	control plane operations  201 to 299 (200: no operation)
 //	control plane responses   301 to 399 (300: no response)
-//	field values              401 to 499 (in dst/machine)
-//	facts                     501        (in dst/machine)
+//	field values              401 to 499 (in dst/core/machine)
+//	facts                     501        (in dst/core/machine)
 //
 // Retired tags: 14 to 17 and 20 (events) and 116 to 119 and 121 (actions) were the
 // shared command log values (LogAppend and its relatives). They were deleted. The

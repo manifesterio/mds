@@ -1,0 +1,61 @@
+DST-1  Two event schedulers in dst: merge sched into the sim queue
+======================================================================
+Type:       Tech debt
+Priority:   Medium
+Component:  dst/core/sched, dst/sim/kernel (queue.go), dst/core/clock, dst/core/syncclock,
+            shared/clock
+Reporter:   (dst redesign, P2)
+Created:    2026-11-24
+Status:     Open (deferred: plan D17 "clock-package merge")
+Blocks:     nothing in P2..P8
+Related:    docs/design/dst-redesign-plan.md D17; docs/design/dst-next/ADR.md section 4 (G2)
+
+Summary
+-------
+dst has two separate event schedulers with the same ordering rule (time, seeded tie,
+insertion seq):
+
+  1. dst/core/sched (was dst/sched): a general loop that runs closures at virtual times.
+     Users: dst/core/clock, dst/core/syncclock, dst/core/realclock (only its TimeNs type),
+     and shared/clock (fake clock; production module).
+  2. dst/sim/kernel/queue.go: the simulator's own heap with lanes, entry kinds folded into
+     the trace hash, cancel by EntryID, and dropIncarnation.
+
+Background
+----------
+sched is the older, general scheduler. When the kernel needed lanes, hashed entry kinds,
+cancel-by-id and dropping a dead incarnation's entries, it grew its own queue instead of
+extending sched. sched stayed behind to drive fake time for the clocks. Not confirmed from
+git history; inferred from the code.
+
+Found in P2: the plan put sched under dst/sim, but its only users are the clocks and
+shared/clock (production code), so core -> sim and product -> sim imports appeared. P2 moved
+it to dst/core/sched instead. That fixes the layering; the duplication remains.
+
+Problem
+-------
+- Two implementations of one ordering rule (heap, tie draw, seq). A fix to one (for example
+  a tie-draw change) can silently diverge from the other.
+- Two notions of time: sched.TimeNs vs machine.NodeTime/Duration (actor.Mono/Duration after P4).
+- A reader of dst meets two schedulers and has to learn why.
+
+Proposal
+--------
+After P8 (the new sim.System queue is the only simulator queue):
+  1. Extract one deterministic queue into dst/core/sched with the features both need
+     (lanes, cancel by id, kinds as opaque labels; trace folding stays in sim).
+  2. Rebuild sim.System's queue and dst/core/clock/syncclock on it.
+  3. Replace sched.TimeNs with actor.Mono/actor.Duration.
+  4. Delete the duplicate heap.
+
+Acceptance criteria
+-------------------
+- One heap implementation in dst (grep finds one (at, tie, seq) comparator).
+- GATES-FULL green; golden hashes unchanged, or regenerated in one golden commit with the
+  reason (plan section 9).
+- dst/core does not import dst/sim (depguard).
+- shared/clock behaviour unchanged (its tests pass without edits to expected values).
+
+Notes
+-----
+- Do not do this during P3..P7: it would move hashes in the middle of migrations.

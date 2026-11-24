@@ -8,7 +8,7 @@ import (
 
 	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 )
 
 // BrokerOp is one operation of the broker suite. The suite runs the same

@@ -3,11 +3,11 @@ package broker
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/dst/core/trace"
 )
 
 // stateHasher is FNV-1a; hash/fnv is off the deterministic allow-list. The integer fold
-// is the one of dst/trace, so the broker and the simulator write the same bytes.
+// is the one of dst/core/trace, so the broker and the simulator write the same bytes.
 type stateHasher uint64
 
 func newStateHasher() stateHasher { return 14695981039346656037 }
