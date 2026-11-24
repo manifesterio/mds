@@ -3,10 +3,10 @@ package replica
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
-// Config tunes the control-plane machine. Zero value keeps catch-up and the
+// Config tunes the control-plane replica. Zero value keeps catch-up and the
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
 // timer-driven catch-up with slot-ordered apply (CP-DSM-4). The commit queue
 // keeps one LogAppend in flight (CP-DSM-5).
@@ -14,14 +14,14 @@ import (
 // CheckpointPrefix arms checkpoint restore/publish and optional LogTrim.
 type Config struct {
 	// CatchUpEvery is the pause between catch-up rounds. Zero disables catch-up.
-	CatchUpEvery machine.Duration
+	CatchUpEvery actor.Duration
 	// ReadLimit caps entries per LogRead during catch-up. Zero means 64.
 	ReadLimit int32
 	// Writer names append IDs (writer/seq). Empty means "cp".
 	Writer string
 	// OnCheckpointDecision, when set, is told every time the checkpoint timer
 	// fires: whether a checkpoint was started or skipped, and why. It only
-	// reports; it must not touch the machine. The simulator leaves it nil.
+	// reports; it must not touch the replica. The simulator leaves it nil.
 	OnCheckpointDecision func(CheckpointDecision)
 
 	// MaxCmdsPerSlot caps commands packed into one commit append. Zero means 256.
@@ -40,17 +40,17 @@ type Config struct {
 	Rank int
 	// Heartbeat is how long an idle active node waits before a no-op append.
 	// Zero disables heartbeat (and, with TakeoverAfter 0, roles).
-	Heartbeat machine.Duration
+	Heartbeat actor.Duration
 	// TakeoverAfter is how long a standby waits with no other-writer slot
 	// before it claims the write role. Zero means only Promote flips the role.
-	TakeoverAfter machine.Duration
+	TakeoverAfter actor.Duration
 	// TakeoverRankStep is added to TakeoverAfter once per rank, so the standbys
 	// of a lower rank claim first. Zero gives every rank the same wait.
-	TakeoverRankStep machine.Duration
+	TakeoverRankStep actor.Duration
 
 	// CheckpointEvery is the pause between checkpoint attempts on the appender.
 	// Zero disables the timer; set CheckpointPrefix alone to restore on NodeStarted.
-	CheckpointEvery machine.Duration
+	CheckpointEvery actor.Duration
 	// CheckpointMinSlots skips a checkpoint when fewer slots were applied since the
 	// last. Zero means 1.
 	CheckpointMinSlots int64
@@ -64,9 +64,9 @@ type Config struct {
 	KeepSlots int64
 
 	// OpenStore makes the empty key-value store that the fold keeps its state
-	// in. It runs when the machine is built and again after a crash restart or
+	// in. It runs when the replica is built and again after a crash restart or
 	// a trimmed-slot restore, once the old store has been closed. Nil means an
-	// in-memory store. The machine itself never imports a database.
+	// in-memory store. The replica itself never imports a database.
 	OpenStore func() (engine.Engine, error)
 
 	// WindowSlots is the idempotency window length. Keys older than this many
@@ -79,7 +79,7 @@ type Config struct {
 	// StallProb / CrashProb are per role-tick cooperative faults (sim only).
 	// Fault() suppresses them after EnterRecovery. Zero disables.
 	StallProb, CrashProb float64
-	StallDur, DownDur    [2]machine.Duration
+	StallDur, DownDur    [2]actor.Duration
 }
 
 func (c Config) readLimit() int32 {

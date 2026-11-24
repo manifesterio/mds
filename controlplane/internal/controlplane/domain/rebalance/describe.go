@@ -5,50 +5,54 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // describe is a Describe call whose reads are in flight: one LocalRead per
 // name, one reply when all are back.
 type describe struct {
-	call CallID
+	n    uint64 // its number, in the answers of its reads
+	call actor.ReplyTo[Reply]
 	out  []GroupDescription
+	back []bool // the reads that are back, by name index
 	left int
-	reqs []machine.RequestID
-}
-
-// describeRead marks a request id as the read of name i of a describe.
-type describeRead struct {
-	d *describe
-	i int
 }
 
 // describe handles a Describe call (rule 32): the log's description of each
-// group, with the state from memory.
+// group, with the state from memory. A describe that waits for its reads
+// watches its caller.
 func (m *Machine) describe(s *serving, in Describe) {
-	d := &describe{call: in.Call, out: make([]GroupDescription, len(in.Groups)), left: len(in.Groups)}
+	d := &describe{call: in.ReplyTo, out: make([]GroupDescription, len(in.Groups)), back: make([]bool, len(in.Groups)), left: len(in.Groups)}
 	if d.left == 0 {
-		m.reply(in.Call, runtime.OK, DescribeAnswer{Groups: d.out})
+		m.reply(in.ReplyTo, runtime.OK, DescribeAnswer{Groups: d.out})
 		return
 	}
+	d.n = m.number()
 	for i, name := range in.Groups {
 		d.out[i].Name = name
-		req := m.read(describeOp(name), false)
-		s.reqs[req] = describeRead{d: d, i: i}
-		d.reqs = append(d.reqs, req)
+		n := d.n
+		m.ask(describeOp(name), false, func(done runtime.ControlPlaneDone) Input { return describeDone{n: n, i: i, done: done} })
 	}
 	s.describes = append(s.describes, d)
+	m.o.Watch(in.ReplyTo, callGone{call: in.ReplyTo})
 }
 
-// describeDone takes one read. A failed read fails the call.
-func (m *Machine) describeDone(s *serving, r describeRead, done runtime.ControlPlaneDone) {
-	d := r.d
-	if done.Err != runtime.OK {
+// describeDone takes one read. A failed read fails the call. The reads of a
+// describe that is over are ignored.
+func (m *Machine) describeDone(s *serving, in describeDone) {
+	i := slices.IndexFunc(s.describes, func(d *describe) bool { return d.n == in.n })
+	if i < 0 || s.describes[i].back[in.i] {
+		return
+	}
+	m.duplicate(in)
+	d := s.describes[i]
+	d.back[in.i] = true
+	if in.done.Err != runtime.OK {
 		m.endDescribe(s, d)
 		m.reply(d.call, runtime.ErrUnavailable, nil)
 		return
 	}
-	d.out[r.i].DescribeGroupResp = runtime.ResponseAs[contract.DescribeGroupResp](done)
+	d.out[in.i].DescribeGroupResp = runtime.ResponseAs[contract.DescribeGroupResp](in.done)
 	if d.left--; d.left > 0 {
 		return
 	}
@@ -60,7 +64,7 @@ func (m *Machine) describeDone(s *serving, r describeRead, done runtime.ControlP
 }
 
 // abandonRead forgets the describe of call, if there is one.
-func (m *Machine) abandonRead(s *serving, call CallID) bool {
+func (m *Machine) abandonRead(s *serving, call actor.ReplyTo[Reply]) bool {
 	i := slices.IndexFunc(s.describes, func(d *describe) bool { return d.call == call })
 	if i >= 0 {
 		m.endDescribe(s, s.describes[i])
@@ -69,9 +73,6 @@ func (m *Machine) abandonRead(s *serving, call CallID) bool {
 }
 
 func (m *Machine) endDescribe(s *serving, d *describe) {
-	for _, req := range d.reqs {
-		delete(s.reqs, req)
-	}
 	s.describes = slices.DeleteFunc(s.describes, func(o *describe) bool { return o == d })
 }
 
@@ -90,5 +91,5 @@ func (m *Machine) list(s *serving, in List) {
 		g := s.groups[name]
 		out = append(out, contract.GroupSummary{Name: name, ProtocolType: g.protoType, State: g.phase.state()})
 	}
-	m.reply(in.Call, runtime.OK, ListAnswer{Groups: out})
+	m.reply(in.ReplyTo, runtime.OK, ListAnswer{Groups: out})
 }

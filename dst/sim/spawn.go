@@ -21,7 +21,8 @@ type spawnOpts struct {
 	cost      CostParams
 	exec      any // Executor[IO], checked in Spawn
 	onPhase   any // func(Phase) (In, bool), checked in Spawn
-	after     any // func(actor.Incarnation, In), checked in Spawn
+	after     any // func(actor.Incarnation, In, []actor.Effect), checked in Spawn
+	onEnd     func(self actor.Incarnation, how actor.End, cause string)
 }
 
 type optionFunc func(o *spawnOpts)
@@ -44,15 +45,22 @@ func OnPhase[In actor.Payload](f func(p Phase) (msg In, ok bool)) SpawnOption {
 	return optionFunc(func(o *spawnOpts) { o.onPhase = f })
 }
 
+// OnEnd runs when an incarnation of the actor ends, after its entries were
+// dropped and before the restart policy runs. Host code uses it to stop
+// what depends on the actor.
+func OnEnd(f func(self actor.Incarnation, how actor.End, cause string)) SpawnOption {
+	return optionFunc(func(o *spawnOpts) { o.onEnd = f })
+}
+
 // Cost is how long the actor is busy after one Receive.
 func Cost(c CostParams) SpawnOption { return optionFunc(func(o *spawnOpts) { o.cost = c }) }
 
 // Attrition lets the System kill this actor during PhaseFaults.
 func Attrition() SpawnOption { return optionFunc(func(o *spawnOpts) { o.attrition = true }) }
 
-// AfterReceive runs after each Receive and its effects. Host code uses it for
-// checks on one actor.
-func AfterReceive[In actor.Payload](f func(self actor.Incarnation, msg In)) SpawnOption {
+// AfterReceive runs after each Receive and its effects, with the message and
+// the effects it recorded. Host code uses it for checks on one actor.
+func AfterReceive[In actor.Payload](f func(self actor.Incarnation, msg In, effects []actor.Effect)) SpawnOption {
 	return optionFunc(func(o *spawnOpts) { o.after = f })
 }
 
@@ -75,7 +83,7 @@ func Spawn[In, IO actor.Payload](sys *System, p actor.Props[In, IO], opts ...Spa
 	h := &host[In, IO]{
 		actorBase: actorBase{sys: sys, idx: len(sys.actors), name: p.Name,
 			workload: o.workload, attrition: o.attrition, restart: p.Restart},
-		props: p, cost: o.cost,
+		props: p, cost: o.cost, onEnd: o.onEnd,
 	}
 	if !typedOptions(sys, h, o) {
 		return actor.EntityRef[In]{}
@@ -102,7 +110,7 @@ func typedOptions[In, IO actor.Payload](sys *System, h *host[In, IO], o spawnOpt
 	check(o.exec != nil, good, "WithExecutor")
 	h.onPhase, good = o.onPhase.(func(Phase) (In, bool))
 	check(o.onPhase != nil, good, "OnPhase")
-	h.afterRcv, good = o.after.(func(actor.Incarnation, In))
+	h.afterRcv, good = o.after.(func(actor.Incarnation, In, []actor.Effect))
 	check(o.after != nil, good, "AfterReceive")
 	return ok
 }

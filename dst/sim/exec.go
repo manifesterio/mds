@@ -81,8 +81,8 @@ type outsideAsk struct {
 }
 
 // Ask asks an actor from host code (a scenario step, a simulated gRPC
-// client). done runs as a host task with the answer, or with ok=false once
-// within passes; then the asker counts as gone and Watches on it fire.
+// client). done runs with the answer as soon as the Reply is applied, or with
+// ok=false (as a host task) once within passes; then the asker counts as gone and Watches on it fire.
 func Ask[Req, Rep actor.Payload](sys *System, to actor.EntityRef[Req], makeReq func(actor.ReplyTo[Rep]) Req,
 	within actor.Duration, done func(answer Rep, ok bool)) {
 	sys.outsideAsks++
@@ -108,7 +108,8 @@ func Ask[Req, Rep actor.Payload](sys *System, to actor.EntityRef[Req], makeReq f
 	sys.tell("host", to.EntityID(), 0, req)
 }
 
-// replyOutside answers a sim.Ask, now, as a host task.
+// replyOutside answers a sim.Ask: done runs at once, while the Reply is
+// applied, so it sees the replying actor as the Reply left it.
 func (sys *System) replyOutside(r actor.ReplyID, answer actor.Payload) {
 	if r.Asker.Runtime != sys.owner {
 		sys.Fail(FailProtocol, "foreign address", "a ReplyTo of another System was used")
@@ -121,5 +122,7 @@ func (sys *System) replyOutside(r actor.ReplyID, answer actor.Payload) {
 	}
 	delete(sys.outside, r.Number)
 	sys.Cancel(ask.deadline)
-	sys.At(sys.q.now, NoLane, func() { ask.done(answer, true) })
+	if !sys.guard("sim.Ask done", func() { ask.done(answer, true) }) {
+		sys.halted = true
+	}
 }

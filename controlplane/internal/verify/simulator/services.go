@@ -9,9 +9,9 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/rng"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	dstsim "github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check"
 )
 
@@ -42,16 +42,17 @@ const (
 )
 
 const (
-	callTimeoutAfter = 1 * machine.Second
-	netMin           = 1 * machine.Millisecond
-	netMax           = 4 * machine.Millisecond
-	slowMin          = 50 * machine.Millisecond // extra delay of a slow call or a slow answer
-	slowMax          = 400 * machine.Millisecond
+	callTimeoutAfter = 1 * actor.Second
+	netMin           = 1 * actor.Millisecond
+	netMax           = 4 * actor.Millisecond
+	slowMin          = 50 * actor.Millisecond // extra delay of a slow call or a slow answer
+	slowMax          = 400 * actor.Millisecond
 )
 
-// storage is the shared fake log and the fake object store. Calls reach it
-// with a delay, take effect at one instant, and the reply comes back with
-// another delay. Faults and partitions act on the calls of one node.
+// storage is the shared fake log and the fake object store, and the executor
+// of the replicas' IO. Calls reach it with a delay, take effect at one
+// instant, and the answer comes back with another delay. Faults and
+// partitions act on the calls of one node.
 type storage struct {
 	s    *sim
 	log  *executor.MemoryLog
@@ -75,23 +76,40 @@ func newStorage(s *sim) *storage {
 	}
 }
 
-func (st *storage) netDelay(r *rng.Rand) machine.Duration {
-	d := machine.Duration(r.Between(int64(netMin), int64(netMax)))
+func (st *storage) netDelay(r *rng.Rand) actor.Duration {
+	d := actor.Duration(r.Between(int64(netMin), int64(netMax)))
 	if r.Chance(st.s.faults.Slow) {
-		d += machine.Duration(r.Between(int64(slowMin), int64(slowMax)))
+		d += actor.Duration(r.Between(int64(slowMin), int64(slowMax)))
 	}
 	return d
 }
 
-func isWrite(call runtime.IOCall) bool {
+// ioKind returns whether call may change data, then whether it goes to the
+// log (else to the object store).
+func ioKind(call runtime.IO) (bool, bool) {
 	switch call.(type) {
-	case runtime.LogAppend, runtime.LogDeleteOld, runtime.LogClaimEpoch, runtime.ObjectPut, runtime.ObjectDelete:
-		return true
+	case runtime.LogAppend, runtime.LogDeleteOld, runtime.LogClaimEpoch:
+		return true, true
+	case runtime.LogRead, runtime.LogGetEnd:
+		return false, true
+	case runtime.ObjectPut, runtime.ObjectDelete:
+		return true, false
+	case runtime.ObjectGet, runtime.ObjectList:
 	}
-	return false
+	return false, false
 }
 
-func (st *storage) decide(r *rng.Rand, call runtime.IOCall) callMode {
+func isWrite(call runtime.IO) bool {
+	write, _ := ioKind(call)
+	return write
+}
+
+func isLogCall(call runtime.IO) bool {
+	_, log := ioKind(call)
+	return log
+}
+
+func (st *storage) decide(r *rng.Rand, call runtime.IO) callMode {
 	f := st.s.faults
 	if st.s.quiet {
 		return callOK
@@ -108,44 +126,53 @@ func (st *storage) decide(r *rng.Rand, call runtime.IOCall) callMode {
 	return callOK
 }
 
-// storage is a kernel service. A node hands it an IOCall in its route function.
-// The call reaches the storage after a delay, takes effect at one instant, and
-// the reply goes back to the caller with another delay.
-var _ kernel.Service[runtime.IOCall, runtime.EventData] = (*storage)(nil)
-
-// Name implements kernel.Service.
-func (st *storage) Name() string { return "storage" }
-
-// StateHash implements kernel.Service. The oracle reads the history, not the hash.
-func (st *storage) StateHash() uint64 { return 0 }
-
-// Handle implements kernel.Service: it queues the arrival of the call at the
-// storage after the network delay. The faults and the effect are drawn when the
-// call arrives, as the delay of the way back is.
-func (st *storage) Handle(cx *kernel.ServiceContext[runtime.EventData], from kernel.Ref[runtime.EventData], call runtime.IOCall) {
-	at := cx.Now() + kernel.Time(st.netDelay(cx.Rand()))
-	cx.Later(at, kernel.NoLane, func(cx *kernel.ServiceContext[runtime.EventData]) { st.arrive(cx, from, call) })
+// exec is the executor of the replicas' IO. The call reaches the storage
+// after a network delay drawn now; there it takes effect (or not), and the
+// answer goes back to the replica that issued it after another delay. A call
+// on the wire still lands after its caller died; the System drops the answer
+// to a dead incarnation.
+func (st *storage) exec(ctx *dstsim.ExecCtx, call runtime.IO) {
+	n := st.s.byName[ctx.Issuer().Name]
+	st.s.after(st.netDelay(st.s.rand), func() {
+		res, back := st.execute(n, call)
+		answer(ctx, call, back, res)
+	})
 }
 
-// OnCrash implements kernel.Service. A call on the wire still lands after its
-// caller died; the reply to a dead incarnation is dropped by the kernel.
-func (st *storage) OnCrash(*kernel.ServiceContext[runtime.EventData], machine.NodeInstance) {}
-
-// EnterRecovery implements kernel.Service. The storage reads the quiet flag of the run.
-func (st *storage) EnterRecovery() {}
-
-// arrive is the call arriving at the storage: it takes effect (or not) and the
-// reply is queued for the caller.
-func (st *storage) arrive(cx *kernel.ServiceContext[runtime.EventData], from kernel.Ref[runtime.EventData], call runtime.IOCall) {
-	res, back := st.execute(cx, from, call)
-	cx.Deliver(from, cx.Now()+kernel.Time(back), kernel.NoLane, res)
+// answer gives res to the Perform that issued call, after back. An
+// ObjectDelete is sent with Do: nothing waits for its answer.
+func answer(ctx *dstsim.ExecCtx, call runtime.IO, back actor.Duration, res actor.Payload) {
+	switch c := call.(type) {
+	case runtime.LogAppend:
+		answerAs[runtime.LogAppendDone](ctx, c, back, res)
+	case runtime.LogRead:
+		answerAs[runtime.LogReadDone](ctx, c, back, res)
+	case runtime.LogGetEnd:
+		answerAs[runtime.LogGetEndDone](ctx, c, back, res)
+	case runtime.LogDeleteOld:
+		answerAs[runtime.LogDeleteOldDone](ctx, c, back, res)
+	case runtime.LogClaimEpoch:
+		answerAs[runtime.LogClaimEpochDone](ctx, c, back, res)
+	case runtime.ObjectPut:
+		answerAs[runtime.ObjectPutDone](ctx, c, back, res)
+	case runtime.ObjectGet:
+		answerAs[runtime.ObjectGetDone](ctx, c, back, res)
+	case runtime.ObjectList:
+		answerAs[runtime.ObjectListDone](ctx, c, back, res)
+	case runtime.ObjectDelete:
+	}
 }
 
-// execute takes the effect of call (or not) and returns the reply with the
-// delay after which it arrives.
-func (st *storage) execute(cx *kernel.ServiceContext[runtime.EventData], from kernel.Ref[runtime.EventData], call runtime.IOCall) (runtime.IOResult, machine.Duration) {
-	n := st.s.byName[from.Instance().Node]
-	timeoutReply := func() (runtime.IOResult, machine.Duration) {
+// answerAs answers req with res, which execute built for req's own answer type.
+func answerAs[Rep actor.Payload, Req actor.Request[runtime.IO, Rep]](ctx *dstsim.ExecCtx, req Req, back actor.Duration, res actor.Payload) {
+	rep, _ := res.(Rep)
+	dstsim.Answer[runtime.IO, Rep](ctx, req, back, rep)
+}
+
+// execute takes the effect of call (or not) for node n, and returns the
+// answer with the delay after which it arrives.
+func (st *storage) execute(n *simNode, call runtime.IO) (actor.Payload, actor.Duration) {
+	timeoutReply := func() (actor.Payload, actor.Duration) {
 		out := runtime.NotApplied
 		if isWrite(call) {
 			out = runtime.MaybeApplied
@@ -156,10 +183,11 @@ func (st *storage) execute(cx *kernel.ServiceContext[runtime.EventData], from ke
 		st.s.stats.CutCalls++
 		return timeoutReply()
 	}
-	switch st.decide(cx.Rand(), call) {
+	r := st.s.rand
+	switch st.decide(r, call) {
 	case callFail:
 		st.s.stats.FailedCalls++
-		return errorReply(call, runtime.ErrUnavailable, runtime.NotApplied), st.netDelay(cx.Rand())
+		return errorReply(call, runtime.ErrUnavailable, runtime.NotApplied), st.netDelay(r)
 	case callTimeout:
 		st.s.stats.FailedCalls++
 		return timeoutReply()
@@ -167,41 +195,40 @@ func (st *storage) execute(cx *kernel.ServiceContext[runtime.EventData], from ke
 		st.s.stats.LostReplies++
 		st.apply(call)
 		return timeoutReply()
+	case callOK:
 	}
 	res := st.apply(call)
-	return res, st.netDelay(cx.Rand()) + st.slowAnswer(cx.Rand(), call)
+	return res, st.netDelay(r) + st.slowAnswer(r, call)
 }
 
-// errorReply is the failure completion that matches call.
-func errorReply(call runtime.IOCall, code runtime.ErrCode, out runtime.Outcome) runtime.IOResult {
+// errorReply is the failure answer that matches call.
+func errorReply(call runtime.IO, code runtime.ErrCode, out runtime.Outcome) actor.Payload {
 	switch c := call.(type) {
 	case runtime.LogAppend:
-		return runtime.LogAppendDone{Req: c.Req, Slot: c.Slot, Err: code, Outcome: out}
+		return runtime.LogAppendDone{Slot: c.Slot, Err: code, Outcome: out}
 	case runtime.LogRead:
-		return runtime.LogReadDone{Req: c.Req, Err: code, Outcome: out}
+		return runtime.LogReadDone{Err: code, Outcome: out}
 	case runtime.LogGetEnd:
-		return runtime.LogGetEndDone{Req: c.Req, Err: code, Outcome: out}
+		return runtime.LogGetEndDone{Err: code, Outcome: out}
 	case runtime.LogDeleteOld:
-		return runtime.LogDeleteOldDone{Req: c.Req, Err: code, Outcome: out}
+		return runtime.LogDeleteOldDone{Err: code, Outcome: out}
 	case runtime.LogClaimEpoch:
-		return runtime.LogClaimEpochDone{Req: c.Req, Err: code, Outcome: out}
+		return runtime.LogClaimEpochDone{Err: code, Outcome: out}
 	case runtime.ObjectPut:
-		return runtime.ObjectPutDone{Req: c.Req, Key: c.Key, Err: code, Outcome: out}
+		return runtime.ObjectPutDone{Key: c.Key, Err: code, Outcome: out}
 	case runtime.ObjectGet:
-		return runtime.ObjectGetDone{Req: c.Req, Err: code}
+		return runtime.ObjectGetDone{Err: code}
 	case runtime.ObjectDelete:
-		return runtime.ObjectDeleteDone{Req: c.Req, Err: code, Outcome: out}
+		return runtime.ObjectDeleteDone{Err: code, Outcome: out}
 	case runtime.ObjectList:
-		return runtime.ObjectListDone{Req: c.Req, Err: code}
+		return runtime.ObjectListDone{Err: code}
 	}
 	panic("simulator: unknown IO call")
 }
 
 // apply runs call on the real in-memory log and object store, and answers like
 // the executor does.
-//
-//nolint:dupl // the cases are alike but each calls a different method
-func (st *storage) apply(call runtime.IOCall) runtime.IOResult {
+func (st *storage) apply(call runtime.IO) actor.Payload {
 	switch c := call.(type) {
 	case runtime.LogAppend:
 		return st.applyAppend(c)
@@ -210,30 +237,56 @@ func (st *storage) apply(call runtime.IOCall) runtime.IOResult {
 		if err != nil {
 			return st.failed(call, err)
 		}
-		return runtime.LogReadDone{Req: c.Req, Entries: st.shortPage(ents), Err: runtime.OK, Outcome: runtime.Applied}
+		return runtime.LogReadDone{Entries: st.shortPage(ents), Err: runtime.OK, Outcome: runtime.Applied}
 	case runtime.LogGetEnd:
 		tail, err := st.log.CheckTail(st.ctx)
 		if err != nil {
 			return st.failed(call, err)
 		}
-		return runtime.LogGetEndDone{Req: c.Req, Tail: tail, Err: runtime.OK, Outcome: runtime.Applied}
+		return runtime.LogGetEndDone{Tail: tail, Err: runtime.OK, Outcome: runtime.Applied}
 	case runtime.LogDeleteOld:
 		if err := st.log.TrimThrough(st.ctx, c.Through); err != nil {
 			return st.failed(call, err)
 		}
-		return runtime.LogDeleteOldDone{Req: c.Req, Err: runtime.OK, Outcome: runtime.Applied}
+		return runtime.LogDeleteOldDone{Err: runtime.OK, Outcome: runtime.Applied}
 	case runtime.LogClaimEpoch:
 		return st.applyClaim(c)
+	case runtime.ObjectPut:
+		if err := st.objs.Put(st.ctx, c.Key, c.Data); err != nil {
+			return st.failed(call, err)
+		}
+		return runtime.ObjectPutDone{Key: c.Key, Err: runtime.OK, Outcome: runtime.Applied}
+	case runtime.ObjectGet:
+		data, err := st.objs.Get(st.ctx, c.Ref)
+		if err != nil {
+			return st.failed(call, err)
+		}
+		if len(data) > 0 && !st.s.quiet && st.s.rand.Chance(st.s.faults.Corrupt) {
+			data[len(data)/2] ^= 0xff // Get returns a copy, so the stored object is not changed
+		}
+		return runtime.ObjectGetDone{Data: data}
+	case runtime.ObjectDelete:
+		if err := st.objs.Delete(st.ctx, c.Key); err != nil {
+			return st.failed(call, err)
+		}
+		return runtime.ObjectDeleteDone{Err: runtime.OK, Outcome: runtime.Applied}
+	case runtime.ObjectList:
+		keys, err := st.objs.List(st.ctx, c.Prefix)
+		if err != nil {
+			return st.failed(call, err)
+		}
+		sort.Strings(keys) // the real store lists in key order; MemoryObjects does not
+		return runtime.ObjectListDone{Keys: keys}
 	}
-	return st.applyObject(call)
+	return errorReply(call, runtime.ErrInvalid, runtime.NotApplied)
 }
 
-func (st *storage) failed(call runtime.IOCall, err error) runtime.IOResult {
+func (st *storage) failed(call runtime.IO, err error) actor.Payload {
 	code, out := executor.Classify(call, err)
 	return errorReply(call, code, out)
 }
 
-func (st *storage) applyAppend(c runtime.LogAppend) runtime.IOResult {
+func (st *storage) applyAppend(c runtime.LogAppend) actor.Payload {
 	existing, taken, err := st.log.Append(st.ctx, c.Slot, c.Data)
 	if err != nil {
 		return st.failed(c, err)
@@ -241,14 +294,14 @@ func (st *storage) applyAppend(c runtime.LogAppend) runtime.IOResult {
 	switch {
 	case taken && len(existing) == 0:
 		// At or below the floor: not a commit, and no entry to show.
-		return runtime.LogAppendDone{Req: c.Req, Slot: c.Slot, Taken: true, Err: runtime.ErrConflict, Outcome: runtime.NotApplied}
+		return runtime.LogAppendDone{Slot: c.Slot, Taken: true, Err: runtime.ErrConflict, Outcome: runtime.NotApplied}
 	case taken && st.s.bug == BugLogOverwrite:
-		return runtime.LogAppendDone{Req: c.Req, Slot: c.Slot, Err: runtime.OK, Outcome: runtime.Applied}
+		return runtime.LogAppendDone{Slot: c.Slot, Err: runtime.OK, Outcome: runtime.Applied}
 	case taken:
-		return runtime.LogAppendDone{Req: c.Req, Slot: c.Slot, Taken: true, Existing: existing, Err: runtime.OK, Outcome: runtime.Applied}
+		return runtime.LogAppendDone{Slot: c.Slot, Taken: true, Existing: existing, Err: runtime.OK, Outcome: runtime.Applied}
 	}
 	st.committed(c.Slot, c.Data)
-	return runtime.LogAppendDone{Req: c.Req, Slot: c.Slot, Err: runtime.OK, Outcome: runtime.Applied}
+	return runtime.LogAppendDone{Slot: c.Slot, Err: runtime.OK, Outcome: runtime.Applied}
 }
 
 // committed records a new entry in the history and checks that one epoch has
@@ -270,7 +323,7 @@ func (st *storage) committed(slot runtime.LogPosition, data []byte) {
 	}
 }
 
-func (st *storage) applyClaim(c runtime.LogClaimEpoch) runtime.IOResult {
+func (st *storage) applyClaim(c runtime.LogClaimEpoch) actor.Payload {
 	epoch, owner, won, err := st.log.ClaimEpoch(st.ctx, c.Expect, c.Owner)
 	if err != nil {
 		return st.failed(c, err)
@@ -283,40 +336,7 @@ func (st *storage) applyClaim(c runtime.LogClaimEpoch) runtime.IOResult {
 			st.s.violation(oneWriterPerEpoch, "epoch %d was won by %q and by %q", epoch, first, owner)
 		}
 	}
-	return runtime.LogClaimEpochDone{Req: c.Req, Epoch: epoch, Owner: owner, Won: won, Err: runtime.OK, Outcome: runtime.Applied}
-}
-
-//nolint:dupl // the cases are alike but each calls a different method
-func (st *storage) applyObject(call runtime.IOCall) runtime.IOResult {
-	switch c := call.(type) {
-	case runtime.ObjectPut:
-		if err := st.objs.Put(st.ctx, c.Key, c.Data); err != nil {
-			return st.failed(call, err)
-		}
-		return runtime.ObjectPutDone{Req: c.Req, Key: c.Key, Err: runtime.OK, Outcome: runtime.Applied}
-	case runtime.ObjectGet:
-		data, err := st.objs.Get(st.ctx, c.Ref)
-		if err != nil {
-			return st.failed(call, err)
-		}
-		if len(data) > 0 && !st.s.quiet && st.s.rand.Chance(st.s.faults.Corrupt) {
-			data[len(data)/2] ^= 0xff // Get returns a copy, so the stored object is not changed
-		}
-		return runtime.ObjectGetDone{Req: c.Req, Data: data}
-	case runtime.ObjectDelete:
-		if err := st.objs.Delete(st.ctx, c.Key); err != nil {
-			return st.failed(call, err)
-		}
-		return runtime.ObjectDeleteDone{Req: c.Req, Err: runtime.OK, Outcome: runtime.Applied}
-	case runtime.ObjectList:
-		keys, err := st.objs.List(st.ctx, c.Prefix)
-		if err != nil {
-			return st.failed(call, err)
-		}
-		sort.Strings(keys) // the real store lists in key order; MemoryObjects does not
-		return runtime.ObjectListDone{Req: c.Req, Keys: keys}
-	}
-	return errorReply(call, runtime.ErrInvalid, runtime.NotApplied)
+	return runtime.LogClaimEpochDone{Epoch: epoch, Owner: owner, Won: won, Err: runtime.OK, Outcome: runtime.Applied}
 }
 
 // logEnd is the number of slots in the history if it has no hole, and the

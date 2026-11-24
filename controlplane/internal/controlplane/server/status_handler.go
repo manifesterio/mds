@@ -18,7 +18,7 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 		ready            bool
 	}
 	ch := make(chan st, 1)
-	err := n.onLoop(ctx, func(m *replica.Replica) []runtime.Action {
+	err := n.onLoop(ctx, func(m *replica.Replica) {
 		role := "standby"
 		if m.IsActive() {
 			role = "active"
@@ -27,7 +27,6 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 			role: role, applied: int64(m.Applied()), logTail: int64(m.Applied()),
 			epoch: m.Epoch(), stepDowns: m.StepDowns(), ready: m.Ready(),
 		}
-		return nil
 	})
 	if err != nil {
 		return nil, wire.ToRPCError(runtime.ErrIO, runtime.NotApplied)

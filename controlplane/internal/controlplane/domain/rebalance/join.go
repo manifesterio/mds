@@ -6,14 +6,14 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // join handles a JoinGroup call (rules 3 to 11). The call parks until its round ends.
 func (m *Machine) join(s *serving, in Join) {
 	g := s.groups[in.Group]
 	if g != nil && len(g.members) > 0 && in.ProtocolType != g.protoType {
-		m.reply(in.Call, runtime.ErrInconsistentGroupProtocol, nil)
+		m.reply(in.ReplyTo, runtime.ErrInconsistentGroupProtocol, nil)
 		return
 	}
 	var mm *member
@@ -21,20 +21,20 @@ func (m *Machine) join(s *serving, in Join) {
 		mm = g.find(in.MemberID)
 	}
 	if in.MemberID != "" && mm == nil {
-		m.reply(in.Call, runtime.ErrUnknownMember, nil)
+		m.reply(in.ReplyTo, runtime.ErrUnknownMember, nil)
 		return
 	}
 	if g == nil {
-		g = m.newGroup(s, in.Group)
+		g = newGroup(s, in.Group)
 	}
 	if len(g.members) == 0 {
 		g.protoType = in.ProtocolType
 	}
 	isNew := mm == nil
 	if isNew {
-		mm = m.newMember(s, g, newMemberID(in.ClientID, m.env.NewID()))
+		mm = newMember(g, newMemberID(in.ClientID, m.env.NewID()))
 		mm.isNew = true
-		m.arm(&mm.session, m.cfg.NewMemberTimeout)
+		m.startSession(g, mm, m.cfg.NewMemberTimeout)
 	}
 	mm.clientID, mm.clientHost, mm.instanceID = in.ClientID, in.ClientHost, in.GroupInstanceID
 	mm.sessionMs, mm.rebalanceMs = in.SessionTimeoutMs, in.RebalanceTimeoutMs
@@ -52,10 +52,9 @@ func (m *Machine) join(s *serving, in Join) {
 		// A newer join of the same member answers the older one (rule 7).
 		delete(jn.joins, mm.id)
 		m.reply(old, runtime.ErrRebalanceInProgress, nil)
-		m.touch(mm)
+		m.touch(g, mm)
 	}
-	jn.joins[mm.id] = in.Call
-	s.where[in.Call] = g.name
+	jn.joins[mm.id] = in.ReplyTo
 	m.maybeComplete(s, g, false)
 }
 
@@ -64,11 +63,11 @@ func (m *Machine) join(s *serving, in Join) {
 // rebalance timeout moves the round end later (rule 10).
 func (m *Machine) joinRound(g *group, jn *joining, mm *member, isNew bool) {
 	if isNew && jn.delay {
-		m.arm(&g.delay, m.after(min(m.now+machine.NodeTime(m.cfg.InitialDelay), jn.end)))
+		m.startDelay(g, m.after(min(m.now+actor.Mono(m.cfg.InitialDelay), jn.end)))
 	}
-	if until := jn.start + g.longest(); !jn.ended && until > jn.end {
+	if until := jn.start + actor.Mono(g.longest()); !jn.ended && until > jn.end {
 		jn.end = until
-		m.arm(&g.round, m.after(jn.end))
+		m.startRound(g, m.after(jn.end))
 	}
 }
 
@@ -82,14 +81,14 @@ func isEmpty(p phase) bool {
 // Empty waits the initial delay.
 func (m *Machine) openRound(g *group, initial bool) *joining {
 	old := g.phase
-	jn := &joining{start: m.now, end: m.now + g.longest(), joins: map[string]CallID{}}
+	jn := &joining{start: m.now, end: m.now + actor.Mono(g.longest()), joins: map[string]actor.ReplyTo[Reply]{}}
 	g.phase = jn
-	m.arm(&g.round, m.after(jn.end))
+	m.startRound(g, m.after(jn.end))
 	if initial {
 		jn.delay = true
-		m.arm(&g.delay, m.after(min(m.now+machine.NodeTime(m.cfg.InitialDelay), jn.end)))
+		m.startDelay(g, m.after(min(m.now+actor.Mono(m.cfg.InitialDelay), jn.end)))
 	} else {
-		m.stop(&g.delay)
+		m.stop(g, delayKey(g.name))
 	}
 	if sy, ok := old.(*syncing); ok {
 		m.answerParked(g, sy.syncs, runtime.ErrRebalanceInProgress, nil)
@@ -99,12 +98,12 @@ func (m *Machine) openRound(g *group, initial bool) *joining {
 
 // answerParked gives every parked call in calls the same answer, in member
 // id order. Each answered member's session starts again.
-func (m *Machine) answerParked(g *group, calls map[string]CallID, err runtime.ErrCode, body Answer) {
+func (m *Machine) answerParked(g *group, calls map[string]actor.ReplyTo[Reply], err runtime.ErrCode, body Answer) {
 	for _, mm := range g.members {
 		if call, ok := calls[mm.id]; ok {
 			delete(calls, mm.id)
 			m.reply(call, err, body)
-			m.touch(mm)
+			m.touch(g, mm)
 		}
 	}
 }
@@ -124,7 +123,7 @@ func (m *Machine) maybeComplete(s *serving, g *group, force bool) {
 	if force {
 		jn.ended = true // a round that fails now waits for its members with no end
 		jn.delay = false
-		m.stop(&g.delay)
+		m.stop(g, delayKey(g.name))
 	}
 	if len(late) == 0 {
 		m.finishRound(s, g)
@@ -155,7 +154,7 @@ func (m *Machine) finishRound(s *serving, g *group) {
 		m.answerParked(g, jn.joins, runtime.ErrInconsistentGroupProtocol, nil)
 		return
 	}
-	m.startWrite(s, g, install, installWrite{op: install})
+	m.startWrite(g, install, installWrite{op: install})
 }
 
 // withProtocol lists the members, in id order, with their metadata for
@@ -180,9 +179,9 @@ func withProtocol(g *group, protocol string) []contract.GroupMember {
 func (m *Machine) installed(g *group, op contract.GroupInstall) {
 	jn := g.phase.(*joining)
 	g.generation, g.protocol, g.leader = op.Generation, op.Protocol, op.Leader
-	g.phase = &syncing{syncs: map[string]CallID{}}
-	m.stop(&g.delay)
-	m.arm(&g.round, machine.Duration(g.longest())) // the sync deadline (rule 24)
+	g.phase = &syncing{syncs: map[string]actor.ReplyTo[Reply]{}}
+	m.stop(g, delayKey(g.name))
+	m.startRound(g, g.longest()) // the sync deadline (rule 24)
 	list := make([]Member, 0, len(op.Members))
 	for _, gm := range op.Members {
 		list = append(list, Member{ID: gm.MemberID, InstanceID: gm.GroupInstanceID, Metadata: gm.Metadata})
@@ -200,7 +199,7 @@ func (m *Machine) installed(g *group, op contract.GroupInstall) {
 			answer.Members = list
 		}
 		m.reply(call, runtime.OK, answer)
-		m.touch(mm)
+		m.touch(g, mm)
 	}
 }
 

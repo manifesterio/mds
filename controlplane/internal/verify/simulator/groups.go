@@ -6,82 +6,67 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
-	"github.com/manifesterio/mds/dst/sim/kernel"
+	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/core/trace"
+	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
-// The host of the rebalance machine (docs/architecture.md section 11). In
-// production server.Node runs the machine in a second loop beside the replica.
-// Here each node gets a second kernel node ("rb-0" beside "cp-0") that crashes
-// and restarts with the replica; a restart takes a new machine, so it starts
-// with no memory. The host does what server.Node does, and nothing else:
+// The host of the rebalance actor (docs/architecture.md section 11). In
+// production server.Node runs it beside the replica. Here each node gets a
+// second actor ("rb-0" beside "cp-0") that crashes and restarts with the
+// replica; a restart builds a new machine, so it starts with no memory. The
+// host does what server.Node does, and nothing else:
 //
-//   - SubmitCommand goes to the replica as a ControlPlaneDeliver from
-//     rebalanceFrom; SubmitRead as a LocalRead, or as a ControlPlaneDeliver
-//     when Fresh.
-//   - A ControlPlaneReply to rebalanceFrom comes back as a ReplicaReply
-//     (simNode.reply looks at To first, as Node.reply does).
-//   - After each replica step, a change of "active appender and Ready" is
-//     sent as RoleChanged (the AfterStep hook of the replica loop).
-//   - A group call gets an id and waits for its Reply. When its deadline
-//     passes first, the call is forgotten, CallAbandoned goes to the machine,
-//     and a later reply is dropped.
+//   - The rebalance actor asks the replica directly: a command or a fresh
+//     read as a ControlPlaneDeliver, any other read as a LocalRead.
+//   - After each Receive of the replica, a change of "active appender and
+//     Ready" is told to the rebalance actor as RoleChanged (the AfterReceive
+//     hook of the replica in production).
+//   - A group call is an ask of the rebalance actor that ends at its
+//     deadline. When the deadline passes first, the caller is gone: the
+//     actor's Watch on the call fires, and a later reply is dropped.
 //   - OffsetFetch is not a machine call: behind the role bit it is a
 //     LocalRead of the replica.
 //
-// A real inbox keeps the order in which values were put in it. The kernel
-// breaks ties of the same instant at random, so the host sends the values
-// that come from outside the machine on two lanes of each node, one for the
-// machine and one for the replica. On one lane, values of one instant keep
-// their order.
+// The host reads the effects of both actors for its checks and for the
+// coverage notes: the machine has no assertions of its own.
 
-// rebalanceFrom is who the machine is when it talks to the replica, as in
-// server/groups_handler.go.
-func rebalanceFrom() machine.NodeInstance { return machine.NodeInstance{Node: "rebalance"} }
-
-// groupsID is the node name of the rebalance machine of node idx.
-func groupsID(idx int) machine.NodeID { return machine.NodeID(fmt.Sprintf("rb-%d", idx)) }
+// groupsName is the actor name of the rebalance actor of node idx.
+func groupsName(idx int) string { return fmt.Sprintf("rb-%d", idx) }
 
 // machineConfig is the machine config, with the times scaled down like replicaConfig.
 // The buggify sites of the machine come from the env of the run, so they fire and are
 // counted (production has an env where none fires).
 func machineConfig() rebalance.Config {
 	return rebalance.Config{
-		InitialDelay:     300 * machine.Millisecond,
-		NewMemberTimeout: 4 * machine.Second,
-		WriteTimeout:     2 * machine.Second,
+		InitialDelay:     300 * actor.Millisecond,
+		NewMemberTimeout: 4 * actor.Second,
+		WriteTimeout:     2 * actor.Second,
 	}
 }
 
-// groupLane is the key of a lane: the values for the machine of a node, or the
-// values for the replica of a node.
-type groupLane struct {
-	node      int
-	toReplica bool
-}
-
-// groupHost hosts the rebalance machine of one node and the group calls that
+// groupHost hosts the rebalance actor of one node and the group calls that
 // wait for it. It lives for the whole run; each boot of the node gives it a
-// new machine.
+// new machine, and the bookkeeping below starts again.
 type groupHost struct {
-	s *sim
-	n *simNode
-
-	addr          kernel.Addr[rebalance.Input]
-	toMachineLane kernel.Lane // values for the machine, in the order they were sent
-	toReplicaLane kernel.Lane // values for the replica, in the order they were sent
+	s   *sim
+	n   *simNode
+	ref actor.EntityRef[rebalance.Input]
 
 	role bool // the role bit: the replica is the active appender and Ready
 	told bool // the role the machine was told last (the last RoleChanged it took)
 
-	writes   map[machine.RequestID]sentWrite // commands sent to the replica and not answered yet
-	terms    int                             // the terms of the machine that ended: a break, or a role loss
-	calls    map[rebalance.CallID]*groupCall // calls that wait for a reply
-	gone     map[rebalance.CallID]bool       // calls that were abandoned
-	nextCall rebalance.CallID
-	reads    map[machine.RequestID]readNote // reads of the machine not answered yet
-	sent     map[machine.RequestID]bool     // every request id the machine of this boot used
-	timers   map[machine.TimerID]bool       // write timers: the timer that the machine sets with each command
+	writes map[actor.ReplyID]sentWrite // commands asked of the replica and not answered yet
+	terms  int                         // the terms of the machine that ended: a break, or a role loss
+	reads  map[actor.ReplyID]readNote  // reads asked of the replica and not answered yet
+	calls  map[actor.ReplyID]*groupCall
+	order  []*groupCall // the calls of this boot, in the order they were sent
+
+	// The timers of the machine, by the trace fold of the message they
+	// deliver: every timer, and the ones armed right after a command (the
+	// timer of a write or a commit).
+	timers      map[uint64]bool
+	writeTimers map[uint64]bool
 }
 
 // sentWrite is a command of the machine that the replica has not answered yet.
@@ -90,9 +75,12 @@ type sentWrite struct {
 	term  int    // the value of groupHost.terms when it was sent
 }
 
-// groupCall is one call that waits for the machine.
+// groupCall is one call to the machine.
 type groupCall struct {
-	try *callTry
+	try     *callTry
+	replies int  // replies of the machine to the call
+	gone    bool // its deadline passed before a reply: the caller is gone
+	closed  bool // the node went down before a reply: the caller saw the connection close
 }
 
 // readNote is what the host knows about one read of the machine, for the
@@ -103,165 +91,276 @@ type readNote struct {
 	fresh bool
 }
 
-// groupMachine is the rebalance machine as the kernel node runs it. Around
-// each Step it does the bookkeeping of the host: before it, the role the
-// machine is told; after it, the coverage notes.
-type groupMachine struct {
-	h *groupHost
-	m *rebalance.Machine
-}
-
-func (g *groupMachine) StateHash() uint64 { return g.m.StateHash() }
-
-func (g *groupMachine) Step(now machine.Now, in rebalance.Input) []rebalance.Output {
-	h := g.h
-	if r, ok := in.(rebalance.RoleChanged); ok {
-		h.told = r.Active
-		if !r.Active {
-			h.endTerm()
-		}
-	}
-	outs := g.m.Step(now, in)
-	h.note(in, outs)
-	return outs
-}
-
-// newGroupHost spawns the node of the rebalance machine of n. It is down until
-// n boots it.
+// newGroupHost spawns the rebalance actor of n. It is down until n boots it.
 func newGroupHost(s *sim, n *simNode) *groupHost {
-	h := &groupHost{
-		s: s, n: n,
-		toMachineLane: s.lanes.Get(groupLane{node: n.idx}),
-		toReplicaLane: s.lanes.Get(groupLane{node: n.idx, toReplica: true}),
+	h := &groupHost{s: s, n: n}
+	h.reset()
+	p := rebalance.Props(machineConfig(), n.ref)
+	p.Name = groupsName(n.idx)
+	build := p.New
+	p.New = func(env actor.Env) actor.Actor[rebalance.Input, actor.NoIO] {
+		h.reset()
+		return build(env)
 	}
-	h.addr = kernel.Spawn(s.w, kernel.NodeSpec[rebalance.Input, rebalance.Output]{
-		Name:  groupsID(n.idx),
-		New:   h.newMachine,
-		Route: h.route,
-	})
+	h.ref = dstsim.Spawn(s.w, p, dstsim.AfterReceive(h.afterReceive))
 	return h
 }
 
-// newMachine is the factory of the kernel node: it runs at each boot. The
-// machine has no memory: it is in Standby until the replica becomes active
-// and Ready.
-func (h *groupHost) newMachine(env machine.Env, _ machine.NodeInstance) machine.Machine[rebalance.Input, rebalance.Output] {
+// reset starts the bookkeeping of a new boot. The machine has no memory: it
+// is in Standby until the replica becomes active and Ready.
+func (h *groupHost) reset() {
 	h.role, h.told = false, false
-	h.sent = map[machine.RequestID]bool{}
-	h.timers = map[machine.TimerID]bool{}
-	h.calls = map[rebalance.CallID]*groupCall{}
-	h.gone = map[rebalance.CallID]bool{}
-	h.reads = map[machine.RequestID]readNote{}
-	h.writes = map[machine.RequestID]sentWrite{}
+	h.writes = map[actor.ReplyID]sentWrite{}
+	h.reads = map[actor.ReplyID]readNote{}
+	h.calls = map[actor.ReplyID]*groupCall{}
+	h.order = nil
+	h.timers = map[uint64]bool{}
+	h.writeTimers = map[uint64]bool{}
 	h.terms = 0
-	h.nextCall = 0
-	return &groupMachine{h: h, m: rebalance.New(machineConfig(), env)}
 }
 
 // stop ends the boot with the node. Every call that waits gets ErrUnavailable,
 // as a client does when the connection closes.
 func (h *groupHost) stop() {
-	for call := range h.nextCall + 1 { // in call order: the ids of a boot count up from 1
-		if gc := h.calls[call]; gc != nil {
-			h.s.after(h.s.store.netDelay(h.s.rand), func() { gc.try.answered(runtime.ErrUnavailable, nil) })
+	for _, gc := range h.order {
+		if gc.replies > 0 || gc.gone || gc.closed {
+			continue
 		}
+		gc.closed = true
+		h.s.after(h.s.store.netDelay(h.s.rand), func() { gc.try.answered(runtime.ErrUnavailable, nil) })
 	}
-	h.role, h.told = false, false
-	h.calls, h.gone, h.reads, h.writes, h.sent, h.timers = nil, nil, nil, nil, nil, nil
+	h.reset()
 }
 
 // writing reports that a command of the machine still waits for the replica.
 func (h *groupHost) writing() bool { return len(h.writes) > 0 }
-
-// replied takes the replica's answer to the machine: a command is no longer
-// in flight. It sends the answer to the machine. A write of the membership that
-// applied after the term that sent it ended makes its group late
-// (groupChecks.late).
-func (h *groupHost) replied(r *kernel.Router[runtime.EventData], d runtime.ControlPlaneDone) {
-	if w, ok := h.writes[d.Req]; ok {
-		delete(h.writes, d.Req)
-		if w.group != "" && w.term < h.terms && d.Err == runtime.OK {
-			h.s.oracle.groups.late[w.group] = true
-			h.s.tracef("%s: a write of group %s that the machine gave up applied late", h.n.name(), w.group)
-		}
-	}
-	kernel.SendOn(r, h.toMachineLane, h.addr, rebalance.Input(rebalance.ReplicaReply{Req: d.Req, Done: d}))
-}
 
 // endTerm notes that the machine ended its term (or lost its role): it will
 // not take the answers of the writes in flight.
 func (h *groupHost) endTerm() { h.terms++ }
 
 // freeze stops the machine for good: the final phase needs a log that no
-// longer changes. A frozen machine takes no step: its inputs wait in its inbox.
-func (h *groupHost) freeze() { h.s.w.Pause(h.addr) }
+// longer changes. A frozen machine takes no message: they wait in its inbox.
+func (h *groupHost) freeze() { h.s.w.Pause(h.ref) }
 
-// deliver sends an input to the machine from outside the nodes (a call that
-// came in from the network, or an abandoned call), on the lane of the machine.
-func (h *groupHost) deliver(v rebalance.Input) {
-	kernel.InjectOn(h.s.w, h.addr, h.toMachineLane, v)
-}
-
-// afterStep is the AfterStep hook of the replica loop: when "active appender
-// and Ready" changes, the machine is told.
-func (h *groupHost) afterStep() {
-	r := h.n.replica()
+// afterReplica runs after each Receive of the replica. A write of the
+// membership that the replica applied after the term that sent it ended
+// makes its group late (groupChecks.late). A read that came back is noted.
+// Then, when "active appender and Ready" changed, the machine is told.
+func (h *groupHost) afterReplica(effects []actor.Effect) {
+	for _, e := range effects {
+		if e.Kind != actor.EffectReply {
+			continue
+		}
+		d, _ := e.Msg.(runtime.ControlPlaneDone)
+		if w, ok := h.writes[e.Reply]; ok {
+			delete(h.writes, e.Reply)
+			if w.group != "" && w.term < h.terms && d.Err == runtime.OK {
+				h.s.oracle.groups.late[w.group] = true
+				h.s.tracef("%s: a write of group %s that the machine gave up applied late", h.n.name(), w.group)
+			}
+		}
+		if r, ok := h.reads[e.Reply]; ok {
+			delete(h.reads, e.Reply)
+			h.noteRead(r, d)
+		}
+	}
+	r := h.n.m
 	active := r.IsActive() && r.Ready()
 	if active == h.role {
 		return
 	}
 	h.role = active
-	h.deliver(rebalance.RoleChanged{Active: active})
+	dstsim.Tell(h.s.w, h.ref, 0, rebalance.Input(rebalance.RoleChanged{Active: active}))
 }
 
-// route handles one output of the machine. It is a copy of routeGroups of the
-// server (controlplane/internal/controlplane/server). It also checks two
-// promises of the machine to its host (docs/architecture.md sections 3 and 9): a
-// request id is never used twice in one run of the process (Node.reply depends
-// on it), and no call is answered OK while the machine was last told that it
-// does not have the role. Every case of rebalance.Output is listed, so a new
-// output without a case does not compile.
-func (h *groupHost) route(r *kernel.Router[rebalance.Input], out rebalance.Output) {
-	switch o := out.(type) {
-	case rebalance.SetTimer:
-		r.SetTimer(o.ID, o.After, rebalance.TimerFired{ID: o.ID, Gen: o.Gen})
-	case rebalance.CancelTimer:
-		r.CancelTimer(o.ID)
-	case rebalance.SendSelf:
-		r.SendSelf(o.Msg)
-	case rebalance.SubmitCommand:
-		h.newRequest(o.Req)
-		h.writes[o.Req] = sentWrite{group: groupOf(o.Op), term: h.terms}
-		h.toReplica(r, runtime.ControlPlaneDeliver{From: rebalanceFrom(), Req: o.Req, Op: o.Op})
-	case rebalance.SubmitRead:
-		h.newRequest(o.Req)
-		if _, list := o.Op.(contract.ListGroups); list && o.Fresh {
+// startCall is a group call that reached the node. It asks the machine,
+// until the deadline of the try. A reply goes back to the consumer after a
+// network delay; at the deadline the consumer sees a timeout.
+func (h *groupHost) startCall(t *callTry) {
+	if !h.n.up() {
+		h.refuse(t)
+		return
+	}
+	gc := &groupCall{try: t}
+	t.quiet = h.s.quiet
+	dstsim.Ask(h.s.w, h.ref, func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
+		h.calls[to.ID()] = gc
+		h.order = append(h.order, gc)
+		return t.op.input(to)
+	}, t.deadline, func(r rebalance.Reply, ok bool) { h.done(gc, r, ok) })
+}
+
+// done is the end of the ask of a call: the machine's reply, or the deadline.
+func (h *groupHost) done(gc *groupCall, r rebalance.Reply, ok bool) {
+	if gc.closed {
+		return // the node went down first and the call was answered then
+	}
+	if ok {
+		h.s.after(h.s.store.netDelay(h.s.rand), func() { gc.try.answered(r.Err, r.Body) })
+		return
+	}
+	gc.gone = true
+	h.s.env.Reachable(callAbandoned)
+	if t := gc.try; !t.onPurpose && t.quiet {
+		h.s.violation(everyCallGetsAnswer, "%s: %s sent a call in the quiet tail and had no answer after %dms",
+			h.n.name(), t.c.name, t.deadline/actor.Millisecond)
+	}
+	gc.try.answered(runtime.ErrTimeout, nil)
+}
+
+// refuse answers a call to a node that is down, as a refused connection.
+func (h *groupHost) refuse(t *callTry) {
+	h.s.after(h.s.store.netDelay(h.s.rand), func() { t.answered(runtime.ErrUnavailable, nil) })
+}
+
+// fetch is the OffsetFetch handler: behind the role bit, a LocalRead of the
+// replica. The answer goes back to the consumer after a network delay; the
+// consumer keeps its own deadline, so the ask ends at it too.
+func (h *groupHost) fetch(t *callTry, within actor.Duration) {
+	if !h.n.up() || !h.role {
+		h.refuse(t)
+		return
+	}
+	s, n := h.s, h.n
+	dstsim.Ask(s.w, n.ref, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+		return runtime.LocalRead{ReplyTo: to, Op: t.op.fetch}
+	}, within, func(d runtime.ControlPlaneDone, ok bool) {
+		if !ok {
+			return
+		}
+		prefix := n.m.Applied()
+		s.after(s.store.netDelay(s.rand), func() { t.c.fetched(t, d, prefix) })
+	})
+}
+
+// receiveNotes is what the host found in the effects of one Receive of the machine.
+type receiveNotes struct {
+	freshList   bool // a fresh ListGroups read: the term ended
+	sentRead    bool
+	unavailable bool // a call was answered ErrUnavailable
+}
+
+// afterReceive runs after each Receive of the machine. It does the
+// bookkeeping of the role and of the commands and reads in flight, checks
+// two promises of the machine to its host (docs/architecture.md sections 3
+// and 9): each call gets at most one reply, and no call is answered OK while
+// the machine was last told that it does not have the role. Then it marks
+// the paths that the coverage report lists.
+func (h *groupHost) afterReceive(_ actor.Incarnation, in rebalance.Input, effects []actor.Effect) {
+	role, isRole := in.(rebalance.RoleChanged)
+	if isRole {
+		h.told = role.Active
+		if !role.Active {
+			h.endTerm()
+		}
+	}
+	k := foldOf(in)
+	timer, writeTimer := h.timers[k], h.writeTimers[k]
+	o := h.noteEffects(in, effects)
+	env := h.s.env
+	switch {
+	case writeTimer && o.freshList:
+		env.Reachable(writeTimerEndsTerm)
+	case timer && o.sentRead:
+		env.Reachable(refusedLoadReadSentAgain)
+	case !timer && !fromOutside(in) && o.freshList:
+		// Not a call, a RoleChanged or a timer: the replica's answer to a
+		// write of the machine.
+		env.Reachable(failedWriteEndsTerm)
+	}
+	if isRole && !role.Active && o.unavailable {
+		env.Reachable(roleLostWhileCallsWait)
+	}
+}
+
+// noteEffects goes through the effects of one Receive of the machine in
+// order: the asks of the replica, the timers and the replies.
+func (h *groupHost) noteEffects(in rebalance.Input, effects []actor.Effect) receiveNotes {
+	var r receiveNotes
+	_, describeCall := in.(rebalance.Describe)
+	afterCommand := false
+	for _, e := range effects {
+		command := false
+		switch e.Kind {
+		case actor.EffectAsk:
+			command = h.asked(e, !describeCall, &r)
+		case actor.EffectStartTimer, actor.EffectAfter:
+			k := foldOf(e.Msg)
+			h.timers[k] = true
+			if afterCommand {
+				h.writeTimers[k] = true // the machine arms the timer of a write right after it
+			}
+		case actor.EffectReply:
+			h.replied(e, &r)
+		default:
+		}
+		afterCommand = command
+	}
+	return r
+}
+
+// asked notes one ask of the replica, and reports whether it is a command.
+func (h *groupHost) asked(e actor.Effect, load bool, r *receiveNotes) bool {
+	if q, ok := e.Msg.(runtime.LocalRead); ok {
+		_, list := q.Op.(contract.ListGroups)
+		h.reads[e.Reply] = readNote{list: list, load: load}
+		r.sentRead = true
+		return false
+	}
+	q, ok := e.Msg.(runtime.ControlPlaneDeliver)
+	if !ok {
+		return false
+	}
+	_, list := q.Op.(contract.ListGroups)
+	_, describe := q.Op.(contract.DescribeGroup)
+	if list || describe {
+		h.reads[e.Reply] = readNote{list: list, load: load, fresh: true}
+		r.sentRead = true
+		if list {
+			r.freshList = true
 			h.endTerm() // a fresh load: the term ended
 		}
-		if o.Fresh {
-			h.toReplica(r, runtime.ControlPlaneDeliver{From: rebalanceFrom(), Req: o.Req, Op: o.Op})
-		} else {
-			h.toReplica(r, runtime.LocalRead{From: rebalanceFrom(), Req: o.Req, Op: o.Op})
-		}
-	case rebalance.Reply:
-		if o.Err == runtime.OK && !h.told {
-			h.s.violation(machineAnswersOnlyWithRole, "%s: the machine answered call %d OK after it was told that it lost the role", h.n.name(), o.Call)
-		}
-		h.answer(o)
+		return false
 	}
+	h.writes[e.Reply] = sentWrite{group: groupOf(q.Op), term: h.terms}
+	if rm, ok := q.Op.(contract.GroupRemove); ok && rm.Reason == "expire" {
+		h.s.consumers.expiring(rm)
+	}
+	return true
 }
 
-// toReplica sends a value to the replica of the node, on the lane of the replica.
-func (h *groupHost) toReplica(r *kernel.Router[rebalance.Input], v runtime.EventData) {
-	kernel.SendOn(r, h.toReplicaLane, h.n.addr, v)
+// replied checks one reply of the machine to a call.
+func (h *groupHost) replied(e actor.Effect, r *receiveNotes) {
+	reply, _ := e.Msg.(rebalance.Reply)
+	if reply.Err == runtime.OK && !h.told {
+		h.s.violation(machineAnswersOnlyWithRole, "%s: the machine answered call %d OK after it was told that it lost the role", h.n.name(), e.Reply.Number)
+	}
+	r.unavailable = r.unavailable || reply.Err == runtime.ErrUnavailable
+	gc := h.calls[e.Reply]
+	switch {
+	case gc == nil:
+		h.s.violation(everyCallGetsOneAnswer, "%s: the machine answered call %d, which it never got", h.n.name(), e.Reply.Number)
+		return
+	case gc.replies > 0:
+		h.s.violation(everyCallGetsOneAnswer, "%s: the machine answered call %d twice", h.n.name(), e.Reply.Number)
+	case gc.gone:
+		h.s.env.Reachable(lateReplyAbandonedCallDropped)
+	}
+	gc.replies++
 }
 
-// newRequest notes a request id of the machine. It must be new in this boot.
-func (h *groupHost) newRequest(req machine.RequestID) {
-	if h.sent[req] {
-		h.s.violation(requestIDsNeverRepeat, "%s: the machine sent request %d twice in one run", h.n.name(), req)
+// noteRead marks the paths of a read that came back.
+func (h *groupHost) noteRead(r readNote, d runtime.ControlPlaneDone) {
+	if d.Err != runtime.OK {
+		return
 	}
-	h.sent[req] = true
+	if r.list && r.fresh {
+		h.s.env.Reachable(groupsReadAgainFromFreshTail)
+	}
+	if desc, ok := d.Resp.(contract.DescribeGroupResp); ok && r.load && !r.fresh && len(desc.Members) > 0 {
+		h.s.env.Reachable(takeoverLoadsGroupMembers)
+	}
 }
 
 // groupOf is the group of a write of the membership, "" for an offset commit.
@@ -277,150 +376,25 @@ func groupOf(op runtime.ControlPlaneOperation) string {
 	return ""
 }
 
-// startCall is a group call that reached the node. It gets an id and goes
-// to the machine. If it has no reply when its deadline passes, the call is
-// abandoned: the machine is told, and the client sees a timeout.
-func (h *groupHost) startCall(t *callTry) {
-	if !h.n.up() {
-		h.refuse(t)
-		return
-	}
-	h.nextCall++
-	call := h.nextCall
-	gc := &groupCall{try: t}
-	h.calls[call] = gc
-	t.quiet = h.s.quiet
-	h.deliver(t.input(call))
-	h.s.after(t.deadline, func() { h.deadline(call, gc) })
+// fromOutside reports whether in came from outside the machine: a call or a
+// RoleChanged. (Not a switch: a switch over the sum must list every case,
+// and the machine's own messages are private to its package.)
+func fromOutside(in rebalance.Input) bool {
+	return is[rebalance.Join](in) || is[rebalance.Sync](in) || is[rebalance.Heartbeat](in) ||
+		is[rebalance.Leave](in) || is[rebalance.OffsetCommit](in) || is[rebalance.Describe](in) ||
+		is[rebalance.List](in) || is[rebalance.RoleChanged](in)
 }
 
-// refuse answers a call to a node that is down, as a refused connection.
-func (h *groupHost) refuse(t *callTry) {
-	h.s.after(h.s.store.netDelay(h.s.rand), func() { t.answered(runtime.ErrUnavailable, nil) })
+func is[T rebalance.Input](in rebalance.Input) bool {
+	_, ok := in.(T)
+	return ok
 }
 
-func (h *groupHost) deadline(call rebalance.CallID, gc *groupCall) {
-	if h.calls == nil || h.calls[call] != gc {
-		return // answered, or the node went down
-	}
-	delete(h.calls, call)
-	h.gone[call] = true
-	h.s.env.Reachable(callAbandoned)
-	h.deliver(rebalance.CallAbandoned{Call: call})
-	if !gc.try.onPurpose && gc.try.quiet {
-		h.s.violation(everyCallGetsAnswer, "%s: %s sent call %d in the quiet tail and had no answer after %dms",
-			h.n.name(), gc.try.c.name, call, gc.try.deadline/machine.Millisecond)
-	}
-	gc.try.answered(runtime.ErrTimeout, nil)
-}
-
-// answer gives a reply of the machine to the call that waits for it. A reply
-// to an abandoned call is dropped, as in production. A reply to a call that
-// never waited, or a second reply, is a failure.
-func (h *groupHost) answer(r rebalance.Reply) {
-	if h.calls == nil {
-		return
-	}
-	gc, ok := h.calls[r.Call]
-	if !ok {
-		if h.gone[r.Call] {
-			h.s.env.Reachable(lateReplyAbandonedCallDropped)
-			return
-		}
-		h.s.violation(everyCallGetsOneAnswer, "%s: the machine answered call %d, which does not wait for an answer", h.n.name(), r.Call)
-		return
-	}
-	delete(h.calls, r.Call)
-	h.s.after(h.s.store.netDelay(h.s.rand), func() { gc.try.answered(r.Err, r.Body) })
-}
-
-// fetch is the OffsetFetch handler: behind the role bit, a LocalRead of the
-// replica. The reply comes back to the consumer as a client reply.
-func (h *groupHost) fetch(t *callTry, req machine.RequestID) {
-	if !h.n.up() || !h.role {
-		h.refuse(t)
-		return
-	}
-	t.req = req
-	kernel.InjectOn[runtime.EventData](h.s.w, h.n.addr, h.toReplicaLane, runtime.LocalRead{From: t.c.from, Req: req, Op: t.op.fetch})
-}
-
-// note marks the paths of the machine that the coverage report lists. The
-// machine has no assertions of its own, so the host reads them from its
-// inputs and outputs.
-func (h *groupHost) note(in rebalance.Input, outs []rebalance.Output) {
-	o := h.noteOutputs(in, outs)
-	env := h.s.env
-	// Not a switch: a sum type switch must list every case, and the machine
-	// has a private input that code outside its package cannot name.
-	if t, ok := in.(rebalance.TimerFired); ok {
-		switch {
-		case o.freshList && h.timers[t.ID]:
-			env.Reachable(writeTimerEndsTerm)
-		case o.sentRead:
-			env.Reachable(refusedLoadReadSentAgain)
-		}
-	}
-	if r, ok := in.(rebalance.ReplicaReply); ok {
-		if o.freshList {
-			env.Reachable(failedWriteEndsTerm)
-		}
-		h.noteRead(r)
-	}
-	if r, ok := in.(rebalance.RoleChanged); ok && !r.Active && o.unavailable {
-		env.Reachable(roleLostWhileCallsWait)
-	}
-}
-
-// stepOutputs is what note found in the outputs of one step.
-type stepOutputs struct {
-	freshList   bool // a fresh ListGroups read: the term ended
-	sentRead    bool
-	unavailable bool // a call was answered ErrUnavailable
-}
-
-// noteOutputs remembers the reads and the write timers of one step.
-func (h *groupHost) noteOutputs(in rebalance.Input, outs []rebalance.Output) stepOutputs {
-	var r stepOutputs
-	afterSubmit := false
-	for _, o := range outs {
-		if st, ok := o.(rebalance.SetTimer); ok && afterSubmit {
-			h.timers[st.ID] = true // the machine arms the timer of a write right after it
-		}
-		_, afterSubmit = o.(rebalance.SubmitCommand)
-		switch o := o.(type) {
-		case rebalance.SubmitRead:
-			_, list := o.Op.(contract.ListGroups)
-			_, describeCall := in.(rebalance.Describe)
-			h.reads[o.Req] = readNote{list: list, load: !describeCall, fresh: o.Fresh}
-			r.sentRead = true
-			r.freshList = r.freshList || (list && o.Fresh)
-		case rebalance.SubmitCommand:
-			if rm, ok := o.Op.(contract.GroupRemove); ok && rm.Reason == "expire" {
-				h.s.consumers.expiring(rm)
-			}
-		case rebalance.Reply:
-			r.unavailable = r.unavailable || o.Err == runtime.ErrUnavailable
-		case rebalance.SetTimer, rebalance.CancelTimer, rebalance.SendSelf:
-		}
-	}
-	return r
-}
-
-// noteRead marks the paths of a read that came back.
-func (h *groupHost) noteRead(in rebalance.ReplicaReply) {
-	r, ok := h.reads[in.Req]
-	if !ok {
-		return
-	}
-	delete(h.reads, in.Req)
-	if in.Done.Err != runtime.OK {
-		return
-	}
-	if r.list && r.fresh {
-		h.s.env.Reachable(groupsReadAgainFromFreshTail)
-	}
-	if d, ok := in.Done.Resp.(contract.DescribeGroupResp); ok && r.load && !r.fresh && len(d.Members) > 0 {
-		h.s.env.Reachable(takeoverLoadsGroupMembers)
-	}
+// foldOf is the trace fold of a message: two messages fold the same when
+// they have the same type and the same fields. A timer delivers the message
+// it was armed with, so the fold names the timer.
+func foldOf(msg actor.Payload) uint64 {
+	h := trace.New()
+	msg.Fold(&h)
+	return h.Sum()
 }

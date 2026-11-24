@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // Tests of the rules that are new or changed (docs/architecture.md sections 5 and 6).
@@ -42,7 +43,7 @@ func TestNewMemberTimeout(t *testing.T) {
 		{delay, syncReq(2, "g", a, 1, as(a, "x")), []string{"2 OK assign=x"}},
 		{delay, h.join(3, "g", ""), nil}, // m2 waits; m1 does not rejoin, it only beats
 	})
-	call := CallID(4)
+	call := uint64(4)
 	for at := delay + 8*sec; at < delay+60*sec; at += 8 * sec {
 		h.run([]step{{at, hb(call, "g", a, 1), []string{fmt.Sprintf("%d ErrRebalanceInProgress", call)}}})
 		call++
@@ -52,9 +53,9 @@ func TestNewMemberTimeout(t *testing.T) {
 		{delay + 60*sec, nil, []string{"3 ErrUnknownMember"}},
 	})
 	h.check("members", []any{h.phase("g"), h.members("g")}, []any{stateJoining, []string{"m1"}})
-	for _, o := range h.outs {
-		if c, ok := o.(SubmitCommand); ok {
-			if r, ok := c.Op.(contract.GroupRemove); ok {
+	for _, e := range h.effects {
+		if d, ok := e.Msg.(runtime.ControlPlaneDeliver); ok && e.Kind == actor.EffectAsk {
+			if r, ok := d.Op.(contract.GroupRemove); ok {
 				t.Fatalf("a removal of a new member was logged: %+v", r)
 			}
 		}
@@ -97,7 +98,7 @@ func TestSyncDeadlineInStable(t *testing.T) {
 		{4 * sec, syncReq(4, "g", b, 1), []string{"4 OK assign=y"}},
 		{8 * sec, nil, nil},
 	})
-	h2.check("all synced", []any{h2.phase("g"), h2.members("g"), h2.group("g").round.on}, []any{stateStable, []string{"m1", "m2"}, false})
+	h2.check("all synced", []any{h2.phase("g"), h2.members("g"), h2.pending(roundKey("g"))}, []any{stateStable, []string{"m1", "m2"}, false})
 }
 
 // Rule 29: an offset commit that passes the checks starts the session again.
@@ -111,9 +112,9 @@ func TestCommitKeepsSession(t *testing.T) {
 		{delay, nil, []string{"1 OK gen=1 proto=range leader=m1 id=m1 members=[m1:meta-range]"}},
 		{delay, syncReq(2, "g", a, 1, as(a, "x")), []string{"2 OK assign=x"}},
 	})
-	call := CallID(3)
+	call := uint64(3)
 	for at := delay + 4*sec; at <= delay+20*sec; at += 4 * sec {
-		c := OffsetCommit{Call: call, Op: contract.OffsetCommit{Group: "g", Member: a, Generation: 1,
+		c := OffsetCommit{ReplyTo: rt(call), Op: contract.OffsetCommit{Group: "g", Member: a, Generation: 1,
 			Offsets: []contract.PartitionOffset{{TopicPartition: contract.NewTopicPartition("t", 0), Offset: int64(call)}}}}
 		h.run([]step{{at, c, []string{fmt.Sprintf("%d OK [OK]", call)}}})
 		call++
@@ -129,18 +130,18 @@ func TestDescribeAndList(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.run([]step{
 		{0, h.join(1, "g", ""), nil},
-		{0, Describe{Call: 2, Groups: []string{"g", "nope"}}, []string{
+		{0, Describe{ReplyTo: rt(2), Groups: []string{"g", "nope"}}, []string{
 			"2 OK g:PreparingRebalance gen=0 assigned=0 members=[] nope:Dead gen=0 assigned=0 members=[]",
 		}},
-		{0, List{Call: 3}, []string{"3 OK g:consumer:PreparingRebalance"}},
-		{0, Describe{Call: 4}, []string{"4 OK"}},
+		{0, List{ReplyTo: rt(3)}, []string{"3 OK g:consumer:PreparingRebalance"}},
+		{0, Describe{ReplyTo: rt(4)}, []string{"4 OK"}},
 		{delay, nil, []string{"1 OK gen=1 proto=range leader=m1 id=m1 members=[m1:meta-range]"}},
-		{delay, Describe{Call: 5, Groups: []string{"g"}}, []string{"5 OK g:CompletingRebalance gen=1 assigned=0 members=[m1]"}},
-		{delay, List{Call: 6}, []string{"6 OK g:consumer:CompletingRebalance"}},
+		{delay, Describe{ReplyTo: rt(5), Groups: []string{"g"}}, []string{"5 OK g:CompletingRebalance gen=1 assigned=0 members=[m1]"}},
+		{delay, List{ReplyTo: rt(6)}, []string{"6 OK g:consumer:CompletingRebalance"}},
 	})
 	// A read that fails fails the call; the term goes on.
 	h.hold = true
-	h.step(Describe{Call: 7, Groups: []string{"g", "g"}})
+	h.step(Describe{ReplyTo: rt(7), Groups: []string{"g", "g"}})
 	h.check("first read fails", h.answer(0, runtime.ErrUnavailable), []string{"7 ErrUnavailable"})
 	h.check("second read is ignored", h.answer(0, runtime.OK), []string(nil))
 	h.check("serving", h.phase("g"), stateSyncing)

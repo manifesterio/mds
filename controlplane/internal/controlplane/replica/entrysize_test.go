@@ -8,7 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // dynamoItemLimit is the largest DynamoDB item, in bytes (400 KiB).
@@ -26,25 +26,20 @@ func sizedCommit(key string, batches int) metadb.Entry {
 	return metadb.Entry{Kind: metadb.KindCommit, Op: contract.CommitSegment{SegmentKey: key, Batches: bs}}
 }
 
-// appendsUntilQueueEmpty finishes each append in turn, so the machine builds
-// the next group from the queue, and returns every LogAppend it emitted.
-func appendsUntilQueueEmpty(t *testing.T, m *replica.Replica, first runtime.LogAppend) []runtime.LogAppend {
+// appendsUntilQueueEmpty finishes each append in turn, so the replica builds
+// the next group from the queue, and returns every LogAppend it sent.
+func appendsUntilQueueEmpty(t *testing.T, h *harness, first actor.Effect) []runtime.LogAppend {
 	t.Helper()
-	all := []runtime.LogAppend{first}
 	cur := first
-	for m.QueueDepth() > 0 {
-		acts := step(m, runtime.LogAppendDone{Req: cur.Req, Slot: cur.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-		var next *runtime.LogAppend
-		for _, a := range acts {
-			if ap, ok := a.(runtime.LogAppend); ok {
-				next = &ap
-			}
+	ap := cur.Msg.(runtime.LogAppend)
+	all := []runtime.LogAppend{ap}
+	for h.m.QueueDepth() > 0 {
+		next, nextEffect, ok := find[runtime.LogAppend](h.answer(cur, applied(ap)))
+		if !ok {
+			t.Fatalf("queue still holds %d commands but no group was sent", h.m.QueueDepth())
 		}
-		if next == nil {
-			t.Fatalf("queue still holds %d commands but no group was emitted", m.QueueDepth())
-		}
-		all = append(all, *next)
-		cur = *next
+		all = append(all, next)
+		cur, ap = nextEffect, next
 	}
 	return all
 }
@@ -60,13 +55,13 @@ func commandsIn(t *testing.T, ap runtime.LogAppend) int {
 
 func TestGroupStopsAtTheEntryByteLimit(t *testing.T) {
 	const limit = 20000
-	m := newMachine(t, replica.Config{MaxEntryBytes: limit})
-	first := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: sizedCommit("seg/0", 50)}))
+	h := newHarness(t, replica.Config{MaxEntryBytes: limit})
+	_, first := only[runtime.LogAppend](t, h.offer(1, replica.ClientOperation{Cmd: sizedCommit("seg/0", 50)}))
 	const queued = 80
 	for i := 2; i <= queued+1; i++ {
-		m.Offer(replica.ClientOperation{Req: machine.RequestID(i), Cmd: sizedCommit(fmt.Sprintf("seg/%d", i), 50)})
+		h.offer(uint64(i), replica.ClientOperation{Cmd: sizedCommit(fmt.Sprintf("seg/%d", i), 50)})
 	}
-	appends := appendsUntilQueueEmpty(t, m, first)
+	appends := appendsUntilQueueEmpty(t, h, first)
 	if len(appends) < 3 {
 		t.Fatalf("groups = %d, want the queue split into several groups", len(appends))
 	}
@@ -83,14 +78,14 @@ func TestGroupStopsAtTheEntryByteLimit(t *testing.T) {
 }
 
 func TestDefaultLimitKeepsEntriesUnderTheDynamoDBItemLimit(t *testing.T) {
-	m := newMachine(t, replica.Config{})
-	first := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: sizedCommit("seg/0", 256)}))
+	h := newHarness(t, replica.Config{})
+	_, first := only[runtime.LogAppend](t, h.offer(1, replica.ClientOperation{Cmd: sizedCommit("seg/0", 256)}))
 	const queued = 200 // 256 commands of 256 batches made a 725 KB entry before the limit
 	for i := 2; i <= queued+1; i++ {
-		m.Offer(replica.ClientOperation{Req: machine.RequestID(i), Cmd: sizedCommit(fmt.Sprintf("seg/%d", i), 256)})
+		h.offer(uint64(i), replica.ClientOperation{Cmd: sizedCommit(fmt.Sprintf("seg/%d", i), 256)})
 	}
 	total := 0
-	for i, ap := range appendsUntilQueueEmpty(t, m, first) {
+	for i, ap := range appendsUntilQueueEmpty(t, h, first) {
 		if len(ap.Data) > 350<<10 || len(ap.Data) >= dynamoItemLimit {
 			t.Errorf("group %d is %d bytes, over the default limit of 350 KiB", i, len(ap.Data))
 		}

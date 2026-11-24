@@ -2,10 +2,6 @@ package runtime
 
 import "github.com/manifesterio/mds/controlplane/contract"
 
-// The time types, ID, NodeID, BootNumber, RequestID, TimerID, TimerVersion and NodeInstance
-// are not defined here. They come from dst/core/machine, and the broker and the control plane
-// share them.
-//
 // ErrCode, Outcome and SegmentRef are public (the broker uses them), so they are defined in
 // contract. The names below are aliases of them, so that the code of this module keeps its
 // short names.

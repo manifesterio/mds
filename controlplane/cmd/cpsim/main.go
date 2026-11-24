@@ -74,7 +74,7 @@ func runner(scenario string, p *product) func(uint64, campaign.RunOptions) campa
 		if err != nil {
 			return campaign.Result{Seed: seed, Failures: []campaign.Failure{{Kind: "protocol", Property: "scenario", Detail: err.Error()}}}
 		}
-		out := campaign.FromKernel(res.Result, res.Reproduce())
+		out := campaign.FromSim(res.Result, res.Reproduce())
 		out.Counters["slots"] = uint64(res.Stats.LogSlots)
 		out.Counters["acked"] = uint64(res.Stats.Acked)
 		if !res.OK() || o.Log {

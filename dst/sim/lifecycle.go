@@ -141,6 +141,7 @@ func (sys *System) end(s slot, how actor.End, cause string) {
 		sv.onCrash(who)
 	}
 	s.drop()
+	s.ended(who, how, cause)
 	if b.restart == nil {
 		return
 	}

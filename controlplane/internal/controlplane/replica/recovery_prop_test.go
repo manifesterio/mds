@@ -36,7 +36,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/spec"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // Kinds of injected storage failure.
@@ -166,9 +166,9 @@ type recWorld struct {
 
 func newRecWorld(t *rapid.T, trim bool) *recWorld {
 	w := &recWorld{t: t, log: executor.NewMemoryLog(), objs: executor.NewMemoryObjects(), model: spec.New(), cfg: replica.Config{
-		Rank: 0, Writer: "cp-0", CatchUpEvery: machine.Duration(time.Millisecond), Heartbeat: machine.Duration(time.Second),
-		TakeoverAfter:   machine.Duration(20 * time.Millisecond),
-		CheckpointEvery: machine.Duration(3 * time.Millisecond), CheckpointMinSlots: 1, CheckpointPrefix: recCheckpointPrefix,
+		Rank: 0, Writer: "cp-0", CatchUpEvery: actor.Duration(time.Millisecond), Heartbeat: actor.Duration(time.Second),
+		TakeoverAfter:   actor.Duration(20 * time.Millisecond),
+		CheckpointEvery: actor.Duration(3 * time.Millisecond), CheckpointMinSlots: 1, CheckpointPrefix: recCheckpointPrefix,
 	}}
 	if trim {
 		w.cfg.KeepSlots = 2 // the log is cut behind each checkpoint
@@ -185,7 +185,7 @@ func newRecWorld(t *rapid.T, trim bool) *recWorld {
 func (w *recWorld) start() {
 	w.proc = &recProcess{log: w.log, objs: w.objs}
 	w.node = server.New(server.Config{Machine: w.cfg, Log: w.proc, Objects: w.proc,
-		Self: machine.NodeInstance{Node: "cp-0"}, StopGrace: machine.Duration(50 * time.Millisecond)})
+		StopGrace: actor.Duration(50 * time.Millisecond)})
 	ctx, cancel := context.WithTimeout(w.t.Context(), 10*time.Second)
 	defer cancel()
 	if err := w.node.Start(ctx); err != nil {

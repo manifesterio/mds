@@ -8,118 +8,106 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // ckptKey is the object key of the checkpoint taken at slot, under the test prefix.
 func ckptKey(slot runtime.LogPosition) string { return fmt.Sprintf("checkpoint/%020d", slot) }
 
-// startRestore runs NodeStarted and returns the first action, which must be
+// startRestore runs NodeStarted and returns the only effect, which must be
 // the list of checkpoint objects.
-func startRestore(t *testing.T, m *replica.Replica) runtime.ObjectList {
+func startRestore(t *testing.T, h *harness) actor.Effect {
 	t.Helper()
-	acts := stepAt(m, 0, runtime.NodeStarted{})
-	list, ok := acts[0].(runtime.ObjectList)
-	if len(acts) != 1 || !ok || list.Prefix != "checkpoint/" {
-		t.Fatalf("Started = %v, want one ObjectList checkpoint/", acts)
+	effects := h.recvAt(0, runtime.NodeStarted{})
+	list, e := only[runtime.ObjectList](t, effects)
+	if len(effects) != 1 || list.Prefix != "checkpoint/" {
+		t.Fatalf("Started = %v, want one ObjectList checkpoint/", describe(effects))
 	}
-	return list
+	return e
 }
 
 func TestCheckpointPublishAndTrim(t *testing.T) {
-	m := newMachine(t, replica.Config{
+	h := newHarness(t, replica.Config{
 		Writer: "w", Rank: 0,
-		CatchUpEvery:       machine.Millisecond,
-		Heartbeat:          machine.Second,
-		TakeoverAfter:      machine.Second,
-		CheckpointEvery:    10 * machine.Millisecond,
+		CatchUpEvery:       actor.Millisecond,
+		Heartbeat:          actor.Second,
+		TakeoverAfter:      actor.Second,
+		CheckpointEvery:    10 * actor.Millisecond,
 		CheckpointMinSlots: 1,
 		KeepSlots:          2,
 		CheckpointPrefix:   "checkpoint/",
 	})
 	// NodeStarted, empty list, catch-up, Ready, claim, fence entry, active (rank 0).
-	list := startRestore(t, m)
-	acts := stepAt(m, 0, runtime.ObjectListDone{Req: list.Req})
-	timer := mustTimer(t, acts[0])
-	acts = stepAt(m, 0, runtime.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(runtime.LogGetEnd)
-	acts = stepAt(m, 0, runtime.LogGetEndDone{
-		Req: tail.Req, Tail: 0, Err: runtime.OK, Outcome: runtime.Applied,
-	})
-	if !m.Ready() {
+	list := startRestore(t, h)
+	h.answer(list, runtime.ObjectListDone{})
+	_, tail := only[runtime.LogGetEnd](t, h.fireAt(0, keyCatchUp))
+	effects := h.answer(tail, runtime.LogGetEndDone{Tail: 0, Err: runtime.OK, Outcome: runtime.Applied})
+	if !h.m.Ready() {
 		t.Fatal("not Ready after catch-up")
 	}
-	winClaim(t, m, acts, 1, 0) // the fence entry takes slot 0
+	if _, ok := h.armed(keyCheckpoint); !ok {
+		t.Fatalf("checkpoint timer missing after %v", describe(effects))
+	}
+	winClaim(t, h, effects, 1, 0) // the fence entry takes slot 0
 	// Commit one slot so applied=2.
-	ap := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: commitCmd("c", 1)}))
-	step(m, runtime.LogAppendDone{Req: ap.Req, Slot: ap.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-	if m.Applied() != 2 {
-		t.Fatalf("Applied = %d, want 2", m.Applied())
+	ap, apEffect := only[runtime.LogAppend](t, h.offer(1, replica.ClientOperation{Cmd: commitCmd("c", 1)}))
+	h.answer(apEffect, applied(ap))
+	if h.m.Applied() != 2 {
+		t.Fatalf("Applied = %d, want 2", h.m.Applied())
 	}
-	checkpoint, ok := findTimer(acts, replica.TimerCheckpoint)
-	if !ok {
-		t.Fatalf("checkpoint timer missing in %v", acts)
-	}
-	acts = stepAt(m, machine.NodeTime(20*machine.Millisecond), runtime.TimerFired{
-		ID: checkpoint.ID, Gen: checkpoint.Gen,
-	})
-	put, ok := acts[0].(runtime.ObjectPut)
-	if !ok || put.Key != ckptKey(2) || len(put.Data) == 0 {
-		t.Fatalf("checkpoint action = %#v, want ObjPut", acts[0])
+	effects = h.fireAt(actor.Mono(20*actor.Millisecond), keyCheckpoint)
+	put, putEffect := only[runtime.ObjectPut](t, effects)
+	if put.Key != ckptKey(2) || len(put.Data) == 0 {
+		t.Fatalf("checkpoint IO = %#v, want ObjectPut", put)
 	}
 	slot, err := metadb.NewMem().Restore(bytes.NewReader(put.Data))
 	if err != nil || slot != 2 {
 		t.Fatalf("published snapshot slot=%d err=%v, want 2", slot, err)
 	}
-	acts = stepAt(m, 0, runtime.ObjectPutDone{
-		Req: put.Req, Key: put.Key, Err: runtime.OK, Outcome: runtime.Applied,
-	})
+	effects = h.answer(putEffect, runtime.ObjectPutDone{Key: put.Key, Err: runtime.OK, Outcome: runtime.Applied})
 	// KeepSlots=2, checkpointSlot=2: below=0, no trim. No older checkpoint to delete.
-	if len(acts) != 0 {
-		t.Fatalf("unexpected actions after the first checkpoint: %v", acts)
+	if len(effects) != 0 {
+		t.Fatalf("unexpected effects after the first checkpoint: %v", describe(effects))
 	}
 
 	// Apply more slots and checkpoint again so trim fires.
-	ap2 := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 2, Cmd: commitCmd("d", 1)}))
-	step(m, runtime.LogAppendDone{Req: ap2.Req, Slot: ap2.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-	ap3 := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 3, Cmd: commitCmd("e", 1)}))
-	step(m, runtime.LogAppendDone{Req: ap3.Req, Slot: ap3.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-	if m.Applied() != 4 {
-		t.Fatalf("Applied = %d, want 4", m.Applied())
+	ap2, ap2Effect := only[runtime.LogAppend](t, h.offer(2, replica.ClientOperation{Cmd: commitCmd("d", 1)}))
+	h.answer(ap2Effect, applied(ap2))
+	ap3, ap3Effect := only[runtime.LogAppend](t, h.offer(3, replica.ClientOperation{Cmd: commitCmd("e", 1)}))
+	h.answer(ap3Effect, applied(ap3))
+	if h.m.Applied() != 4 {
+		t.Fatalf("Applied = %d, want 4", h.m.Applied())
 	}
-	// Re-arm checkpoint by firing a fresh gen (timer was re-armed in onCheckpointTimer).
-	acts = stepAt(m, machine.NodeTime(40*machine.Millisecond), runtime.TimerFired{
-		ID: replica.TimerCheckpoint, Gen: checkpoint.Gen + 1,
-	})
-	put = acts[0].(runtime.ObjectPut)
+	// The checkpoint timer was armed again when it fired.
+	effects = h.fireAt(actor.Mono(40*actor.Millisecond), keyCheckpoint)
+	put, putEffect = only[runtime.ObjectPut](t, effects)
 	if put.Key != ckptKey(4) {
 		t.Fatalf("second checkpoint key = %s, want %s", put.Key, ckptKey(4))
 	}
-	acts = stepAt(m, 0, runtime.ObjectPutDone{
-		Req: put.Req, Key: put.Key, Err: runtime.OK, Outcome: runtime.Applied,
-	})
-	if del, ok := acts[len(acts)-1].(runtime.ObjectDelete); !ok || del.Key != ckptKey(2) {
-		t.Fatalf("after put actions = %v, want a final ObjectDelete of the older checkpoint %s", acts, ckptKey(2))
+	effects = h.answer(putEffect, runtime.ObjectPutDone{Key: put.Key, Err: runtime.OK, Outcome: runtime.Applied})
+	ps := performs(effects)
+	if del, ok := ps[len(ps)-1].Msg.(runtime.ObjectDelete); !ok || del.Key != ckptKey(2) {
+		t.Fatalf("after put IO = %v, want a final ObjectDelete of the older checkpoint %s", describe(effects), ckptKey(2))
 	}
-	trim, ok := acts[0].(runtime.LogDeleteOld)
+	trim, ok := ps[0].Msg.(runtime.LogDeleteOld)
 	if !ok {
-		t.Fatalf("after put actions = %v, want LogTrim", acts)
+		t.Fatalf("after put IO = %v, want LogTrim", describe(effects))
 	}
 	// checkpointSlot=4, KeepSlots=2: below=2, Through=1.
 	if trim.Through != 1 {
 		t.Fatalf("LogTrim Through = %d, want 1", trim.Through)
 	}
-	stepAt(m, 0, runtime.LogDeleteOldDone{Req: trim.Req, Err: runtime.OK, Outcome: runtime.Applied})
+	h.answer(ps[0], runtime.LogDeleteOldDone{Err: runtime.OK, Outcome: runtime.Applied})
 }
 
 // A listed checkpoint can be deleted by the time it is read, because a newer
 // one replaced it. The node lists again instead of starting from slot 0.
 func TestVanishedCheckpointIsListedAgain(t *testing.T) {
-	m := newMachine(t, replica.Config{Writer: "w", CatchUpEvery: machine.Millisecond, CheckpointPrefix: "checkpoint/"})
-	list := startRestore(t, m)
-	get := step(m, runtime.ObjectListDone{Req: list.Req, Keys: []string{ckptKey(5)}})[0].(runtime.ObjectGet)
-	acts := step(m, runtime.ObjectGetDone{Req: get.Req, Err: runtime.ErrNotFound})
-	if _, ok := acts[0].(runtime.ObjectList); !ok || len(acts) != 1 || m.Ready() {
-		t.Fatalf("want one new ObjectList and not Ready, got %v", acts)
+	h := newHarness(t, replica.Config{Writer: "w", CatchUpEvery: actor.Millisecond, CheckpointPrefix: "checkpoint/"})
+	list := startRestore(t, h)
+	_, get := only[runtime.ObjectGet](t, h.answer(list, runtime.ObjectListDone{Keys: []string{ckptKey(5)}}))
+	effects := h.answer(get, runtime.ObjectGetDone{Err: runtime.ErrNotFound})
+	if _, _, ok := find[runtime.ObjectList](effects); !ok || len(effects) != 1 || h.m.Ready() {
+		t.Fatalf("want one new ObjectList and not Ready, got %v", describe(effects))
 	}
 }

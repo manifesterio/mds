@@ -6,59 +6,42 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // A read that arrives while a tail check is in flight waits for the NEXT check.
 func TestReadWaitsForFreshTail(t *testing.T) {
-	m := newMachine(t, replica.Config{
+	h := newHarness(t, replica.Config{
 		Writer: "s1", Rank: 1,
-		CatchUpEvery:  machine.Millisecond,
-		TakeoverAfter: 10 * machine.Second,
+		CatchUpEvery:  actor.Millisecond,
+		TakeoverAfter: 10 * actor.Second,
 	})
-	acts := bootEmpty(t, m, 0)
-	timer, ok := findTimer(acts, 1)
-	if !ok {
-		t.Fatalf("catch-up timer missing in %v", acts)
-	}
-	tailA := stepAt(m, 1, runtime.TimerFired{ID: timer.ID, Gen: timer.Gen})[0].(runtime.LogGetEnd)
-	got := stepAt(m, 2, runtime.ControlPlaneDeliver{
-		From: machine.NodeInstance{Node: "b"}, Req: 7, Op: contract.DescribeTopics{},
-	})
+	bootEmpty(t, h, 0)
+	_, tailA := only[runtime.LogGetEnd](t, h.fireAt(1, keyCatchUp))
+	got := h.recvAt(2, runtime.ControlPlaneDeliver{ReplyTo: caller(7), Op: contract.DescribeTopics{}})
 	if len(got) != 0 {
-		t.Fatalf("read answered at once: %v", got)
+		t.Fatalf("read answered at once: %v", describe(got))
 	}
-	acts = stepAt(m, 3, runtime.LogGetEndDone{Req: tailA.Req, Err: runtime.OK, Outcome: runtime.Applied})
-	for _, a := range acts {
-		if _, isReply := a.(runtime.ControlPlaneReply); isReply {
-			t.Fatalf("read answered from a tail check that started before it: %v", acts)
-		}
+	effects := h.answerAt(3, tailA, runtime.LogGetEndDone{Err: runtime.OK, Outcome: runtime.Applied})
+	if rs := replies(t, effects); len(rs) != 0 {
+		t.Fatalf("read answered from a tail check that started before it: %+v", rs)
 	}
-	timer, ok = findTimer(acts, 1)
-	if !ok {
-		t.Fatalf("catch-up timer missing in %v", acts)
-	}
-	tailB := stepAt(m, 4, runtime.TimerFired{ID: timer.ID, Gen: timer.Gen})[0].(runtime.LogGetEnd)
-	acts = stepAt(m, 5, runtime.LogGetEndDone{Req: tailB.Req, Err: runtime.OK, Outcome: runtime.Applied})
-	for _, a := range acts {
-		if r, isReply := a.(runtime.ControlPlaneReply); isReply && r.Done.Req == 7 && r.Done.Err == runtime.OK {
+	_, tailB := only[runtime.LogGetEnd](t, h.fireAt(4, keyCatchUp))
+	effects = h.answerAt(5, tailB, runtime.LogGetEndDone{Err: runtime.OK, Outcome: runtime.Applied})
+	for _, r := range replies(t, effects) {
+		if r.n == 7 && r.done.Err == runtime.OK {
 			return
 		}
 	}
-	t.Fatalf("no reply after a fresh tail: %v", acts)
+	t.Fatalf("no reply after a fresh tail: %v", describe(effects))
 }
 
-// A node that is not Ready refuses a read at once, so the bridge can fail over.
+// A node that is not Ready refuses a read at once, so the caller can fail over.
 func TestReadRefusedWhenNotReady(t *testing.T) {
-	m := newMachine(t, replica.Config{Writer: "s1", CatchUpEvery: machine.Millisecond})
-	step(m, runtime.NodeStarted{})
-	acts := stepAt(m, 1, runtime.ControlPlaneDeliver{
-		From: machine.NodeInstance{Node: "b"}, Req: 8, Op: contract.DescribeTopics{},
-	})
-	if len(acts) != 1 {
-		t.Fatalf("want one reply, got %v", acts)
-	}
-	if r, ok := acts[0].(runtime.ControlPlaneReply); !ok || r.Done.Err != runtime.ErrUnavailable {
-		t.Fatalf("want ErrUnavailable reply, got %v", acts[0])
+	h := newHarness(t, replica.Config{Writer: "s1", CatchUpEvery: actor.Millisecond})
+	h.recv(runtime.NodeStarted{})
+	r := onlyReply(t, h.recvAt(1, runtime.ControlPlaneDeliver{ReplyTo: caller(8), Op: contract.DescribeTopics{}}))
+	if r.done.Err != runtime.ErrUnavailable {
+		t.Fatalf("want ErrUnavailable reply, got %+v", r)
 	}
 }

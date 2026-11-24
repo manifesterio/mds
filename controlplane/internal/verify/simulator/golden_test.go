@@ -10,17 +10,15 @@ import (
 // goldenHashes pins named scenario/seed traces. An accidental determinism
 // change fails this test in review; bump a pin only after intentional review.
 var goldenHashes = map[string]uint64{
-	"basic/17": 0x337ae38013d6ceff,
-	"chaos/42": 0x7d8e4e6f2cc72b2f,
+	"basic/17": 0x6fea6c7ac801f8c5,
+	"chaos/42": 0xeb22a24f98c39d51,
 }
 
-// goldenWithoutGroups are the pins of the same seeds with the rebalance machines
-// and the consumers left out (the run of before the consumer groups were added,
-// T6.5). They moved once, with the others, when the host code moved to the dst
-// kernel (T1.11c).
+// goldenWithoutGroups are the pins of the same seeds with the rebalance actors
+// and the consumers left out.
 var goldenWithoutGroups = map[string]uint64{
-	"basic/17": 0x798ef51af00c8c5f,
-	"chaos/42": 0xef9a9a341d46a6ca,
+	"basic/17": 0x177b7b1714bd0a9e,
+	"chaos/42": 0xac4bd2ff469d907d,
 }
 
 // TestGoldenWithoutGroups pins the run with the consumer groups left out.

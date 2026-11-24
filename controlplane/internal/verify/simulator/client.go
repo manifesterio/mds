@@ -1,14 +1,13 @@
 package simulator
 
 import (
-	"fmt"
-
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
+	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
 const (
-	clientTimeout = 2 * machine.Second
+	clientTimeout = 2 * actor.Second
 	maxAttempts   = 8
 	finalAttempts = 40
 )
@@ -17,51 +16,46 @@ const (
 type opState struct {
 	op       runtime.ControlPlaneOperation
 	write    bool
-	attempts int
-	req      machine.RequestID
+	attempts int // the attempts so far; the number of the current one
 	node     int // node of the current attempt
 	snap     *snapshot
 	final    bool   // a read of the final check: one node, retried there
 	then     func() // what the client does when the operation is over
 }
 
-// client sends one operation at a time to a random node, and retries it with a new
-// request id when the node says unavailable or does not answer. The same
+// client sends one operation at a time to a random node, and retries it as a
+// new ask when the node says unavailable or does not answer. The same
 // operation is sent every time, so a commit keeps its segment key.
 type client struct {
 	pool *clientPool
-	from machine.NodeInstance
 	cur  *opState
 	idle bool
 }
 
 // clientPool is the set of clients of a run.
 type clientPool struct {
-	s       *sim
-	w       *workload
-	all     []*client
-	byName  map[machine.NodeID]*client
-	nextReq machine.RequestID
+	s   *sim
+	w   *workload
+	all []*client
 }
 
 func newClientPool(s *sim, count int) *clientPool {
-	p := &clientPool{s: s, w: &workload{rand: s.rand}, byName: map[machine.NodeID]*client{}}
-	for i := range count {
-		p.add(fmt.Sprintf("client-%d", i))
+	p := &clientPool{s: s, w: &workload{rand: s.rand}}
+	for range count {
+		p.add()
 	}
 	return p
 }
 
-func (p *clientPool) add(name string) *client {
-	c := &client{pool: p, idle: true, from: machine.NodeInstance{Node: machine.NodeID(name)}}
+func (p *clientPool) add() *client {
+	c := &client{pool: p, idle: true}
 	p.all = append(p.all, c)
-	p.byName[c.from.Node] = c
 	return c
 }
 
 func (p *clientPool) start() {
 	for _, c := range p.all {
-		d := machine.Duration(p.s.rand.Between(int64(20*machine.Millisecond), int64(200*machine.Millisecond)))
+		d := actor.Duration(p.s.rand.Between(int64(20*actor.Millisecond), int64(200*actor.Millisecond)))
 		p.s.after(d, c.issue)
 	}
 }
@@ -79,7 +73,7 @@ func (p *clientPool) busy() bool {
 // startFinal makes one client per node. Each reads all the state from its node.
 func (p *clientPool) startFinal() {
 	for _, n := range p.s.nodes {
-		c := p.add(fmt.Sprintf("final-%d", n.idx))
+		c := p.add()
 		reads := finalReads(p.s.consumers != nil)
 		var next func()
 		next = func() {
@@ -103,21 +97,6 @@ func (p *clientPool) pickNode(last int) int {
 	return (last + 1 + p.s.rand.Intn(n-1)) % n
 }
 
-// reply is called when a node returns a ControlPlaneReply. The answer reaches
-// the client after a network delay. prefix is how many log slots the node had
-// applied when it computed the answer.
-func (p *clientPool) reply(n *simNode, a runtime.ControlPlaneReply) {
-	c := p.byName[a.To.Node]
-	if c == nil {
-		if p.s.consumers != nil {
-			p.s.consumers.fetched(n, a)
-		}
-		return
-	}
-	prefix := n.replica().Applied()
-	p.s.after(p.s.store.netDelay(p.s.rand), func() { c.receive(a.Done, prefix) })
-}
-
 // issue starts the next random operation, unless the quiet tail has started.
 func (c *client) issue() {
 	s := c.pool.s
@@ -125,10 +104,10 @@ func (c *client) issue() {
 		c.idle = true
 		return
 	}
-	nowMs := int64(s.mono()) / int64(machine.Millisecond)
+	nowMs := int64(s.mono()) / int64(actor.Millisecond)
 	op, write := c.pool.w.next(nowMs)
 	c.begin(&opState{op: op, write: write, node: -1, then: func() {
-		think := machine.Duration(s.rand.Between(int64(10*machine.Millisecond), int64(120*machine.Millisecond)))
+		think := actor.Duration(s.rand.Between(int64(10*actor.Millisecond), int64(120*actor.Millisecond)))
 		s.after(think, c.issue)
 	}})
 }
@@ -140,33 +119,41 @@ func (c *client) begin(op *opState) {
 	c.attempt()
 }
 
-// attempt sends the operation to a node with a new request id.
+// attempt asks a node to run the operation. The ask reaches the node after a
+// network delay, and the answer comes back to the client after another. The
+// client gives up on the attempt clientTimeout after it started. prefix is how
+// many log slots the node had applied when it answered.
 func (c *client) attempt() {
 	p, op := c.pool, c.cur
 	op.attempts++
-	p.nextReq++
-	req := p.nextReq
-	op.req = req
+	try := op.attempts
 	if !op.final {
 		op.node = p.pickNode(op.node)
 	}
 	op.snap = p.s.oracle.snapshotFor(op.op)
-	node := p.s.nodes[op.node]
-	deliver := runtime.ControlPlaneDeliver{From: c.from, Req: req, Op: op.op}
-	p.s.after(p.s.store.netDelay(p.s.rand), func() { node.deliverNow(deliver) })
-	p.s.after(clientTimeout, func() {
-		if c.cur == op && op.req == req {
-			c.answered(runtime.ControlPlaneDone{Req: req, Err: runtime.ErrTimeout, Outcome: runtime.MaybeApplied}, 0)
+	s, node := p.s, p.s.nodes[op.node]
+	current := func() bool { return c.cur == op && op.attempts == try }
+	there := s.store.netDelay(s.rand)
+	s.after(there, func() {
+		dstsim.Ask(s.w, node.ref, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+			return runtime.ControlPlaneDeliver{ReplyTo: to, Op: op.op}
+		}, clientTimeout-there, func(d runtime.ControlPlaneDone, ok bool) {
+			if !ok {
+				return // the timeout below answers the client
+			}
+			prefix := node.m.Applied()
+			s.after(s.store.netDelay(s.rand), func() {
+				if current() {
+					c.answered(d, prefix)
+				}
+			})
+		})
+	})
+	s.after(clientTimeout, func() {
+		if current() {
+			c.answered(runtime.ControlPlaneDone{Err: runtime.ErrTimeout, Outcome: runtime.MaybeApplied}, 0)
 		}
 	})
-}
-
-// receive handles a reply. A reply to an old attempt is ignored, like a real
-// client ignores an answer for a request that it has given up on.
-func (c *client) receive(d runtime.ControlPlaneDone, prefix runtime.LogPosition) {
-	if c.cur != nil && c.cur.req == d.Req {
-		c.answered(d, prefix)
-	}
 }
 
 func retriable(code runtime.ErrCode) bool {
@@ -197,7 +184,7 @@ func (c *client) answered(d runtime.ControlPlaneDone, prefix runtime.LogPosition
 		return
 	}
 	s.stats.Retries++
-	backoff := machine.Duration(op.attempts) * 60 * machine.Millisecond
+	backoff := actor.Duration(op.attempts) * 60 * actor.Millisecond
 	s.after(backoff, func() {
 		if c.cur == op {
 			c.attempt()

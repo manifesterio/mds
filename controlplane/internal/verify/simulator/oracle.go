@@ -10,7 +10,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/spec"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/verify/check"
 )
 
@@ -272,7 +272,7 @@ func (o *oracle) judgeRead(model spec.Model, r readRec, end runtime.LogPosition)
 	}
 	want := model.Apply(r.op)
 	s.verdict(sameAnswer(want, r.done.Answer()), readsAgreeWithSpec, "at t=%dms after slot %d, %T: spec says %s, node says %s",
-		r.at/int64(machine.Millisecond), r.prefix, r.op, describeAnswer(want), describeAnswer(r.done.Answer()))
+		r.at/int64(actor.Millisecond), r.prefix, r.op, describeAnswer(want), describeAnswer(r.done.Answer()))
 }
 
 // judgeAcks checks that every acked write is in the log, and gave the answer that the spec gives.
@@ -282,7 +282,7 @@ func (o *oracle) judgeAcks(model spec.Model, committed map[string]contract.Done)
 		switch w := a.op.(type) {
 		case contract.CommitSegment:
 			want, in := committed[w.SegmentKey]
-			if !s.verdict(in, ackedWriteInLog, "commit %q was acked at t=%dms, but it is not in the log", w.SegmentKey, a.at/int64(machine.Millisecond)) {
+			if !s.verdict(in, ackedWriteInLog, "commit %q was acked at t=%dms, but it is not in the log", w.SegmentKey, a.at/int64(actor.Millisecond)) {
 				continue
 			}
 			s.verdict(sameAnswer(want, a.done.Answer()), ackedWriteHasSpecAnswer, "commit %q: spec says %s, the ack says %s", w.SegmentKey, describeAnswer(want), describeAnswer(a.done.Answer()))
@@ -522,7 +522,7 @@ func (o *oracle) judgeGroups(model spec.Model, l *groupLog) {
 		isMember := slices.ContainsFunc(in.Members, func(m contract.GroupMember) bool { return m.MemberID == j.member })
 		s.verdict(ok && in.Leader == j.leader && isMember, answeredGenerationInLog,
 			"at t=%dms %q got generation %d of %s with leader %q, but the log has it %v (leader %q, member %v)",
-			j.at/int64(machine.Millisecond), j.member, j.gen, j.group, j.leader, ok, in.Leader, isMember)
+			j.at/int64(actor.Millisecond), j.member, j.gen, j.group, j.leader, ok, in.Leader, isMember)
 	}
 	for _, y := range g.syncs {
 		assigns := l.assigns[groupGen{y.group, y.gen}]
@@ -534,13 +534,13 @@ func (o *oracle) judgeGroups(model spec.Model, l *groupLog) {
 			return string(a.Assignments[i].Bytes) == string(y.bytes)
 		})
 		s.verdict(match, syncAnswerIsLoggedAssignment, "at t=%dms %q of %s generation %d got %q, but the log assigns %+v",
-			y.at/int64(machine.Millisecond), y.member, y.group, y.gen, y.bytes, assigns)
+			y.at/int64(actor.Millisecond), y.member, y.group, y.gen, y.bytes, assigns)
 	}
 	for _, c := range g.commits {
 		pk := partitionKey{c.group, c.offset.TopicPartition}
 		slot, in := l.offsets[offsetKey{pk, c.offset.Offset}]
 		if !s.verdict(in, ackedOffsetCommitInLog, "offset %d of %s %v was acked at t=%dms, but it is not in the log",
-			c.offset.Offset, c.group, c.offset.TopicPartition, c.at/int64(machine.Millisecond)) {
+			c.offset.Offset, c.group, c.offset.TopicPartition, c.at/int64(actor.Millisecond)) {
 			continue
 		}
 		got := model.Apply(contract.OffsetFetch{Group: c.group, Partitions: []contract.TopicPartition{c.offset.TopicPartition}})

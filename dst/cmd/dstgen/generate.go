@@ -61,8 +61,9 @@ func generate(opt options) (result, error) {
 	for _, u := range units {
 		byDir[u.dir] = append(byDir[u.dir], u)
 	}
+	generated := generatedFolds(units)
 	for _, dir := range slices.Sorted(maps.Keys(byDir)) {
-		if err := generateDir(dir, byDir[dir], opt, &res, errs); err != nil {
+		if err := generateDir(dir, byDir[dir], opt, generated, &res, errs); err != nil {
 			return result{}, err
 		}
 	}
@@ -71,7 +72,7 @@ func generate(opt options) (result, error) {
 }
 
 // generateDir handles the units of one directory, which share one dst.tags.
-func generateDir(dir string, units []unit, opt options, res *result, errs *errorList) error {
+func generateDir(dir string, units []unit, opt options, generated map[string]bool, res *result, errs *errorList) error {
 	tags, err := readTags(dir + "/" + tagsFile)
 	if err != nil {
 		return err
@@ -93,7 +94,7 @@ func generateDir(dir string, units []unit, opt options, res *result, errs *error
 	tags.retireMissing(func(name string) bool { return names[name] })
 	tags.assign(all, errs)
 	for i, u := range units {
-		res.outputs[u.outPath()] = emitUnit(u, scans[i], tags, errs)
+		res.outputs[u.outPath()] = emitUnit(u, scans[i], tags, generated, errs)
 	}
 	res.tags[dir] = tags
 	res.outputs[tags.path] = tags.bytes()
@@ -102,16 +103,11 @@ func generateDir(dir string, units []unit, opt options, res *result, errs *error
 
 // emitUnit writes the generated file of one unit, or nil when it has nothing
 // to generate.
-func emitUnit(u unit, s scanned, tags *tagFile, errs *errorList) []byte {
+func emitUnit(u unit, s scanned, tags *tagFile, generated map[string]bool, errs *errorList) []byte {
 	e := emitter{
 		u: u, s: s, tags: tags, errs: errs,
 		imports:   map[string]bool{},
-		generated: map[*types.TypeName]bool{},
-	}
-	for _, a := range s.types {
-		if a.message() && !a.manual && a.obj != nil {
-			e.generated[a.obj] = true
-		}
+		generated: generated,
 	}
 	for _, a := range s.types {
 		e.emitType(a)
@@ -134,7 +130,7 @@ type emitter struct {
 	tags      *tagFile
 	errs      *errorList
 	imports   map[string]bool
-	generated map[*types.TypeName]bool
+	generated map[string]bool
 	body      strings.Builder
 }
 
@@ -308,4 +304,20 @@ func splitImports(imports map[string]bool) ([]string, []string) {
 		}
 	}
 	return std, other
+}
+
+// generatedFolds names every type of the loaded packages that gets a
+// generated Fold. Generated files are blanked while loading, so a field of
+// such a type, even from another package, folds through its Fold.
+func generatedFolds(units []unit) map[string]bool {
+	out := map[string]bool{}
+	scratch := &errorList{}
+	for _, u := range units {
+		for _, a := range scan(u, scratch).types {
+			if a.message() && !a.manual && a.obj != nil && a.obj.Pkg() != nil {
+				out[typeKey(a.obj)] = true
+			}
+		}
+	}
+	return out
 }

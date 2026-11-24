@@ -17,7 +17,7 @@ func TestOneMemberJoinsAndSyncs(t *testing.T) {
 		{delay, nil, []string{"1 OK gen=1 proto=range leader=m1 id=m1 members=[m1:meta-range]"}},
 		{delay, syncReq(2, "g", a, 1, as(a, "all")), []string{"2 OK assign=all"}},
 		{delay, hb(3, "g", a, 1), []string{"3 OK"}},
-		{delay, Describe{Call: 4, Groups: []string{"g"}}, []string{"4 OK g:Stable gen=1 assigned=1 members=[m1]"}},
+		{delay, Describe{ReplyTo: rt(4), Groups: []string{"g"}}, []string{"4 OK g:Stable gen=1 assigned=1 members=[m1]"}},
 	})
 }
 
@@ -109,8 +109,8 @@ func TestHeartbeatTable(t *testing.T) {
 		if tc.setup != nil {
 			h.step(tc.setup)
 		}
-		got := h.step(hb(CallID(i+1), tc.group, tc.id, tc.gen))
-		want := h.show(Reply{Call: CallID(i + 1), Err: tc.want})
+		got := h.step(hb(uint64(i+1), tc.group, tc.id, tc.gen))
+		want := h.show(uint64(i+1), Reply{Err: tc.want})
 		if len(got) != 1 || got[0] != want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, want)
 		}

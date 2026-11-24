@@ -93,6 +93,14 @@ These change Appendix A; the code in `dst/core/actor` and `dst/sim` is the refer
 6. `sim.Tell(sys, to, d, msg)` and `sim.Ask` keep their function form (host code); a concrete
    message needs a conversion or an explicit type argument there.
 7. `trace.StringMap(m)` was added (store state hashes), as change 3 of section 9 said.
+8. (P6) `sim.AfterReceive(func(self, msg, effects))` also gets the effects of the Receive, as the
+   kernel's AfterStep got the outputs: product simulators check what an actor did (the
+   controlplane group host checks late writes and answers after a role loss).
+9. (P6) `sim.OnEnd(func(self, how, cause))` runs when an incarnation ends, before the restart
+   policy: host code stops what depends on the actor (the replica's group actor).
+10. (P6) `sim.Ask`'s `done` runs at once while the Reply is applied (not as a later host task), so
+    it sees the replying actor as the Reply left it (controlplane's oracle reads the applied
+    prefix of the replying replica).
 
 ## 3. Runtime model
 

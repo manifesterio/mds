@@ -88,6 +88,9 @@ func unitOf(p *packages.Package) (unit, bool) {
 	dir := filepath.Dir(p.Fset.File(p.Syntax[0].Pos()).Name())
 	u := unit{dir: dir, pkg: p, pkgName: p.Name}
 	testVariant := strings.Contains(p.ID, " [")
+	if testVariant && !strings.HasSuffix(p.Name, "_test") && p.ID != p.PkgPath+" ["+p.PkgPath+".test]" {
+		return unit{}, false // the package recompiled for another package's tests: a copy
+	}
 	switch {
 	case strings.HasSuffix(p.Name, "_test"):
 		u.file = genXTestFile

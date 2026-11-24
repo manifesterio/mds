@@ -59,7 +59,7 @@ func TestEmptyMemberIDAndBadJoins(t *testing.T) {
 		func(j *Join) { j.Protocols = nil },
 	}
 	for i, change := range bad {
-		j := h.join(CallID(10+i), "g", "")
+		j := h.join(uint64(10+i), "g", "")
 		change(&j)
 		want := fmt.Sprintf("%d ErrInvalid", 10+i)
 		h.check(fmt.Sprintf("bad join %d", i), h.step(j), []string{want})
@@ -100,8 +100,8 @@ func TestOffsetCommitChecks(t *testing.T) {
 	}
 	a, b := h.stableTwo("g", 0, 1, 1)
 	tp0 := contract.NewTopicPartition("t", 0)
-	commit := func(call CallID, group, member string, gen int32, offs ...contract.PartitionOffset) OffsetCommit {
-		return OffsetCommit{Call: call, Op: contract.OffsetCommit{Group: group, Member: member, Generation: gen, Offsets: offs}}
+	commit := func(call uint64, group, member string, gen int32, offs ...contract.PartitionOffset) OffsetCommit {
+		return OffsetCommit{ReplyTo: rt(call), Op: contract.OffsetCommit{Group: group, Member: member, Generation: gen, Offsets: offs}}
 	}
 	off := func(tp contract.TopicPartition, o int64) contract.PartitionOffset {
 		return contract.PartitionOffset{TopicPartition: tp, Offset: o}
@@ -114,7 +114,7 @@ func TestOffsetCommitChecks(t *testing.T) {
 		{delay, commit(13, "g", "", -1, off(tp0, 6)), []string{"13 ErrUnknownMember"}},
 		{delay, commit(14, "fresh", "", -1, off(tp0, 3)), []string{"14 OK [OK]"}},
 		// "fresh" is not in memory, so List does not show it.
-		{delay, List{Call: 15}, []string{"15 OK g:consumer:Stable"}},
+		{delay, List{ReplyTo: rt(15)}, []string{"15 OK g:consumer:Stable"}},
 	})
 	f := contract.ResponseAs[contract.OffsetFetchResp](h.log.Apply(contract.OffsetFetch{Group: "g", Partitions: []contract.TopicPartition{tp0}}))
 	h.check("fetch", f.Offsets[0].Offset, 5)
@@ -172,7 +172,7 @@ func TestRebuildKeepsMembersAndExpiresSilent(t *testing.T) {
 	// Failover: the old machine loses the role, a new one takes over from the log.
 	h.check("losing the role", h.step(RoleChanged{Active: false}), []string(nil))
 	h.check("timers left", len(h.timers), 0)
-	h.m = New(Config{}, h.env)
+	h.m = New(Config{}, h.env, h.replica)
 	h.step(RoleChanged{Active: true})
 	h.check("rebuilt g", []any{h.phase("g"), h.group("g").generation, h.members("g")}, []any{stateStable, 2, []string{"m1", "m2"}})
 	h.check("rebuilt unsynced", []any{h.phase("unsynced"), h.members("unsynced")}, []any{stateJoining, []string{"m3"}})
@@ -216,22 +216,19 @@ func TestStoreFailureBreaksTermAndRebuildRecovers(t *testing.T) {
 	})
 }
 
-// heldOps names the held submits.
+// heldOps names the held asks. A read that waits for a fresh log tail (a
+// ControlPlaneDeliver read, not a LocalRead) is marked fresh.
 func heldOps(h *harness) string {
 	var out []string
-	for _, o := range h.held {
-		switch o := o.(type) {
-		case SubmitCommand:
-			out = append(out, strings.TrimPrefix(fmt.Sprintf("%T", o.Op), "contract."))
-		case SubmitRead:
-			name := strings.TrimPrefix(fmt.Sprintf("%T", o.Op), "contract.")
-			if o.Fresh {
+	for _, a := range h.held {
+		name := strings.TrimPrefix(fmt.Sprintf("%T", a.op), "contract.")
+		switch a.op.(type) {
+		case contract.ListGroups, contract.DescribeGroup:
+			if a.fresh {
 				name += " fresh"
 			}
-			out = append(out, name)
-		case Reply, SetTimer, CancelTimer, SendSelf:
-			// Not a submit: held holds only submits.
 		}
+		out = append(out, name)
 	}
 	return fmt.Sprint(out)
 }
@@ -244,14 +241,14 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 	const n = 8
 	h.session = 30000
 	for i := range n {
-		j := h.join(CallID(i+1), "g", "")
+		j := h.join(uint64(i+1), "g", "")
 		j.ClientID = fmt.Sprintf("c%d", i)
 		j.Protocols[0].Metadata = []byte(j.ClientID)
 		h.check("parked", h.step(j), []string(nil))
 	}
 	h.check("before the delay", h.until(199*msec), []string(nil))
 	h.until(200 * msec)
-	replies := repliesIn(h.outs)
+	replies := repliesIn(h.replies())
 	if len(replies) != n {
 		t.Fatalf("got %d join answers, want %d", len(replies), n)
 	}
@@ -275,7 +272,7 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 	}
 	var got []string
 	for i, id := range ids {
-		got = append(got, h.step(syncReq(CallID(100+i), "g", id, 1, assigns...))...)
+		got = append(got, h.step(syncReq(uint64(100+i), "g", id, 1, assigns...))...)
 	}
 	var want []string
 	for i, id := range ids {
@@ -286,13 +283,11 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 	}
 }
 
-func repliesIn(outs []Output) []Reply {
+func repliesIn(all []Reply) []Reply {
 	var out []Reply
-	for _, o := range outs {
-		if r, ok := o.(Reply); ok && r.Err == runtime.OK {
-			if _, ok := r.Body.(JoinAnswer); ok {
-				out = append(out, r)
-			}
+	for _, r := range all {
+		if _, ok := r.Body.(JoinAnswer); ok && r.Err == runtime.OK {
+			out = append(out, r)
 		}
 	}
 	return out

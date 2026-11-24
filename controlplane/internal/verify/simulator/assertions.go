@@ -39,14 +39,12 @@ var (
 	everyCallGetsAnswer           = assert.NewAlwaysOnFailure("sim: every call gets an answer")                        //determinismcheck:ok catalog handle, set once at start
 	everyCallGetsOneAnswer        = assert.NewAlwaysOnFailure("sim: every call gets one answer")                       //determinismcheck:ok catalog handle, set once at start
 	finalReadsAnswered            = assert.NewAlwaysOnFailure("sim: final reads are answered")                         //determinismcheck:ok catalog handle, set once at start
-	knownAction                   = assert.NewAlwaysOnFailure("sim: known action")                                     //determinismcheck:ok catalog handle, set once at start
 	liveReplicasConverge          = assert.NewAlways("sim: live replicas converge")                                    //determinismcheck:ok catalog handle, set once at start
 	noTwoLeadersInGeneration      = assert.NewAlwaysOnFailure("sim: no two leaders of one generation")                 //determinismcheck:ok catalog handle, set once at start
 	offsetsNeverGoBackwards       = assert.NewAlwaysOnFailure("sim: offsets never go backwards")                       //determinismcheck:ok catalog handle, set once at start
 	oneWriterPerEpoch             = assert.NewAlwaysOnFailure("sim: one writer per epoch")                             //determinismcheck:ok catalog handle, set once at start
 	readsAgreeWithSpec            = assert.NewAlways("sim: reads agree with the spec")                                 //determinismcheck:ok catalog handle, set once at start
 	replicasAgreeEverySlot        = assert.NewAlwaysOnFailure("sim: replicas agree on every slot")                     //determinismcheck:ok catalog handle, set once at start
-	requestIDsNeverRepeat         = assert.NewAlwaysOnFailure("sim: request ids never repeat")                         //determinismcheck:ok catalog handle, set once at start
 	runEnds                       = assert.NewAlwaysOnFailure("sim: run ends")                                         //determinismcheck:ok catalog handle, set once at start
 	segmentListsNeverGoBackwards  = assert.NewAlwaysOnFailure("sim: segment lists never go backwards")                 //determinismcheck:ok catalog handle, set once at start
 )

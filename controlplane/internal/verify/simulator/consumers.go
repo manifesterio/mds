@@ -7,7 +7,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
 // The consumer workload. A consumer is a client that uses the group protocol
@@ -31,15 +31,15 @@ const (
 	consumerType       = "consumer"
 	consumerProtocol   = "range"
 
-	groupCallTimeout = 5 * machine.Second // deadline of a heartbeat, commit, leave, describe, list or fetch
-	parkedCallSlack  = 6 * machine.Second // a join or sync may wait its rebalance timeout, plus this
+	groupCallTimeout = 5 * actor.Second // deadline of a heartbeat, commit, leave, describe, list or fetch
+	parkedCallSlack  = 6 * actor.Second // a join or sync may wait its rebalance timeout, plus this
 	maxGroupAttempts = 8
 	maxSilences      = 3    // silent consumers in one run; each gets a new consumer in its place
 	silenceChance    = 0.01 // per action of a consumer in its group
 	skipSyncChance   = 0.02 // go silent after the join, before the sync
 	leaveChance      = 0.02
 	abandonChance    = 0.04
-	watchEvery       = 300 * machine.Millisecond
+	watchEvery       = 300 * actor.Millisecond
 )
 
 func consumerGroupName(i int) string { return fmt.Sprintf("cg%d", i) }
@@ -70,9 +70,9 @@ const (
 // groupOp is one call of a consumer, with its tries.
 type groupOp struct {
 	kind     callKind
-	input    func(rebalance.CallID) rebalance.Input // the input of the machine; nil for a fetch
+	input    func(actor.ReplyTo[rebalance.Reply]) rebalance.Input // the call to the machine; nil for a fetch
 	fetch    contract.OffsetFetch
-	deadline machine.Duration
+	deadline actor.Duration
 	attempts int
 
 	member  string                     // join: the member id sent ("" for a new member)
@@ -86,13 +86,10 @@ type callTry struct {
 	c         *consumer
 	op        *groupOp
 	node      int
-	deadline  machine.Duration
+	deadline  actor.Duration
 	onPurpose bool // the consumer abandons the call on purpose: its deadline is short
 	quiet     bool // sent in the quiet tail
-	req       machine.RequestID
 }
-
-func (t *callTry) input(call rebalance.CallID) rebalance.Input { return t.op.input(call) }
 
 // answered is the end of the try: a reply, a timeout or a closed connection.
 func (t *callTry) answered(code runtime.ErrCode, body rebalance.Answer) { t.c.result(t, code, body) }
@@ -101,7 +98,6 @@ func (t *callTry) answered(code runtime.ErrCode, body rebalance.Answer) { t.c.re
 type consumer struct {
 	pool                   *consumerPool
 	name                   string
-	from                   machine.NodeInstance
 	group                  string
 	sessionMs, rebalanceMs int32
 
@@ -126,9 +122,7 @@ type consumer struct {
 type consumerPool struct {
 	s        *sim
 	all      []*consumer
-	byName   map[machine.NodeID]*consumer
 	byMember map[string]*consumer // member id -> the consumer that got it
-	nextReq  machine.RequestID
 	nextOff  int64
 	silences int
 
@@ -137,7 +131,7 @@ type consumerPool struct {
 }
 
 func newConsumerPool(s *sim, count int) *consumerPool {
-	p := &consumerPool{s: s, byName: map[machine.NodeID]*consumer{}, byMember: map[string]*consumer{}}
+	p := &consumerPool{s: s, byMember: map[string]*consumer{}}
 	for i := range count {
 		p.add(consumerGroupName(i % consumerGroupCount))
 	}
@@ -153,16 +147,14 @@ func (p *consumerPool) add(group string) *consumer {
 		rebalanceMs: int32(s.rand.Between(2000, 3000)),
 		node:        s.rand.Intn(len(s.nodes)),
 	}
-	c.from = machine.NodeInstance{Node: machine.NodeID(c.name)}
 	p.all = append(p.all, c)
-	p.byName[c.from.Node] = c
 	return c
 }
 
 func (p *consumerPool) start() {
 	for _, c := range p.all {
 		c.idle = false
-		c.later(machine.Duration(p.s.rand.Between(int64(20*machine.Millisecond), int64(300*machine.Millisecond))))
+		c.later(actor.Duration(p.s.rand.Between(int64(20*actor.Millisecond), int64(300*actor.Millisecond))))
 	}
 }
 
@@ -213,11 +205,6 @@ func consumerGroups() []string {
 	return names
 }
 
-func (p *consumerPool) newReq() machine.RequestID {
-	p.nextReq++
-	return p.nextReq
-}
-
 // otherNode is the next node to try after last: the next one in the list, as
 // a client walks its list of addresses.
 func (p *consumerPool) otherNode(last int) int { return (last + 1) % len(p.s.nodes) }
@@ -238,45 +225,38 @@ func (p *consumerPool) expiring(rm contract.GroupRemove) {
 	}
 }
 
-// fetched is the replica's answer to the OffsetFetch of a consumer.
-func (p *consumerPool) fetched(n *simNode, a runtime.ControlPlaneReply) bool {
-	c := p.byName[a.To.Node]
-	if c == nil {
-		return false
+// fetched is the replica's answer to the OffsetFetch try t. prefix is how
+// many log slots the replica had applied when it answered.
+func (c *consumer) fetched(t *callTry, d runtime.ControlPlaneDone, prefix runtime.LogPosition) {
+	p := c.pool
+	if c.cur != t {
+		return
 	}
-	prefix := n.replica().Applied()
-	p.s.after(p.s.store.netDelay(p.s.rand), func() {
-		t := c.cur
-		if t == nil || t.op.kind != callFetch || t.req != a.Done.Req {
-			return
-		}
-		if a.Done.Err == runtime.OK {
-			p.s.oracle.reads = append(p.s.oracle.reads, readRec{op: t.op.fetch, done: a.Done, prefix: prefix, at: int64(p.s.mono())})
-			p.s.stats.ReadsOK++
-		}
-		code := a.Done.Err
-		if code != runtime.OK {
-			code = runtime.ErrUnavailable // the handler maps every failure so
-		}
-		c.result(t, code, nil)
-	})
-	return true
+	if d.Err == runtime.OK {
+		p.s.oracle.reads = append(p.s.oracle.reads, readRec{op: t.op.fetch, done: d, prefix: prefix, at: int64(p.s.mono())})
+		p.s.stats.ReadsOK++
+	}
+	code := d.Err
+	if code != runtime.OK {
+		code = runtime.ErrUnavailable // the handler maps every failure so
+	}
+	c.result(t, code, nil)
 }
 
 // later runs the next step of c after d.
-func (c *consumer) later(d machine.Duration) {
+func (c *consumer) later(d actor.Duration) {
 	c.pool.s.after(d, c.next)
 }
 
 // gap is the wait between two calls of a consumer in its group: about a
 // quarter of its session timeout.
-func (c *consumer) gap() machine.Duration {
-	q := int64(c.sessionMs) * int64(machine.Millisecond) / 4
-	return machine.Duration(c.pool.s.rand.Between(q*2/3, q*4/3))
+func (c *consumer) gap() actor.Duration {
+	q := int64(c.sessionMs) * int64(actor.Millisecond) / 4
+	return actor.Duration(c.pool.s.rand.Between(q*2/3, q*4/3))
 }
 
-func (c *consumer) think() machine.Duration {
-	return machine.Duration(c.pool.s.rand.Between(int64(10*machine.Millisecond), int64(80*machine.Millisecond)))
+func (c *consumer) think() actor.Duration {
+	return actor.Duration(c.pool.s.rand.Between(int64(10*actor.Millisecond), int64(80*actor.Millisecond)))
 }
 
 // next makes the next call.
@@ -343,15 +323,15 @@ func (c *consumer) goSilent() {
 	p.s.tracef("%s goes silent (member %q of %s)", c.name, c.member, c.group)
 	n := p.add(c.group)
 	n.idle = false
-	n.later(machine.Duration(p.s.rand.Between(int64(2500*machine.Millisecond), int64(5*machine.Second))))
+	n.later(actor.Duration(p.s.rand.Between(int64(2500*actor.Millisecond), int64(5*actor.Second))))
 }
 
 func (c *consumer) join() {
 	member := c.member
 	op := &groupOp{kind: callJoin, member: member, deadline: c.parkedDeadline()}
-	op.input = func(call rebalance.CallID) rebalance.Input {
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
 		return rebalance.Join{
-			Call: call, Group: c.group, MemberID: member, ClientID: c.name, ClientHost: "/10.0.0.1",
+			ReplyTo: to, Group: c.group, MemberID: member, ClientID: c.name, ClientHost: "/10.0.0.1",
 			SessionTimeoutMs: c.sessionMs, RebalanceTimeoutMs: c.rebalanceMs, ProtocolType: consumerType,
 			Protocols: []rebalance.Protocol{{Name: consumerProtocol, Metadata: []byte(c.group)}},
 		}
@@ -359,8 +339,8 @@ func (c *consumer) join() {
 	c.send(op)
 }
 
-func (c *consumer) parkedDeadline() machine.Duration {
-	return machine.Duration(c.rebalanceMs)*machine.Millisecond + parkedCallSlack
+func (c *consumer) parkedDeadline() actor.Duration {
+	return actor.Duration(c.rebalanceMs)*actor.Millisecond + parkedCallSlack
 }
 
 // sync sends the assignment when the consumer leads: each member gets bytes
@@ -373,8 +353,8 @@ func (c *consumer) sync() {
 		}
 	}
 	member, gen, assign := c.member, c.gen, op.assign
-	op.input = func(call rebalance.CallID) rebalance.Input {
-		return rebalance.Sync{Call: call, Group: c.group, MemberID: member, Generation: gen, Assignments: assign}
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
+		return rebalance.Sync{ReplyTo: to, Group: c.group, MemberID: member, Generation: gen, Assignments: assign}
 	}
 	c.send(op)
 }
@@ -382,8 +362,8 @@ func (c *consumer) sync() {
 func (c *consumer) heartbeat() {
 	member, gen := c.member, c.gen
 	op := &groupOp{kind: callHeartbeat, member: member, gen: gen, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) rebalance.Input {
-		return rebalance.Heartbeat{Call: call, Group: c.group, MemberID: member, Generation: gen}
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
+		return rebalance.Heartbeat{ReplyTo: to, Group: c.group, MemberID: member, Generation: gen}
 	}
 	c.send(op)
 }
@@ -399,7 +379,9 @@ func (c *consumer) commit() {
 		op.offsets = append(op.offsets, contract.PartitionOffset{TopicPartition: tp, Offset: p.nextOff, LeaderEpoch: -1})
 	}
 	commit := contract.OffsetCommit{Group: c.group, Member: c.member, Generation: c.gen, Offsets: op.offsets}
-	op.input = func(call rebalance.CallID) rebalance.Input { return rebalance.OffsetCommit{Call: call, Op: commit} }
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
+		return rebalance.OffsetCommit{ReplyTo: to, Op: commit}
+	}
 	c.send(op)
 }
 
@@ -410,31 +392,31 @@ func (c *consumer) fetchOffsets() {
 
 func (c *consumer) describe() {
 	op := &groupOp{kind: callDescribe, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) rebalance.Input {
-		return rebalance.Describe{Call: call, Groups: []string{c.group}}
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
+		return rebalance.Describe{ReplyTo: to, Groups: []string{c.group}}
 	}
 	c.send(op)
 }
 
 func (c *consumer) describeAll() {
 	op := &groupOp{kind: callDescribe, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) rebalance.Input {
-		return rebalance.Describe{Call: call, Groups: consumerGroups()}
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
+		return rebalance.Describe{ReplyTo: to, Groups: consumerGroups()}
 	}
 	c.send(op)
 }
 
 func (c *consumer) list() {
 	op := &groupOp{kind: callList, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) rebalance.Input { return rebalance.List{Call: call} }
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input { return rebalance.List{ReplyTo: to} }
 	c.send(op)
 }
 
 func (c *consumer) leave() {
 	member := c.member
 	op := &groupOp{kind: callLeave, member: member, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) rebalance.Input {
-		return rebalance.Leave{Call: call, Group: c.group, Members: []string{member}}
+	op.input = func(to actor.ReplyTo[rebalance.Reply]) rebalance.Input {
+		return rebalance.Leave{ReplyTo: to, Group: c.group, Members: []string{member}}
 	}
 	c.send(op)
 }
@@ -447,13 +429,14 @@ func (c *consumer) send(op *groupOp) {
 	t := &callTry{c: c, op: op, node: c.node, deadline: op.deadline}
 	if !s.quiet && !c.watcher && s.rand.Chance(abandonChance) {
 		t.onPurpose = true
-		t.deadline = machine.Duration(s.rand.Between(int64(machine.Millisecond), int64(300*machine.Millisecond)))
+		t.deadline = actor.Duration(s.rand.Between(int64(actor.Millisecond), int64(300*actor.Millisecond)))
 	}
 	c.cur = t
 	n := s.nodes[t.node]
-	s.after(s.store.netDelay(s.rand), func() {
+	there := s.store.netDelay(s.rand)
+	s.after(there, func() {
 		if op.kind == callFetch {
-			n.groups.fetch(t, c.pool.newReq())
+			n.groups.fetch(t, t.deadline-there)
 			return
 		}
 		n.groups.startCall(t)
@@ -496,7 +479,7 @@ func (c *consumer) retry(op *groupOp, code runtime.ErrCode) {
 	s := c.pool.s
 	c.node = c.pool.otherNode(c.node)
 	if op.attempts < maxGroupAttempts && !c.stopping {
-		backoff := machine.Duration(op.attempts) * 50 * machine.Millisecond
+		backoff := actor.Duration(op.attempts) * 50 * actor.Millisecond
 		s.after(backoff, func() { c.send(op) })
 		return
 	}
@@ -557,7 +540,7 @@ func (c *consumer) handle(op *groupOp, code runtime.ErrCode, body rebalance.Answ
 			c.pool.s.env.Reachable(leaveRemovesMember)
 		}
 		c.member, c.stage = "", needJoin
-		c.later(machine.Duration(c.pool.s.rand.Between(int64(200*machine.Millisecond), int64(machine.Second))))
+		c.later(actor.Duration(c.pool.s.rand.Between(int64(200*actor.Millisecond), int64(actor.Second))))
 		return
 	case callDescribe:
 		if c.watcher {

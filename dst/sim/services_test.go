@@ -130,3 +130,31 @@ func TestTellFromHostAndOnPhase(t *testing.T) {
 		t.Errorf("a: %v", got)
 	}
 }
+
+func TestAfterReceiveSeesEffectsAndOnEndFires(t *testing.T) {
+	w := newWorld(19)
+	var kinds []actor.EffectKind
+	var ends []string
+	a := w.spawn("a", func(_ *scripted, _ actor.Now, m msg, o *outbox) {
+		if _, ok := m.(start); ok {
+			o.After(ms, tick{1})
+			o.Fact(actor.Fact{Name: "f"})
+		}
+	},
+		sim.AfterReceive(func(_ actor.Incarnation, m msg, effects []actor.Effect) {
+			for _, e := range effects {
+				kinds = append(kinds, e.Kind)
+			}
+		}),
+		sim.OnEnd(func(self actor.Incarnation, how actor.End, cause string) {
+			ends = append(ends, self.Name+" "+how.String()+" "+cause)
+		}))
+	w.sys.After(5*ms, func() { w.sys.Crash(a, "test") })
+	mustOK(t, w.sys.Run())
+	if !slices.Equal(kinds, []actor.EffectKind{actor.EffectAfter, actor.EffectFact}) {
+		t.Errorf("effects seen: %v", kinds)
+	}
+	if !slices.Equal(ends, []string{"a crash test"}) {
+		t.Errorf("ends: %v", ends)
+	}
+}

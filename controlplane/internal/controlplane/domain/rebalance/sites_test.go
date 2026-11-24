@@ -41,7 +41,7 @@ func (f *everyOther) Fault(fault.Site, float64) bool         { return false }
 
 // The sites that do not move time must not change any reply.
 func TestSitesKeepTheReplies(t *testing.T) {
-	f := newEveryOther(SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry)
+	f := newEveryOther(SiteDuplicateReply, SiteLateDrain, SiteLoadRetry)
 	h := newBareHarness(t, Config{}, f)
 	h.session = 5000
 	h.step(RoleChanged{Active: true})
@@ -72,7 +72,7 @@ func TestSitesKeepTheReplies(t *testing.T) {
 		{sec + delay + 5*sec, nil, nil}, // both sessions end: both are removed
 	})
 	h.check("expired", h.phase("g"), stateEmpty)
-	for _, site := range []fault.Site{SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
+	for _, site := range []fault.Site{SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
 		if f.fired[site.Name()] == 0 {
 			t.Errorf("site %s never fired", site.Name())
 		}

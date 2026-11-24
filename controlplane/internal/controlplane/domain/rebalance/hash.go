@@ -4,16 +4,14 @@ import (
 	"github.com/manifesterio/mds/dst/core/trace"
 )
 
-// StateHash implements machine.Machine. It folds the state that decides what the
+// StateHash implements actor.Actor. It folds the state that decides what the
 // machine does next, in a fixed order.
 func (m *Machine) StateHash() uint64 {
 	h := trace.New()
-	h.Uint64(uint64(m.nextReq))
-	h.Uint64(uint64(m.nextTimer))
+	h.Uint64(m.next)
 	switch s := m.state.(type) {
 	case *serving:
 		h.Byte(2)
-		h.Uint64(uint64(len(s.reqs)))
 		h.Uint64(uint64(len(s.describes)))
 		h.Uint64(uint64(len(s.commits)))
 		for _, name := range s.names {
@@ -23,9 +21,9 @@ func (m *Machine) StateHash() uint64 {
 		h.Byte(1)
 		h.Bool(s.fresh)
 		h.Bool(s.listed)
-		h.Uint64(uint64(len(s.reqs)))
+		h.Uint64(uint64(len(s.waiting)))
 		h.Uint64(uint64(len(s.again)))
-		hashTimer(&h, s.retry)
+		h.Bool(s.retrying)
 	default:
 		h.Byte(0)
 	}
@@ -43,11 +41,9 @@ func hashGroup(h *trace.Hash, g *group) {
 	h.Bool(g.write != nil)
 	h.Bool(g.draining)
 	h.Uint64(uint64(len(g.queue)))
-	hashTimer(h, g.round)
-	hashTimer(h, g.delay)
 	if jn, ok := g.phase.(*joining); ok {
-		h.Uint64(uint64(jn.start))
-		h.Uint64(uint64(jn.end))
+		h.Int64(int64(jn.start))
+		h.Int64(int64(jn.end))
 		h.Bool(jn.ended)
 		h.Bool(jn.delay)
 	}
@@ -58,13 +54,8 @@ func hashGroup(h *trace.Hash, g *group) {
 		h.Bool(mm.synced)
 		call, parked := g.parked(mm)
 		h.Bool(parked)
-		h.Uint64(uint64(call))
-		hashTimer(h, mm.session)
+		if parked {
+			call.Fold(h)
+		}
 	}
-}
-
-func hashTimer(h *trace.Hash, t timer) {
-	h.Uint64(uint64(t.id))
-	h.Uint64(uint64(t.gen))
-	h.Bool(t.on)
 }

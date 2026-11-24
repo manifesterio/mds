@@ -99,3 +99,58 @@ Acceptance criteria
 -------------------
 - go test -tags integration -count=20 -run TestCompressionRoundTrip ./test/integrationtest/
   passes 20/20.
+
+
+DST-3  ControlPlaneDone.Req carries a log slot under a request-id name
+======================================================================
+Type:       Tech debt
+Priority:   Low
+Component:  controlplane/internal/runtime (event.go), controlplane/internal/controlplane/metadb
+Created:    2026-11-24
+Status:     Open
+
+Summary
+-------
+After the actor migration nothing routes answers by request id (callers hold a ReplyTo), but
+runtime.ControlPlaneDone keeps a field Req. metadb fills it with the log slot an operation was
+applied at (metadb/entry.go), and the idempotent-replay window stores and returns it. The name
+says "request" while the value is a slot.
+
+Proposal
+--------
+Rename the field to Slot (runtime.LogPosition) in runtime, metadb and their tests. It is folded
+into the trace hash, so the rename moves no hash, but a type change would: do it in a phase that
+regenerates controlplane goldens anyway.
+
+Acceptance criteria
+-------------------
+- No field named Req in controlplane/internal/runtime.
+- Controlplane goldens unchanged, or regenerated with the reason.
+
+
+DST-4  Simulator coverage notes match timer messages by their trace fold
+======================================================================
+Type:       Tech debt
+Priority:   Low
+Component:  controlplane/internal/verify/simulator (groups.go)
+Created:    2026-11-24
+Status:     Open
+
+Summary
+-------
+The rebalance actor's timer messages (writeTimedOut, loadRetryDue, ...) are private to package
+rebalance. The simulator's group host notes the coverage paths writeTimerEndsTerm,
+refusedLoadReadSentAgain and failedWriteEndsTerm by recording the trace fold of each StartTimer
+or After message it sees in the actor's effects, and matching later received messages by fold.
+It works, but it couples the host to fold bytes instead of to meaning.
+
+Proposal
+--------
+Either export a small predicate from rebalance (e.g. rebalance.IsWriteTimeout(in Input) bool)
+for host checks, or record the coverage facts inside rebalance with env.Reachable at the place
+the behaviour happens, and drop the host-side matching.
+
+Acceptance criteria
+-------------------
+- No fold-matching in the simulator's group host.
+- The controlplane campaign still reaches all expected coverage paths.

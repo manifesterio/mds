@@ -164,10 +164,10 @@ func TestCleanRunHasNoFalseAlarm(t *testing.T) {
 	})
 }
 
-// TestCachedStateHashesAreRight: the kernel keeps the state hash of a node until
-// it calls the node again. With verifyHashes it recomputes every hash at every
+// TestCachedStateHashesAreRight: the System keeps the state hash of an actor until
+// it calls the actor again. With verifyHashes it recomputes every hash at every
 // step, and a hash that changed without a call fails the seed. Host code that
-// changes a machine outside a Step would show here.
+// changes an actor outside a Receive would show here.
 func TestCachedStateHashesAreRight(t *testing.T) {
 	for _, sc := range ScenarioNames() {
 		for seed := uint64(1); seed <= uint64(seedCount(2, 5)); seed++ {

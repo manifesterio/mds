@@ -15,6 +15,8 @@ type slot interface { //nolint:interfacebloat // see above
 	stateHash() uint64
 	inboxLens() (int, int)
 	drop()
+	// ended runs the OnEnd hook of the incarnation that just ended.
+	ended(who actor.Incarnation, how actor.End, cause string)
 	stopRequest(deadline actor.Mono) bool
 	// arrive puts a message that reached the actor in its inbox. n is the
 	// owned number it carries (a timer or an answer), 0 for none.
@@ -37,7 +39,8 @@ type host[In, IO actor.Payload] struct {
 	props    actor.Props[In, IO]
 	exec     Executor[IO]
 	onPhase  func(Phase) (In, bool)
-	afterRcv func(self actor.Incarnation, msg In)
+	afterRcv func(self actor.Incarnation, msg In, effects []actor.Effect)
+	onEnd    func(self actor.Incarnation, how actor.End, cause string)
 	cost     CostParams
 	a        actor.Actor[In, IO]
 	control  []item[In]
@@ -231,9 +234,10 @@ func (h *host[In, IO]) receive(msg In) bool {
 		}
 		return false
 	}
-	h.apply(actor.Close(o))
+	effects := actor.Close(o)
+	h.apply(effects)
 	if h.afterRcv != nil && h.alive(inc) && !sys.halted {
-		if !sys.guard("AfterReceive "+h.name, func() { h.afterRcv(h.self(), msg) }) {
+		if !sys.guard("AfterReceive "+h.name, func() { h.afterRcv(h.self(), msg, effects) }) {
 			sys.halted = true
 		}
 	}
@@ -261,4 +265,10 @@ func (h *host[In, IO]) phaseStep(p Phase) {
 	}
 	sys.logMsg(fmt.Sprintf("on_phase %s %s", h.name, p), msg)
 	h.receive(msg)
+}
+
+func (h *host[In, IO]) ended(who actor.Incarnation, how actor.End, cause string) {
+	if h.onEnd != nil && !h.sys.guard("OnEnd "+h.name, func() { h.onEnd(who, how, cause) }) {
+		h.sys.halted = true
+	}
 }

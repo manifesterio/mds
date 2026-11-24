@@ -2,8 +2,8 @@ package simulator
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/machine"
 	"github.com/manifesterio/mds/dst/core/rng"
 )
 
@@ -27,7 +27,7 @@ var (
 // slowAnswer is the extra delay of the reply to call: zero, or (when the site
 // for the log or the object store fires) the same range as the Slow fault. The
 // call has taken effect already, so this only moves the reply later.
-func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) machine.Duration {
+func (st *storage) slowAnswer(r *rng.Rand, call runtime.IO) actor.Duration {
 	site := SiteObjectsSlowAnswer
 	if isLogCall(call) {
 		site = SiteLogSlowAnswer
@@ -35,7 +35,7 @@ func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) machine.Duration
 	if !st.s.env.Maybe(site) {
 		return 0
 	}
-	return machine.Duration(r.Between(int64(slowMin), int64(slowMax)))
+	return actor.Duration(r.Between(int64(slowMin), int64(slowMax)))
 }
 
 // shortPage may cut a page of log entries to a shorter one that still has the
@@ -45,12 +45,4 @@ func (st *storage) shortPage(ents []runtime.LogEntry) []runtime.LogEntry {
 		return ents
 	}
 	return ents[:1+st.s.rand.Intn(len(ents)-1)]
-}
-
-func isLogCall(call runtime.IOCall) bool {
-	switch call.(type) {
-	case runtime.LogAppend, runtime.LogRead, runtime.LogGetEnd, runtime.LogDeleteOld, runtime.LogClaimEpoch:
-		return true
-	}
-	return false
 }

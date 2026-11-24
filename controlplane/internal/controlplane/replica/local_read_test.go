@@ -6,76 +6,71 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/machine"
+	"github.com/manifesterio/mds/dst/core/actor"
 )
 
-// brokerFrom is the sender of the requests in these tests.
-var brokerFrom = machine.NodeInstance{Node: "b1"}
-
-func readyMachine(t *testing.T) *replica.Replica {
+func readyHarness(t *testing.T) *harness {
 	t.Helper()
-	m := newMachine(t, replica.Config{
+	h := newHarness(t, replica.Config{
 		Writer: "s1", Rank: 1,
-		CatchUpEvery:  machine.Millisecond,
-		TakeoverAfter: 10 * machine.Second,
+		CatchUpEvery:  actor.Millisecond,
+		TakeoverAfter: 10 * actor.Second,
 	})
-	bootEmpty(t, m, 0)
-	if !m.Ready() {
-		t.Fatal("machine is not Ready")
+	bootEmpty(t, h, 0)
+	if !h.m.Ready() {
+		t.Fatal("replica is not Ready")
 	}
-	return m
+	return h
 }
 
-func onlyReply(t *testing.T, acts []runtime.Action) runtime.ControlPlaneReply {
+// onlyReply returns the one effect, which must be a Reply.
+func onlyReply(t *testing.T, effects []actor.Effect) reply {
 	t.Helper()
-	if len(acts) != 1 {
-		t.Fatalf("want one reply, got %v", acts)
+	rs := replies(t, effects)
+	if len(effects) != 1 || len(rs) != 1 {
+		t.Fatalf("want one reply, got %v", describe(effects))
 	}
-	r, ok := acts[0].(runtime.ControlPlaneReply)
-	if !ok {
-		t.Fatalf("want a ControlPlaneReply, got %T", acts[0])
-	}
-	return r
+	return rs[0]
 }
 
-// A LocalRead on a Ready node is answered in the same step, with no wait for
-// a tail check, and the reply carries the request id.
+// A LocalRead on a Ready node is answered in the same Receive, with no wait
+// for a tail check, and the reply goes to the caller.
 func TestLocalReadAnswersAtOnce(t *testing.T) {
-	m := readyMachine(t)
-	r := onlyReply(t, step(m, runtime.LocalRead{From: brokerFrom, Req: 21, Op: contract.DescribeTopics{}}))
-	if r.To != brokerFrom || r.Done.Req != 21 || r.Done.Err != runtime.OK {
+	h := readyHarness(t)
+	r := onlyReply(t, h.recv(runtime.LocalRead{ReplyTo: caller(21), Op: contract.DescribeTopics{}}))
+	if r.n != 21 || r.done.Err != runtime.OK {
 		t.Fatalf("reply = %+v", r)
 	}
-	if _, ok := r.Done.Resp.(contract.DescribeTopicsResp); !ok {
-		t.Fatalf("resp = %#v", r.Done.Resp)
+	if _, ok := r.done.Resp.(contract.DescribeTopicsResp); !ok {
+		t.Fatalf("resp = %#v", r.done.Resp)
 	}
 }
 
 // A node that is not Ready refuses at once.
 func TestLocalReadRefusedWhenNotReady(t *testing.T) {
-	m := newMachine(t, replica.Config{Writer: "s1", CatchUpEvery: machine.Millisecond})
-	step(m, runtime.NodeStarted{})
-	r := onlyReply(t, step(m, runtime.LocalRead{From: brokerFrom, Req: 3, Op: contract.DescribeTopics{}}))
-	if r.Done.Err != runtime.ErrUnavailable || r.Done.Req != 3 {
+	h := newHarness(t, replica.Config{Writer: "s1", CatchUpEvery: actor.Millisecond})
+	h.recv(runtime.NodeStarted{})
+	r := onlyReply(t, h.recv(runtime.LocalRead{ReplyTo: caller(3), Op: contract.DescribeTopics{}}))
+	if r.done.Err != runtime.ErrUnavailable || r.n != 3 {
 		t.Fatalf("reply = %+v, want ErrUnavailable", r)
 	}
 }
 
 // A command is not a read: it is refused and nothing reaches the log.
 func TestLocalReadRefusesACommand(t *testing.T) {
-	m := readyMachine(t)
-	r := onlyReply(t, step(m, runtime.LocalRead{From: brokerFrom, Req: 4, Op: contract.CreateTopic{Name: "x", Partitions: 1}}))
-	if r.Done.Err != runtime.ErrInvalid || r.Done.Req != 4 {
+	h := readyHarness(t)
+	r := onlyReply(t, h.recv(runtime.LocalRead{ReplyTo: caller(4), Op: contract.CreateTopic{Name: "x", Partitions: 1}}))
+	if r.done.Err != runtime.ErrInvalid || r.n != 4 {
 		t.Fatalf("reply = %+v, want ErrInvalid", r)
 	}
 }
 
-// An operation that the machine does not know is refused with ErrInvalid, and
+// An operation that the replica does not know is refused with ErrInvalid, and
 // nothing reaches the log.
 func TestUnknownOperationIsInvalid(t *testing.T) {
-	m := newMachine(t, replica.Config{Writer: "w"})
-	r := onlyReply(t, step(m, runtime.ControlPlaneDeliver{From: brokerFrom, Req: 9, Op: nil}))
-	if r.To != brokerFrom || r.Done.Err != runtime.ErrInvalid || r.Done.Req != 9 {
+	h := newHarness(t, replica.Config{Writer: "w"})
+	r := onlyReply(t, h.recv(runtime.ControlPlaneDeliver{ReplyTo: caller(9), Op: nil}))
+	if r.done.Err != runtime.ErrInvalid || r.n != 9 {
 		t.Fatalf("reply = %+v, want ErrInvalid to the sender", r)
 	}
 }

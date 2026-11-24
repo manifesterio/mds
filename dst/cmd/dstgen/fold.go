@@ -12,7 +12,7 @@ import (
 // through it even before the generated file exists.
 type folder struct {
 	pkg       *types.Package
-	generated map[*types.TypeName]bool
+	generated map[string]bool // "pkgpath.Name" of every type that gets a generated Fold
 	imports   map[string]bool // import paths the written code needs
 	b         *strings.Builder
 	depth     int
@@ -67,7 +67,7 @@ func (f *folder) qualifier(p *types.Package) string {
 // hasFold reports whether values of t have Fold(*trace.Hash), now or once
 // dstgen has written it.
 func (f *folder) hasFold(t types.Type) bool {
-	if n, ok := t.(*types.Named); ok && f.generated[n.Obj()] {
+	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil && f.generated[typeKey(n.Obj())] {
 		return true
 	}
 	return hasFold(t)
@@ -206,3 +206,6 @@ func hasFold(t types.Type) bool {
 	named, ok := ptr.Elem().(*types.Named)
 	return ok && named.Obj().Name() == "Hash" && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == tracePath
 }
+
+// typeKey names a type across packages: its package path and name.
+func typeKey(obj *types.TypeName) string { return obj.Pkg().Path() + "." + obj.Name() }

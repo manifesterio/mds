@@ -1,6 +1,6 @@
 // Package simulator is a deterministic simulation test (DST) harness for the
 // replicated control plane. One run is one seed. A run builds a few replicas
-// with the same constructor that production uses (replica.New), puts them on a
+// with the same Props that production uses (replica.Props), puts them on a
 // virtual clock, gives them a fake shared log and a fake object store, and
 // drives them with random client work and random faults. The same seed gives
 // the same run, bit for bit, which the trace hash proves.

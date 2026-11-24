@@ -1,0 +1,31 @@
+# dst.tags: written by dstgen. Append-only: never change a number, never reuse one.
+# <tag> <TypeName>; a retired line has the name -
+1008 -
+1105 -
+1006 Describe
+1003 Heartbeat
+1001 Join
+1004 Leave
+1007 List
+1005 OffsetCommit
+1010 -
+1103 Reply
+1009 RoleChanged
+1106 -
+1104 -
+1101 -
+1102 -
+1002 Sync
+1011 -
+1012 drainLater
+1013 callGone
+1014 sessionExpired
+1015 roundDue
+1016 delayDone
+1017 writeTimedOut
+1018 commitTimedOut
+1019 loadRetryDue
+1020 writeDone
+1021 commitDone
+1022 describeDone
+1023 loadDone
