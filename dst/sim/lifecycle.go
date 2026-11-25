@@ -50,15 +50,6 @@ func (sys *System) Current(e actor.Entity) (actor.Incarnation, bool) {
 	return s.base().self(), true
 }
 
-// Down reports how the last incarnation ended, if the actor is down.
-func (sys *System) Down(e actor.Entity) (actor.End, bool) {
-	s, ok := sys.lookup(e)
-	if !ok || s.base().up {
-		return actor.Crash, false
-	}
-	return s.base().lastEnd, true
-}
-
 // Boot starts a new incarnation of an actor that is down.
 func (sys *System) Boot(e actor.Entity) {
 	if s, ok := sys.lookup(e); ok {
@@ -172,7 +163,7 @@ func (sys *System) countEnd(how actor.End) string {
 
 func (sys *System) queueBoot(s slot, at Time) {
 	b := s.base()
-	e := &entry{at: at, lane: HostLane, kind: kindRestart, node: b.idx}
+	e := &entry{at: at, lane: hostLane, kind: kindRestart, node: b.idx}
 	e.run = func() {
 		sys.counters[countKernelSteps]++
 		s.boot()
@@ -190,7 +181,7 @@ func (sys *System) stop(s slot, grace actor.Duration) {
 	b.stopping = true
 	sys.counters[countGracefulStops]++
 	inc := b.inc
-	e := &entry{at: deadline, lane: HostLane, kind: kindCrash, node: b.idx, inc: inc}
+	e := &entry{at: deadline, lane: hostLane, kind: kindCrash, node: b.idx, inc: inc}
 	e.run = func() {
 		sys.counters[countKernelSteps]++
 		if !b.alive(inc) {

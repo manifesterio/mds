@@ -20,16 +20,16 @@ type Service[Req, Rep actor.Payload] interface {
 	StateHash() uint64
 }
 
-// CrashObserver is an optional Service extra: it hears that an actor
+// crashObserver is an optional Service extra: it hears that an actor
 // incarnation ended. Effects already applied stand; Later steps the service
 // queued are not dropped, so a write on the wire can still land.
-type CrashObserver interface {
+type crashObserver interface {
 	OnCrash(ctx *ServiceCtx, who actor.Incarnation)
 }
 
-// RecoveryObserver is an optional Service extra: no new faults for requests
+// recoveryObserver is an optional Service extra: no new faults for requests
 // issued after EnterRecovery. Plans already made stand.
-type RecoveryObserver interface {
+type recoveryObserver interface {
 	EnterRecovery()
 }
 
@@ -93,7 +93,7 @@ func (h *serviceHost[Req, Rep]) handle(req actor.Payload, to responderTarget) {
 }
 
 func (h *serviceHost[Req, Rep]) onCrash(who actor.Incarnation) {
-	if o, ok := h.svc.(CrashObserver); ok {
+	if o, ok := h.svc.(crashObserver); ok {
 		h.invalidateHash()
 		if !h.sys.guard("OnCrash "+h.name, func() { o.OnCrash(h.ctx, who) }) {
 			h.sys.halted = true
@@ -102,7 +102,7 @@ func (h *serviceHost[Req, Rep]) onCrash(who actor.Incarnation) {
 }
 
 func (h *serviceHost[Req, Rep]) enterRecovery() {
-	if o, ok := h.svc.(RecoveryObserver); ok {
+	if o, ok := h.svc.(recoveryObserver); ok {
 		o.EnterRecovery()
 	}
 }

@@ -39,25 +39,22 @@ func (s objectSpec) Apply(call objectstore.Call) objectstore.Result { return s.E
 // a System with sim.AddService.
 func NewObjectStore(f ObjectStoreFaults) *ObjectStore {
 	spec := objectstore.NewSpec()
-	shape := faulty.Shape[core.ObjectCall, core.ObjectDone, objectstore.Call, objectstore.Result]{
-		Name:     "fakeobjectstore",
-		Prefix:   "obj",
-		Asserts:  objectAsserts,
-		Op:       func(c core.ObjectCall) objectstore.Call { return c.Call },
-		Mutating: objectMutating,
-		Changed:  objectChanged,
-		Reply:    func(_ core.ObjectCall, r objectstore.Result) core.ObjectDone { return core.ObjectDone{Result: r} },
-		Fail:     objectFail,
-		Corrupt: &faulty.Corruption[objectstore.Call, objectstore.Result]{
-			Prob: f.GetCorruptProb,
-			Targets: func(c objectstore.Call) bool {
-				_, isGet := c.(objectstore.Get)
-				return isGet
-			},
-			Flip:    flipGetBit,
-			Kind:    "obj_get_corrupt",
-			Reached: objectGetCorrupted,
+	shape := faulty.ShapeOf[core.ObjectCall, core.ObjectDone, objectstore.Call, objectstore.Result](
+		"fakeobjectstore", "obj", objectAsserts)
+	shape.Op = func(c core.ObjectCall) objectstore.Call { return c.Call }
+	shape.Mutating = objectMutating
+	shape.Changed = objectChanged
+	shape.Reply = func(_ core.ObjectCall, r objectstore.Result) core.ObjectDone { return core.ObjectDone{Result: r} }
+	shape.Fail = objectFail
+	shape.Corrupt = &faulty.Corruption[objectstore.Call, objectstore.Result]{
+		Prob: f.GetCorruptProb,
+		Targets: func(c objectstore.Call) bool {
+			_, isGet := c.(objectstore.Get)
+			return isGet
 		},
+		Flip:    flipGetBit,
+		Kind:    "obj_get_corrupt",
+		Reached: objectGetCorrupted,
 	}
 	return &ObjectStore{Service: faulty.New(faulty.Spec[objectstore.Call, objectstore.Result](objectSpec{spec}), f.Faults, shape), spec: spec}
 }

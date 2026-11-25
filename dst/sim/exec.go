@@ -160,7 +160,7 @@ func (sys *System) replyOutside(r actor.ReplyID, answer actor.Payload) {
 		return
 	}
 	delete(sys.outside, r.Number)
-	sys.Cancel(ask.deadline)
+	sys.cancel(ask.deadline)
 	if !sys.guard("sim.Ask done", func() { ask.done(answer, true) }) {
 		sys.halted = true
 	}

@@ -97,14 +97,8 @@ func (s *spec) StateHash() uint64 {
 
 // The assertions of the test service.
 var (
-	testAsserts = faulty.Asserts{ //determinismcheck:ok catalog handles, set once at start
-		Outage:      assert.NewReachable("test outage started"),
-		Unavailable: assert.NewReachable("test 503 injected"),
-		Timeout:     assert.NewReachable("test timeout injected"),
-		Lost:        assert.NewReachable("test lost response injected"),
-		Applied:     assert.NewSometimes("test timed-out op applied"),
-		NotApplied:  assert.NewSometimes("test timed-out op not applied"),
-	}
+	testAsserts = faulty.NamedAsserts("test")                  //determinismcheck:ok catalog handles, set once at start
+	slotAsserts = faulty.NamedAsserts("slot")                  //determinismcheck:ok catalog handles, set once at start
 	testFlipped = assert.NewReachable("test answer corrupted") //determinismcheck:ok catalog handle, set once at start
 )
 
@@ -115,17 +109,13 @@ type extras struct {
 }
 
 func shape(e extras) faulty.Shape[request, answer, request, answer] {
-	s := faulty.Shape[request, answer, request, answer]{
-		Name:     "testservice",
-		Prefix:   "test",
-		Asserts:  testAsserts,
-		Op:       func(r request) request { return r },
-		Mutating: func(r request) bool { return r.set },
-		Changed:  func(a answer) bool { return a.changed },
-		Reply:    func(_ request, a answer) answer { return a },
-		Fail: func(r request, f faulty.Failure) answer {
-			return answer{id: r.id, failure: f}
-		},
+	s := faulty.ShapeOf[request, answer, request, answer]("testservice", "test", testAsserts)
+	s.Op = func(r request) request { return r }
+	s.Mutating = func(r request) bool { return r.set }
+	s.Changed = func(a answer) bool { return a.changed }
+	s.Reply = func(_ request, a answer) answer { return a }
+	s.Fail = func(r request, f faulty.Failure) answer {
+		return answer{id: r.id, failure: f}
 	}
 	if e.limit {
 		s.Limit = func(r request) (answer, bool) {
@@ -268,6 +258,30 @@ func (t *testWorld) hit(name string) bool {
 func (t *testWorld) value(key string) (int64, bool) {
 	v, ok := t.sp.m[key]
 	return v, ok
+}
+
+// NamedAsserts fills the six catalog slots with the usual Prefix names.
+func TestNamedAssertsNames(t *testing.T) {
+	a := slotAsserts
+	want := []struct {
+		got, name string
+	}{
+		{a.Outage.Name(), "slot outage started"},
+		{a.Unavailable.Name(), "slot 503 injected"},
+		{a.Timeout.Name(), "slot timeout injected"},
+		{a.Lost.Name(), "slot lost response injected"},
+		{a.Applied.Name(), "slot timed-out op applied"},
+		{a.NotApplied.Name(), "slot timed-out op not applied"},
+	}
+	for _, w := range want {
+		if w.got != w.name {
+			t.Fatalf("got %q, want %q", w.got, w.name)
+		}
+	}
+	s := faulty.ShapeOf[request, answer, request, answer]("svc", "slot", a)
+	if s.Name != "svc" || s.Prefix != "slot" || s.Asserts != a {
+		t.Fatal(s)
+	}
 }
 
 // Without faults the service gives the spec answers, applies each change once,

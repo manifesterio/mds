@@ -78,7 +78,8 @@ type Faults struct {
 }
 
 // Asserts are the assertions of the fault kinds. The product declares them at
-// package level (the assertion catalog needs that), with names it chooses.
+// package level (the assertion catalog needs that), with names it chooses --
+// or with NamedAsserts for the usual naming slots of a Prefix.
 type Asserts struct {
 	Outage      assert.Reachable // an outage window started
 	Unavailable assert.Reachable // a call was refused
@@ -86,6 +87,23 @@ type Asserts struct {
 	Lost        assert.Reachable // a reply was lost
 	Applied     assert.Sometimes // a timed-out op was applied
 	NotApplied  assert.Sometimes // a timed-out op was not applied
+}
+
+// NamedAsserts declares the six Asserts handles with the usual names for a
+// fault Prefix. Call it only in a package-level var block, like
+// assert.NewReachable. The names are "{prefix} outage started",
+// "{prefix} 503 injected", "{prefix} timeout injected",
+// "{prefix} lost response injected", "{prefix} timed-out op applied" and
+// "{prefix} timed-out op not applied".
+func NamedAsserts(prefix string) Asserts {
+	return Asserts{
+		Outage:      assert.NewReachable(prefix + " outage started"),
+		Unavailable: assert.NewReachable(prefix + " 503 injected"),
+		Timeout:     assert.NewReachable(prefix + " timeout injected"),
+		Lost:        assert.NewReachable(prefix + " lost response injected"),
+		Applied:     assert.NewSometimes(prefix + " timed-out op applied"),
+		NotApplied:  assert.NewSometimes(prefix + " timed-out op not applied"),
+	}
 }
 
 // Corruption flips a bit in the answer of some ops, once in a while. The spec
@@ -126,6 +144,12 @@ type Shape[Req, Rep actor.Payload, Op, Res any] struct {
 	Limit func(op Op) (Res, bool)
 	// Corrupt is optional.
 	Corrupt *Corruption[Op, Res]
+}
+
+// ShapeOf returns a Shape with Name, Prefix and Asserts set. The product fills
+// Op, Mutating, Changed, Reply and Fail (and optionally Limit and Corrupt).
+func ShapeOf[Req, Rep actor.Payload, Op, Res any](name, prefix string, a Asserts) Shape[Req, Rep, Op, Res] {
+	return Shape[Req, Rep, Op, Res]{Name: name, Prefix: prefix, Asserts: a}
 }
 
 // How an issued call ends.

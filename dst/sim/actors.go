@@ -197,7 +197,7 @@ func (sys *System) ensureWake(b *actorBase, at Time) {
 
 // nodeLane is a lane of the system for actor idx: k=1 wake-ups.
 func nodeLane(idx int, k uint64) Lane {
-	return HostLane + 1 + Lane(idx)<<8 + Lane(k)
+	return hostLane + 1 + Lane(idx)<<8 + Lane(k)
 }
 
 // dropped counts a delivery that was dropped and folds why.

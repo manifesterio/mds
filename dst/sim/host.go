@@ -37,7 +37,7 @@ type item[In actor.Payload] struct {
 type host[In, IO actor.Payload] struct {
 	actorBase
 	props    actor.Props[In, IO]
-	exec     Executor[IO]
+	exec     executor[IO]
 	onPhase  func(Phase) (In, bool)
 	afterRcv func(self actor.Incarnation, msg In, effects []actor.Effect)
 	onEnd    func(self actor.Incarnation, how actor.End, cause string)

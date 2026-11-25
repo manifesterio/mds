@@ -49,7 +49,7 @@ func (b phaseBody) Fold(h *trace.Hash) {
 	h.Uint64(uint64(b.to))
 }
 
-// SchedulePhases queues the two phase changes on HostLane (PhaseHeal after
+// SchedulePhases queues the two phase changes on the host lane (PhaseHeal after
 // Faults, PhaseDrain after Faults+Heal) and sets Config.End to
 // Faults+Heal+Drain. Prefer this when the product uses the three-phase
 // fault/heal/drain schedule with Config.End. Products that drive quiet and
@@ -71,7 +71,7 @@ func QuietElapsed(waited, min, max actor.Duration, ready bool) bool {
 }
 
 func (sys *System) queuePhase(at Time, to Phase) {
-	e := &entry{at: at, lane: HostLane, kind: kindPhase, node: -1, body: phaseBody{to}}
+	e := &entry{at: at, lane: hostLane, kind: kindPhase, node: -1, body: phaseBody{to}}
 	e.run = func() {
 		sys.counters[countKernelSteps]++
 		sys.SetPhase(to)

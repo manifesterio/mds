@@ -368,6 +368,34 @@ Run full verification + deslop. Write Outcome section into docs/contribute/dst-d
 
 _(Phase 0 agent fills this in.)_
 
+## Phase D0 — Spike outcome: **DEFER**
+
+**Decision:** do not merge. `sched` remains live/clock-only; `sim` keeps `queue.go`. No D1. No code change.
+
+**Compared:** `dst/core/sched/sched.go` vs `dst/sim/queue.go` (plus `entry.go`, `foldEntry`, `core/clock` cancel pattern, `guarantees_test` lane FIFO).
+
+### Shared shape (not enough)
+
+Both are binary min-heaps ordered by `(at, tie, seq)`. That is the only real overlap. Consumers diverge: `sched` feeds `core/clock`, `core/syncclock`, and product `shared/clock`; `sim` never imports `sched` — its queue is the kernel run loop.
+
+### Why zero-drift sit-on-sched fails
+
+| Gate | `sched` | `sim` queue | Drift if forced together |
+|---|---|---|---|
+| Tie draw counts | `After` draws one `Uint64` per event; `AfterFIFO` draws **zero** and sets `tie=0` | **Always** draws one `Uint64` per `add`, then may overwrite with a lane group's existing tie (draw still burned) | Mapping lane FIFO onto `AfterFIFO` skips draws → RNG stream shifts → later faults/delays/orders and golden hashes move. Mapping onto `After` alone keeps draws but loses lane FIFO. |
+| Lane FIFO | No lanes. `AfterFIFO` = global same-time FIFO. `After` = independent ties (no FIFO group) | Per-`(lane, at)` shared tie → FIFO by `seq` within lane; different lanes at one time stay randomly ordered by their ties (`TestSameTimeOrderIsSeeded`) | Neither `After` nor `AfterFIFO` reproduces “FIFO within lane, seeded across lanes.” Need `laneGroup` maps — i.e. keep sim’s queue logic. |
+| Trace fold / entry kinds | Payload is `label` + `func()` only | Frozen `entryKind` values (0/1/2/3/5/7) folded with lane, node, inc, service, body in `foldEntry` | Sitting on `sched` either drops kinds (hash change) or pulls sim metadata into `core/sched` (wrong layer for clock adapters). |
+| Cancel / peek | No kill. Clock `Stop` leaves the heap event; callback no-ops. `Peek`/`Len` still see it | Soft-delete (`dead`), `byID`, `live`, lane refcounts; `peek`/`top` skip dead; `dropIncarnation` | Different emptiness and time-peek under cancel. Unifying without changing one side’s peek/cancel story is not free. |
+| Clock extras | `Jump`, `Take` unlocked, `max(now, at)` on take | No jump; `add` clamps past→now; `pop` sets `now = e.at` | Adapters need Jump; sim does not. One type serving both grows API without deleting sim’s bookkeeping. |
+
+### What a “clean” merge would actually require
+
+To keep draws, lane FIFO, kinds, and goldens identical, `sched` would have to absorb lane groups, always-draw-then-reuse, soft cancel + incarnation drop, and entry metadata — becoming a second copy of `sim/queue` under `core/`. Clock callers would then sit on a sim-shaped heap they do not need. Extracting only the ~heap push/pop into a shared internal package saves little and still leaves two behavioral façades; it does not end “sched unused by sim.”
+
+### DoD for D0
+
+Explicit deferral recorded. Working tree unmigrated. D1 not started.
+
 ## Outcome
 
 _(Phase G agent fills this in.)_

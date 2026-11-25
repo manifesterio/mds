@@ -6,11 +6,11 @@ import (
 	"github.com/manifesterio/mds/dst/core/actor"
 )
 
-// Executor simulates product IO. One executor per IO sum, shared by every
+// executor simulates product IO. One executor per IO sum, shared by every
 // actor of that sum. It runs right after the Receive that recorded the IO,
 // once per Do or Perform, in record order. It must not block: it answers a
 // Perform with Answer or Forward, and sends unsolicited results with Tell.
-type Executor[IO actor.Payload] func(ctx *ExecCtx, io IO)
+type executor[IO actor.Payload] func(ctx *ExecCtx, io IO)
 
 // SpawnOption configures what only a simulation needs.
 type SpawnOption interface{ applySpawn(o *spawnOpts) }
@@ -19,7 +19,7 @@ type spawnOpts struct {
 	workload  bool
 	attrition bool
 	cost      CostParams
-	exec      any // Executor[IO], checked in Spawn
+	exec      any // executor[IO], checked in Spawn
 	onPhase   any // func(Phase) (In, bool), checked in Spawn
 	after     any // func(actor.Incarnation, In, []actor.Effect), checked in Spawn
 	onEnd     func(self actor.Incarnation, how actor.End, cause string)
@@ -30,7 +30,7 @@ type optionFunc func(o *spawnOpts)
 func (f optionFunc) applySpawn(o *spawnOpts) { f(o) }
 
 // WithExecutor runs the actor's product IO. Required unless IO is NoIO.
-func WithExecutor[IO actor.Payload](x Executor[IO]) SpawnOption {
+func WithExecutor[IO actor.Payload](x executor[IO]) SpawnOption {
 	return optionFunc(func(o *spawnOpts) { o.exec = x })
 }
 
@@ -106,7 +106,7 @@ func typedOptions[In, IO actor.Payload](sys *System, h *host[In, IO], o spawnOpt
 		}
 	}
 	var good bool
-	h.exec, good = o.exec.(Executor[IO])
+	h.exec, good = o.exec.(executor[IO])
 	check(o.exec != nil, good, "WithExecutor")
 	h.onPhase, good = o.onPhase.(func(Phase) (In, bool))
 	check(o.onPhase != nil, good, "OnPhase")

@@ -26,11 +26,11 @@ type EntryID uint64
 const (
 	// NoLane is no FIFO group: every entry gets a fresh random tie.
 	NoLane Lane = 0
-	// HostLane is the lane of the System itself (restarts, kills, phases).
+	// hostLane is the lane of the System itself (restarts, kills, phases).
 	// Lanes at or above it belong to the System: it keeps one wake-up lane
 	// per actor there. Pair lanes (one per sender and receiver) are just
 	// below it; host code may use the lanes below those.
-	HostLane Lane = 1 << 62
+	hostLane Lane = 1 << 62
 )
 
 const (
@@ -51,18 +51,6 @@ type Config struct {
 	HaltOnFirst  bool // stop the run at the first failure
 	VerifyHashes bool // recompute cached state hashes every step; a mismatch fails the seed
 }
-
-// Stopped says why RunUntil returned.
-type Stopped uint8
-
-// The reasons RunUntil returns.
-const (
-	StopAsked Stopped = iota // the stop function returned true
-	Drained                  // the queue is empty
-	TimeUp                   // the next entry is after Config.End
-	StepLimit                // Config.MaxSteps was reached (a FailMaxSteps)
-	Halted                   // the run halted (HaltOnFirst, or a panic outside a node)
-)
 
 // FailKind says what kind of failure a seed had. It is not folded into the
 // trace hash.
@@ -89,8 +77,8 @@ type Failure struct {
 	Repeats  int
 }
 
-// Counter is one run statistic.
-type Counter struct {
+// counter is one run statistic.
+type counter struct {
 	Name string
 	N    uint64
 }
@@ -106,7 +94,7 @@ type LogEntry struct {
 type Result struct {
 	Seed, Steps, RandCalls, Hash uint64
 	Crashes, Trips, Exits        int
-	Stats                        []Counter
+	Stats                        []counter
 	Failures                     []Failure
 	Coverage                     map[string]assert.Coverage
 	Sites                        map[string]fault.SiteCount
@@ -244,9 +232,6 @@ func (sys *System) Faults() *fault.Injector { return sys.faults }
 // Assert is the assertion log of the run.
 func (sys *System) Assert() *assert.Log { return sys.asserts }
 
-// Logging reports Config.Log.
-func (sys *System) Logging() bool { return sys.cfg.Log }
-
 // Timeline is the fact timeline of the run.
 func (sys *System) Timeline() *Timeline { return sys.tl }
 
@@ -280,9 +265,9 @@ func Bootstrap(cfg Config) (*System, actor.Env, *rng.Rand) {
 	return sys, sys.Env(), sys.Rand()
 }
 
-// Cancel retires a pending queue entry. An entry that already ran, or an
+// cancel retires a pending queue entry. An entry that already ran, or an
 // unknown id, is ignored.
-func (sys *System) Cancel(id EntryID) { sys.q.cancel(id) }
+func (sys *System) cancel(id EntryID) { sys.q.cancel(id) }
 
 // AddRule adds a rule. Add every rule before the run starts.
 func (sys *System) AddRule(r Rule) { sys.rules = append(sys.rules, r) }
@@ -362,26 +347,26 @@ func (sys *System) Start() {
 // RunUntil takes queue entries until stop returns true (checked before each
 // entry; stop may be nil), the queue is empty, the next entry is after
 // Config.End, the step limit is hit, or the run halted.
-func (sys *System) RunUntil(stop func() bool) Stopped {
+func (sys *System) RunUntil(stop func() bool) {
 	sys.Start()
 	for {
 		if sys.halted {
-			return Halted
+			return
 		}
 		if stop != nil && stop() {
-			return StopAsked
+			return
 		}
 		at, ok := sys.q.peek()
 		if !ok {
-			return Drained
+			return
 		}
 		if sys.cfg.End > 0 && at > sys.cfg.End {
-			return TimeUp
+			return
 		}
 		if sys.steps >= sys.cfg.MaxSteps {
 			sys.Fail(FailMaxSteps, "max_steps", fmt.Sprintf("the run took more than %d steps", sys.cfg.MaxSteps))
 			sys.halted = true
-			return StepLimit
+			return
 		}
 		e, _ := sys.q.pop()
 		sys.steps++
@@ -425,7 +410,7 @@ func (sys *System) Finish() Result {
 		Sites:    sys.faults.Sites(),
 	}
 	for i, name := range counterNames() {
-		res.Stats = append(res.Stats, Counter{Name: name, N: sys.counters[i]})
+		res.Stats = append(res.Stats, counter{Name: name, N: sys.counters[i]})
 	}
 	for _, l := range sys.lines {
 		res.Log = append(res.Log, l.entry())

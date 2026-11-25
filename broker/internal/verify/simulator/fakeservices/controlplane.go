@@ -48,32 +48,29 @@ var _ sim.Service[core.ControlPlaneCall, core.ControlPlaneDone] = (*ControlPlane
 // to a System with sim.AddService.
 func NewControlPlane(f ControlPlaneFaults) *ControlPlane {
 	s := &ControlPlane{spec: specbridge.New(), maxItems: f.MaxCommitItems}
-	shape := faulty.Shape[core.ControlPlaneCall, core.ControlPlaneDone, contract.Operation, contract.Done]{
-		Name:    "fakecontrolplane",
-		Prefix:  "cp",
-		Asserts: controlPlaneAsserts,
-		Op:      func(c core.ControlPlaneCall) contract.Operation { return c.Op },
-		Mutating: func(op contract.Operation) bool {
-			_, ok := op.(contract.CommitSegment)
-			return ok
-		},
-		// A replayed commit is Applied too, so Gen may bump without a change.
-		Changed: func(d contract.Done) bool { return d.Outcome == core.Applied },
-		Reply: func(_ core.ControlPlaneCall, d contract.Done) core.ControlPlaneDone {
-			return core.ControlPlaneDone{Resp: d.Resp, Err: d.Err, Outcome: d.Outcome}
-		},
-		Fail: func(_ core.ControlPlaneCall, failure faulty.Failure) core.ControlPlaneDone {
-			if failure == faulty.TimedOut {
-				return core.ControlPlaneDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}
-			}
-			return core.ControlPlaneDone{Err: core.ErrUnavailable, Outcome: core.NotApplied}
-		},
-		Limit: func(op contract.Operation) (contract.Done, bool) {
-			if s.tooLarge(op) {
-				return contract.Done{Err: core.ErrTooLarge, Outcome: core.NotApplied}, true
-			}
-			return contract.Done{}, false
-		},
+	shape := faulty.ShapeOf[core.ControlPlaneCall, core.ControlPlaneDone, contract.Operation, contract.Done](
+		"fakecontrolplane", "cp", controlPlaneAsserts)
+	shape.Op = func(c core.ControlPlaneCall) contract.Operation { return c.Op }
+	shape.Mutating = func(op contract.Operation) bool {
+		_, ok := op.(contract.CommitSegment)
+		return ok
+	}
+	// A replayed commit is Applied too, so Gen may bump without a change.
+	shape.Changed = func(d contract.Done) bool { return d.Outcome == core.Applied }
+	shape.Reply = func(_ core.ControlPlaneCall, d contract.Done) core.ControlPlaneDone {
+		return core.ControlPlaneDone{Resp: d.Resp, Err: d.Err, Outcome: d.Outcome}
+	}
+	shape.Fail = func(_ core.ControlPlaneCall, failure faulty.Failure) core.ControlPlaneDone {
+		if failure == faulty.TimedOut {
+			return core.ControlPlaneDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}
+		}
+		return core.ControlPlaneDone{Err: core.ErrUnavailable, Outcome: core.NotApplied}
+	}
+	shape.Limit = func(op contract.Operation) (contract.Done, bool) {
+		if s.tooLarge(op) {
+			return contract.Done{Err: core.ErrTooLarge, Outcome: core.NotApplied}, true
+		}
+		return contract.Done{}, false
 	}
 	s.Service = faulty.New(faulty.Spec[contract.Operation, contract.Done](s.spec), f.Faults, shape)
 	return s
