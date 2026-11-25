@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../../../broker"
 pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./spec ./internal/verify/speccheck ./internal/verify/speccheck/specbridge)
 
 echo "== determinismcheck"
-go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ../ops/broker/determinism-allow.txt "${pkgs[@]}"
+go run github.com/manifesterio/mds/ops/tools/determinismcheck -allow ../ops/broker/determinism-allow.txt "${pkgs[@]}"
 
 echo "== real time stays out of the gated packages"
 # Only dst/runtime/live (the production loop) and the production adapters may read real time

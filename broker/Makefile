@@ -4,7 +4,7 @@
 # Integration tests (make it) need Podman (DynamoDB Local + SeaweedFS via shared/testinfra)
 # and a real mdscontrolplane binary; they are part of build and never skip.
 # The import check for deterministic packages is the determinismcheck tool:
-# go run github.com/manifesterio/mds/dst/cmd/determinismcheck <packages>
+# go run github.com/manifesterio/mds/ops/tools/determinismcheck <packages>
 # Toolchain: `mise install` at the repo root (pins in the root mise.toml). The commit hook is
 # installed by the root Makefile (make install-hooks).
 

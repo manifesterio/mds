@@ -43,4 +43,4 @@ groups differ from Apache Kafka. Simulation: [docs/contribute/determinism.md](..
 - `internal/verify/simulator` - deterministic simulation of the replicated control plane
 - `test/integration` - end-to-end tests on the real binary (build tag `integration`; Podman via `shared/testinfra`)
 - `test/s3store` - S3 object-store tests against SeaweedFS (build tag `integration`)
-- Module ops live under repo `ops/controlplane/` (scripts, allow-list). The tool `protoc-gen-mdswire` is in `controlplane/ops/tools/`, so `go run ./ops/tools/protoc-gen-mdswire` stays inside the module. The determinism tool is `dst/cmd/determinismcheck`.
+- Module ops live under repo `ops/controlplane/` (scripts, allow-list). The tool `protoc-gen-mdswire` is in `controlplane/ops/tools/`, so `go run ./ops/tools/protoc-gen-mdswire` stays inside the module. The determinism tool is `ops/tools/determinismcheck`.

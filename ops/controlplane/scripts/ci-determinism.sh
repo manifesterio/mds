@@ -33,14 +33,14 @@ pkgs=(
 sim=./internal/verify/simulator
 
 echo "== determinismcheck"
-go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ../ops/controlplane/determinism-allow.txt "${pkgs[@]}"
+go run github.com/manifesterio/mds/ops/tools/determinismcheck -allow ../ops/controlplane/determinism-allow.txt "${pkgs[@]}"
 
 echo "== determinismcheck (simulator engine)"
 allow=$(mktemp)
 trap 'rm -f "$allow"' EXIT
 cat ../ops/controlplane/determinism-allow.txt >"$allow"
 echo context >>"$allow"
-go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow "$allow" "$sim"
+go run github.com/manifesterio/mds/ops/tools/determinismcheck -allow "$allow" "$sim"
 
 echo "== real time stays out of the gated packages"
 # Only live and the production adapters may read real time or real randomness.

@@ -14,7 +14,7 @@ Docs: [docs/contribute/determinism.md](../docs/contribute/determinism.md).
 ## Build
 
 From the repo root: `make -C dst build`. It runs format, ASCII, vet, lint, modernize, the tests and the
-determinism check. The determinism tool is in `cmd/determinismcheck`.
+determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 
 ## Packages
 

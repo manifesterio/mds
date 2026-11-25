@@ -31,5 +31,5 @@ echo "== determinism packages (${#pkgs[@]}), excluded: $(printf '%s\n' "$exclude
 printf '  %s\n' "${pkgs[@]}"
 
 echo "== determinismcheck"
-go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ../ops/dst/determinism-allow.txt "${pkgs[@]}"
+go run github.com/manifesterio/mds/ops/tools/determinismcheck -allow ../ops/dst/determinism-allow.txt "${pkgs[@]}"
 echo "determinism gate passed"

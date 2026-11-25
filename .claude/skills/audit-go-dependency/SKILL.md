@@ -50,7 +50,7 @@ needs no determinism audit.
    - Add the **exact** import path(s) our code will use to
      `ops/determinism-allow.txt`. Never add a bare prefix like `math`; use
      `/...` only for a whole subtree you audited.
-   - `go get <module>@<version>` in the repo and run `go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt ./internal/core/... ./internal/verify/simulator/...`.
+   - `go get <module>@<version>` in the repo and run `go run github.com/manifesterio/mds/ops/tools/determinismcheck -allow ops/determinism-allow.txt ./internal/core/... ./internal/verify/simulator/...`.
    - Add any rules for our code to `docs/decisions.md`.
 
 7. **On a version bump:** rerun from step 1 for the new version and diff the
@@ -59,6 +59,6 @@ needs no determinism audit.
 
 ## Never
 
-- Never weaken `dst/cmd/determinismcheck` or delete an allow-list check to make CI pass.
+- Never weaken `ops/tools/determinismcheck` or delete an allow-list check to make CI pass.
 - Never suppress a finding in our code without `//determinismcheck:ok <reason>`.
 - Never accept a dependency on "it's just a codec": check aliasing and hidden defaults.

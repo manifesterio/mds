@@ -60,7 +60,7 @@ make risk-strict
 
 `make it` requires Podman and never skips. Integration tests are under
 `//go:build integration`. The import rules for the deterministic packages
-are checked by `go run github.com/manifesterio/mds/dst/cmd/determinismcheck` (see `../ops/broker/scripts/ci-determinism.sh`).
+are checked by `go run github.com/manifesterio/mds/ops/tools/determinismcheck` (see `../ops/broker/scripts/ci-determinism.sh`).
 
 ## Docs
 

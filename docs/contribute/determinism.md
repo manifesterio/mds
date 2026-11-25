@@ -29,7 +29,7 @@ bash ops/broker/scripts/ci-determinism.sh
 
 `dst` and `controlplane` also run their gate inside `make build`. Broker `make build` does not. Root `make determinism` is the broker gate.
 
-The checker is `dst/cmd/determinismcheck`. The dst gate covers every package under `core/` and `sim/` except paths listed in `ops/dst/determinism-exclude.txt`, plus `verify/check` and `verify/check/faulty`.
+The checker is `ops/tools/determinismcheck`. The dst gate covers every package under `core/` and `sim/` except paths listed in `ops/dst/determinism-exclude.txt`, plus `verify/check` and `verify/check/faulty`.
 
 ## Allow-list and audit records
 

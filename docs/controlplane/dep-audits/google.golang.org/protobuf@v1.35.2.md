@@ -79,7 +79,7 @@ plus imports of `os`, `sync`, `sync/atomic`, `unsafe`, `reflect`, `io`,
 
 ## Evidence
 
-- `go run github.com/manifesterio/mds/dst/cmd/determinismcheck` over the packages
+- `go run github.com/manifesterio/mds/ops/tools/determinismcheck` over the packages
   listed above: findings match the table. No goroutine, channel, time, or random
   number on the marshal path with `Deterministic: true`.
 - Probe (temporary `main`, not committed): six builds with different
