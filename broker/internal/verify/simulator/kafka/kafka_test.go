@@ -236,19 +236,35 @@ func (i *tallyRule) AtEnd(v sim.View) {
 	}
 }
 
+// minIndet is the non-vacuity floor for maybe-applied (ResultUnknown) produces.
+// Target was ~50 over the campaign seed budget. The dedicated ambiguous-produce
+// scenario alone yields hundreds over 20 seeds (measured ~630); 50 is a stable
+// CI floor that still fails if that path collapses back toward the default
+// campaign's handful of indeterminate outcomes.
+const minIndet = 50
+
 // The campaign must actually exercise the system: acks, retried batches,
 // ambiguous outcomes, deliberately idempotent batches rejected by the broker,
-// and reads.
+// and reads. Default seeds cover throughput and rejection; ambiguousProduceConfig
+// seeds force the ResultUnknown path that whole-frame delivery otherwise starves.
 func TestCampaignIsNotVacuous(t *testing.T) {
 	var tl tally
-	for s := uint64(1); s <= 20; s++ {
-		Run(Config{Seed: s, ExtraRules: func(_ *cluster.Cluster, h *History) []sim.Rule {
-			return []sim.Rule{&tallyRule{t: &tl, hist: h}}
-		}})
+	extra := func(_ *cluster.Cluster, h *History) []sim.Rule {
+		return []sim.Rule{&tallyRule{t: &tl, hist: h}}
 	}
-	t.Logf("20 seeds: %+v", tl)
-	if tl.definite < 2000 || tl.indet == 0 || tl.retried == 0 || tl.rejected == 0 || tl.readRecs < 2000 {
-		t.Fatalf("campaign too weak: %+v", tl)
+	for s := uint64(1); s <= 20; s++ {
+		Run(Config{Seed: s, ExtraRules: extra})
+	}
+	for s := uint64(1); s <= 20; s++ {
+		cfg := ambiguousProduceConfig(s)
+		cfg.ExtraRules = extra
+		if r := Run(cfg); len(r.Failures) > 0 {
+			t.Errorf("ambiguous-produce seed %d: %+v", s, r.Failures[0])
+		}
+	}
+	t.Logf("20 default + 20 ambiguous-produce seeds: %+v", tl)
+	if tl.definite < 2000 || tl.indet < minIndet || tl.retried == 0 || tl.rejected == 0 || tl.readRecs < 2000 {
+		t.Fatalf("campaign too weak: %+v (want indet >= %d)", tl, minIndet)
 	}
 }
 

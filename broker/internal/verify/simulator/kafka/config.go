@@ -47,6 +47,21 @@ type Config struct {
 	ExtraRules func(c *cluster.Cluster, h *History) []sim.Rule
 }
 
+// ambiguousProduceConfig is a dedicated campaign preset that forces maybe-applied
+// produce outcomes without wall-clock waits: a short virtual request timeout so
+// RequestDue can fire while the broker may still apply the produce, and a raised
+// ConnResetProb so in-flight frames reset. Client giveUp still resolves via
+// history.ResultUnknown.
+func ambiguousProduceConfig(seed uint64) Config {
+	opts := DefaultOpts()
+	opts.ReqTimeout = 50 * actor.Millisecond
+	return Config{
+		Seed: seed,
+		Opts: opts,
+		Tune: func(s *Settings) { s.ConnResetProb = 0.05 },
+	}
+}
+
 // Run builds and runs one seed of the Kafka scenario.
 func Run(cfg Config) sim.Result {
 	opts := cfg.Opts
