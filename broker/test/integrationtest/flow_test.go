@@ -135,7 +135,7 @@ func TestMetadataAndApiVersions(t *testing.T) {
 				t.Errorf("broker %d does not offer API key %d", v.NodeID, key)
 			}
 		}
-		if _, ok := v.KeyMaxVersion(22); ok { // InitProducerId: no idempotent producers (decision 41)
+		if _, ok := v.KeyMaxVersion(22); ok { // InitProducerId is not offered. No idempotent producers.
 			t.Errorf("broker %d offers InitProducerId", v.NodeID)
 		}
 	}

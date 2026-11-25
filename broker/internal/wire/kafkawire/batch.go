@@ -39,7 +39,7 @@ var (
 )
 
 // Compression codec ids, the low three attribute bits of a v2 batch. The
-// broker stores and serves compressed payloads as opaque bytes (decision 45).
+// broker stores and serves compressed payloads as opaque bytes.
 const (
 	CodecNone   = 0
 	CodecGzip   = 1

@@ -214,9 +214,6 @@ func TestStopFlushesOpenSegment(t *testing.T) {
 	}
 }
 
-// With the CP storing one range run per partition and segment (decision 39),
-// many small batches no longer hit the batch cap at 32: the segment seals at
-// the byte cap.
 func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 	n := len(plain(t, "a"))
 	config := DefaultConfig()

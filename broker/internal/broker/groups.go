@@ -10,9 +10,8 @@ import (
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// Group APIs (decision Q3). The broker keeps no group state. Each call is one
-// control plane call, and every broker serves every group call. Classic
-// protocol only (decision Q9).
+// Group APIs. The broker keeps no group state. Each call is one control plane
+// call, and every broker serves every group call. Classic protocol only.
 //
 // A group call is an operation of kind opGroup. It has no retry: a retry of a
 // JoinGroup would make a second member. A control plane failure is answered

@@ -10,8 +10,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 )
 
-// metadata answers Metadata (decision 29): this broker is the leader of every
-// partition. Topics come from the control plane and are never auto-created.
+// metadata answers Metadata. This broker is the leader of every partition.
+// Topics come from the control plane and are never auto-created.
 func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 	var names []string
 	for _, t := range r.Topics {
@@ -106,7 +106,7 @@ func (b *Broker) metaTopic(name string, infos []contract.TopicInfo, code kafkaEr
 }
 
 // listOffsets serves earliest (always 0, no retention) and latest (the end
-// offset); other timestamps are unsupported (decision 29).
+// offset). Other timestamps are unsupported.
 func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action {
 	response := listOffsetsSkeleton(r)
 	s.response = response

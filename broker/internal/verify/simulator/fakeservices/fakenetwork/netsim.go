@@ -1,5 +1,5 @@
-// Package fakenetwork is the simulated network service: TCP-like byte streams
-// between nodes (decision 6). Address = NodeID string.
+// Package fakenetwork is the simulated network service. It models TCP-like byte
+// streams between nodes. Address = NodeID string.
 //
 // It is a kernel.Service. A node hands it one of five calls (Dial, Write, Close,
 // Pause, Resume). The service answers the caller, and it also sends events to
@@ -9,8 +9,8 @@
 // Model
 //   - A connection is a pair of ends (dialer = side 0, listener = side 1) and
 //     two directions; direction d carries bytes from side d to side 1-d. Each
-//     direction has its own Lane (decision C) and monotone arrival times, so
-//     bytes never reorder even when chunks draw different latencies.
+//     direction has its own Lane and monotone arrival times, so bytes never
+//     reorder even when chunks draw different latencies.
 //   - Connect: live target -> ConnIDs allocated now (per-node counters, never
 //     reused across incarnations), ConnectDone{OK} to the dialer and
 //     ConnOpened to the listener, both after latency. Down target ->

@@ -47,13 +47,13 @@ type Config struct {
 	Host     string // advertised host
 	Port     int32  // advertised port
 
-	// MaxFrame is the largest request frame; a larger one closes the
+	// MaxFrame is the largest request frame. A larger one closes the
 	// connection. The default is 100 MiB, Kafka's socket.request.max.bytes, so a
 	// client with max.request.size=64000000 (the WarpStream benchmark config) can
-	// send a 64 MB Produce request (decision 45).
+	// send a 64 MB Produce request.
 	MaxFrame int32
 
-	// Segment flush rule (decision 35): the open segment is sealed when it holds
+	// Segment flush rule. The open segment is sealed when it holds
 	// MaxSegmentBytes of batch data, or BatchWindow after its first batch
 	// arrived (a fixed timer, not extended by later batches), or when it hits
 	// one of the count caps below.
@@ -61,7 +61,7 @@ type Config struct {
 	MaxSegmentBytes int              // flush at once when the open segment holds this many batch bytes
 
 	// MaxSegmentPartitions and MaxSegmentBatches cap the open segment so the
-	// control plane can commit it. The cap is a per-store setting (decision 52):
+	// control plane can commit it. The cap is a per-store setting:
 	//
 	//	log store (machine/exec) one command of about 20 bytes per partition in a
 	//	                         log entry, so the default is 4096 (about 80 KB,
@@ -94,7 +94,7 @@ type Config struct {
 	DefaultFetchBytes int32 // partition limit when a Fetch asks for none (<= 0)
 
 	// FetchPollInterval is how often a Fetch part that found no data asks the
-	// control plane again, until the Fetch has MinBytes or MaxWait ends (decision 29, Q8).
+	// control plane again, until the Fetch has MinBytes or MaxWait ends.
 	FetchPollInterval machine.Duration
 
 	// InjectedBug is test-only; see InjectedBug.

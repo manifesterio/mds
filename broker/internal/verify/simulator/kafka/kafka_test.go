@@ -447,11 +447,6 @@ func wideCampaign(t *testing.T, capParts, batches int) int64 {
 	return widest.Load()
 }
 
-// The old store (decisions 39, 41, 44): a commit costs 1 + distinct partitions
-// (+ grown topics) of the 100 items of a transaction, so the broker must run with
-// -max-segment-partitions 96 (3 spare items). At that cap the control plane
-// refuses nothing; the widest committed segment must be over half of the cap,
-// or the test proves nothing.
 func TestProductionCapsFitDynamoLimit(t *testing.T) {
 	const capParts = 96
 	if 1+capParts > fakeservices.DynamoMaxCommitItems || fakeservices.DynamoMaxCommitItems-1-capParts < 3 {
@@ -464,8 +459,8 @@ func TestProductionCapsFitDynamoLimit(t *testing.T) {
 	}
 }
 
-// The log store (decision 52) campaign needs replica + fakelogstore in
-// mds-controlplane; skip until reconnect.
+// The log store campaign needs replica + fakelogstore in mds-controlplane.
+// Skip until reconnect.
 func TestLogStoreTakesTheDefaultCap(t *testing.T) {
 	t.Skip("control plane extracted to mds-controlplane; reconnect later")
 }

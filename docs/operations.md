@@ -1,7 +1,8 @@
 # Operations
 
-Run binaries, read metrics/logs, and deploy containers. Demo quickstart:
-[getting-started.md](getting-started.md). Build: [contribute/build.md](contribute/build.md).
+Run binaries, read metrics and logs, and build container images. For the demo
+image, see [getting-started.md](getting-started.md). For the build gate, see
+[contribute/build.md](contribute/build.md).
 
 ## Local binaries
 
@@ -23,28 +24,28 @@ bin/mdsbroker \
   -metrics-addr :9100
 ```
 
-Give both the same `-run-id` (or `$MDS_RUN_ID`) when joining logs later.
+Give both the same `-run-id` (or `$MDS_RUN_ID`) when you join logs later.
 
 ### Control plane stores (`-store`)
 
 | Value | Role |
 |-------|------|
-| `mem` | In-process. Demo/tests. Default. |
-| `dynamolog` | DynamoDB log; optional S3 checkpoints. |
-| `postgres` | PostgreSQL log; optional S3 checkpoints. |
+| `mem` | In-process. Demo and tests. Default. |
+| `dynamolog` | DynamoDB log. Optional S3 checkpoints. |
+| `postgres` | PostgreSQL log. Optional S3 checkpoints. |
 
 Shared flags: `-addr` (`:8080`), `-metrics-addr` (`:9101`), `-log-level`,
 `-run-id`, `-manifest-out`, `-broker-lease-ttl` (default 5s).
 
-**dynamolog:** `-dynamo-endpoint` (empty = AWS), `-region`, `-table-prefix` /
-`-table`, `-create-tables`, `-checkpoint-bucket` / `-checkpoint-prefix`,
-`-node-name`, `-rank` (0 = preferred appender), `-takeover-after`, `-heartbeat`,
-`-pebble-dir`.
+**dynamolog.** `-dynamo-endpoint` (empty means AWS), `-region`, `-table-prefix`,
+`-table`, `-create-tables`, `-checkpoint-bucket`, `-checkpoint-prefix`,
+`-node-name`, `-rank` (0 is the preferred appender), `-takeover-after`,
+`-heartbeat`, `-pebble-dir`.
 
-**postgres:** DSN via `$MDS_POSTGRES_DSN` or `-postgres-dsn` (never logged).
-`-postgres-prefix` (default `mds_`), `-create-tables`. Checkpoint/rank flags
-match dynamolog. All nodes share one DB; do not point at a read replica.
-`make it-postgres` needs Podman/Docker.
+**postgres.** DSN via `$MDS_POSTGRES_DSN` or `-postgres-dsn` (never logged).
+`-postgres-prefix` (default `mds_`), `-create-tables`. Checkpoint and rank flags
+match dynamolog. All nodes share one DB. Do not point at a read replica.
+`make -C broker it-postgres` needs Podman.
 
 ### Broker objects (`-objects`)
 
@@ -53,13 +54,13 @@ match dynamolog. All nodes share one DB; do not point at a read replica.
 | `s3` | Default. Real S3 or compatible. |
 | `mem` | In-process. Single broker. |
 
-S3: `-s3-endpoint`, `-s3-bucket`, `-s3-prefix`, `-s3-region`, `-s3-path-style`,
-`-s3-create-bucket`. Other: `-listen`, `-advertise`, `-broker-id`, `-cp-url`
-(comma list for failover), `-metrics-addr` (`:9100`), `-lease-interval`
-(keep CP `-broker-lease-ttl` about 3x this).
+S3 flags: `-s3-endpoint`, `-s3-bucket`, `-s3-prefix`, `-s3-region`,
+`-s3-path-style`, `-s3-create-bucket`. Other flags: `-listen`, `-advertise`,
+`-broker-id`, `-cp-url` (comma list for failover), `-metrics-addr` (`:9100`),
+`-lease-interval` (keep CP `-broker-lease-ttl` about 3x this).
 
-Production: separate processes/images, durable store, real object store. Not
-`mem` or `mds-all`.
+Production uses separate processes or images, a durable store, and a real
+object store. Not `mem` or `mds-all`.
 
 ## Observability
 
@@ -71,25 +72,28 @@ Production: separate processes/images, durable store, real object store. Not
 Empty `-metrics-addr` disables the port. `/metrics` and `/healthz` on each.
 
 `-run-id` / `$MDS_RUN_ID` stamps logs, `*_build_info`, and optional
-`-manifest-out`. JSON logs on stderr (`run_id`, `service`, `version`, `git_sha`).
-Broker: ~one line per segment event. CP: `cp_summary` each second at INFO;
-`cp_call` at DEBUG. High load: `-log-level warn`.
+`-manifest-out`. JSON logs on stderr (`run_id`, `service`, `version`,
+`git_sha`). The broker writes about one line per segment event. The control
+plane writes `cp_summary` each second at INFO while traffic is present, and
+`cp_call` at DEBUG. Under high load, use `-log-level warn`.
 
-Useful broker events: `segment_sealed`, `segment_put_done`, `segment_committed`,
-`segment_failed`, `backpressure_on` / `off`. CP: `cp_call`, `cp_summary`,
-`aws_attempt_failed`.
+Useful broker events are `segment_sealed`, `segment_put_done`,
+`segment_committed`, `segment_failed`, `backpressure_on`, and
+`backpressure_off`. Useful control-plane events are `cp_call`, `cp_summary`,
+and `aws_attempt_failed`.
 
 ## Containers and cluster
 
 | Image | Use |
 |-------|-----|
 | `mdscontrolplane:dev` | CP only (prod shape) |
-| `mdsbroker:dev` | broker only (prod shape) |
-| `mds-all:dev` | CP + broker, mem (**demo only**) |
+| `mdsbroker:dev` | Broker only (prod shape) |
+| `mds-all:dev` | CP + broker, mem (demo only) |
 
-From repo root (Podman): `make image-cp`, `make image-broker`, `make image-all`.
-Detail: `deploy/container/README.md`. Chart: `deploy/helm/mdscontrolplane`,
-`deploy/README.md`.
+From repo root with Podman, run `make image-cp`, `make image-broker`, or
+`make image-all`. See `deploy/container/README.md` for image detail,
+`deploy/helm/mdscontrolplane` for the chart, and `deploy/README.md` for the
+deploy layout.
 
 kind + helm sketch:
 
@@ -98,5 +102,5 @@ helm upgrade --install cp deploy/helm/mdscontrolplane \
   --kube-context kind-mds --wait --timeout 3m
 ```
 
-`deploy/container/broker-compose.yml` is only for IT backends (`ops/scripts/it-up.sh`),
-not a product deploy.
+`deploy/container/broker-compose.yml` starts DynamoDB-compatible and S3
+backends for integration tests. It is not a product deploy.

@@ -2,7 +2,7 @@
 // every Go function from cyclomatic complexity and a coverprofile, and fails
 // when a function is too risky. See docs/contribute/build.md.
 //
-// Standard library only (dependency-audit policy, decision I).
+// Standard library only. Dependency-audit policy.
 package main
 
 import (

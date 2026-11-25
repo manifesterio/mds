@@ -1,18 +1,60 @@
 # Dependency audit records
 
-Every third-party module that the deterministic packages (`internal/core/`, `internal/verify/simulator/`)
-depend on needs a reviewed record here, at exactly
-`docs/broker/dep-audits/<module path>@<version>.md`. `ops/broker/scripts/ci-determinism.sh` fails
-CI when one is missing, so a version bump forces a re-audit.
+Reference for third-party modules that the broker determinism gate may reach.
 
-Only modules that the deterministic packages really run are checked. The script does not
-follow imports into the generated gRPC API (`controlplane/api`), because that is
-the input/output edge. So grpc, protobuf, genproto and golang.org/x/{net,sys,text} need no
-record here. Deterministic packages may use the generated API for type definitions only
-(decision 57).
+## Gate
 
-How to produce one: run `ops/broker/scripts/audit-dep.sh <module>@<version>` and follow
-`.claude/skills/audit-go-dependency/SKILL.md`. Use the template below.
+`ops/broker/scripts/ci-determinism.sh` walks the import closure of:
+
+```
+./internal/core/...
+./internal/verify/simulator/...
+./internal/wire/segmentformat/...
+./internal/wire/kafkawire
+./internal/broker/...
+./spec
+./internal/verify/speccheck
+./internal/verify/speccheck/specbridge
+```
+
+For every third-party module in that closure, CI requires a file at exactly:
+
+```
+docs/broker/dep-audits/<module path>@<version>.md
+```
+
+The version string must match `broker/go.mod`. A version bump without a matching record fails CI.
+
+First-party modules under `github.com/manifesterio/mds/` need no record.
+
+## Edge cut
+
+The walk stops at the generated gRPC API package
+`github.com/manifesterio/mds/controlplane/api/controlplane/v1`. Imports only used
+through that edge (grpc, protobuf, genproto, `golang.org/x/{net,sys,text}`) need
+no broker record. Deterministic packages may import the API for type definitions.
+
+Allow-list: `ops/broker/determinism-allow.txt`.
+
+## Records in this directory
+
+| File | In `broker/go.mod` | In gate closure |
+|---|---|---|
+| `github.com/twmb/franz-go/pkg/kmsg@v1.14.0.md` | yes (`v1.14.0`) | yes |
+| `github.com/prometheus/client_golang@v1.20.5.md` | yes (`v1.20.5`) | no (edge) |
+| `github.com/cockroachdb/pebble@v1.1.5.md` | no | no |
+| `pebble-indirect-modules.md` | no | no |
+
+As of the current tree, the gate prints only
+`github.com/twmb/franz-go/pkg/kmsg@v1.14.0`.
+
+## New record
+
+```bash
+ops/broker/scripts/audit-dep.sh <module>@<version>
+```
+
+Follow `.claude/skills/audit-go-dependency/SKILL.md`. Template:
 
 ```markdown
 # <module>@<version>

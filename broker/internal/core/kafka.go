@@ -1,7 +1,7 @@
 package core
 
-// Kafka wire handling runs inside the deterministic path (decision A). The
-// implementations wrap franz-go's pure kmsg package; kgo is never used here.
+// Kafka wire handling runs inside the deterministic path. The implementations
+// wrap franz-go's pure kmsg package. kgo is never used here.
 
 // Request is satisfied by kmsg.Request.
 type Request interface {

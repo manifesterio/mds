@@ -13,7 +13,7 @@
 // commands. The events are made on every replica when the command is applied,
 // and are never stored.
 //
-// Idempotency window (decision 48): a K record is kept until Trim drops it,
+// Idempotency window. A K record is kept until Trim drops it,
 // that is for as long as the log keeps the command. A replay inside the window
 // gets the original ranges (rebuilt from the replayed request and the stored
 // bases) or ErrConflict when the request digest differs. After Trim the key is

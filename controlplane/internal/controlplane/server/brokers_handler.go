@@ -1,7 +1,7 @@
 package server
 
-// Broker membership: each broker sends BrokerHeartbeat to renew its lease, and
-// the active node answers with the live broker set (decision Q4, Q7b).
+// Broker membership. Each broker sends BrokerHeartbeat to renew its lease, and
+// the active node answers with the live broker set.
 //
 // Where the pieces live:
 //   - wire messages: api/v1 (BrokerInfo, BrokerHeartbeat*)

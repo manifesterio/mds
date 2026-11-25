@@ -71,11 +71,11 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, topicPartition core.Topi
 	return &partitionBatch{s: s, part: rp, topicPartition: topicPartition, data: one, records: int64(bt.NumRecords)}, errNone
 }
 
-// checkBatch validates one batch's header without decompressing it
-// (decision 45): magic 2, CRC32C over the possibly compressed bytes, a known
-// codec, no transaction or control flags, a record count that matches
-// lastOffsetDelta, and no producer id (decision 41). The payload stays opaque;
-// the broker only ever relies on the header count.
+// checkBatch validates one batch's header without decompressing it. It
+// requires magic 2, CRC32C over the possibly compressed bytes, a known codec,
+// no transaction or control flags, a record count that matches
+// lastOffsetDelta, and no producer id. The payload stays opaque. The broker
+// only ever relies on the header count.
 func (b *Broker) checkBatch(one []byte) (kafkawire.Batch, kafkaErrorCode) {
 	bt, err := b.parseProduceBatch(one)
 	if err != nil {
@@ -110,9 +110,9 @@ func (b *Broker) batchPolicy(bt kafkawire.Batch) kafkaErrorCode {
 	case bt.NumRecords <= 0 || bt.LastOffsetDelta != bt.NumRecords-1:
 		return errCorruptMessage
 	case bt.ProducerID >= 0:
-		// Idempotent producers are unsupported (decision 41): without the
-		// sequence checks a retry would duplicate records, so refuse rather
-		// than silently weaken the guarantee. INVALID_REQUEST is not retriable.
+		// Idempotent producers are unsupported. Without the sequence checks a
+		// retry would duplicate records, so refuse rather than silently weaken
+		// the guarantee. INVALID_REQUEST is not retriable.
 		b.env.Reachable(idempotentBatchRejected)
 		return errInvalidRequest
 	default:

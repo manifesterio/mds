@@ -81,8 +81,8 @@ type ObjectListDone struct {
 
 // ControlPlaneDone reports that a control-plane call finished. Resp is the in-process
 // response (nil unless Err == OK). The gRPC server turns it into the generated
-// API response messages (controlplane/server); typed *Response fields wait for the gRPC cutover so
-// runtime does not import grpc (decision 57).
+// API response messages (controlplane/server). Typed *Response fields wait for the gRPC cutover so
+// runtime does not import grpc.
 type ControlPlaneDone struct {
 	Req     machine.RequestID
 	Resp    ControlPlaneResponse

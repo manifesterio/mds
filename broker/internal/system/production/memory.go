@@ -9,9 +9,9 @@ import (
 // Machine memory detection, to size the broker's unacked-produce buffer. Not
 // deterministic (reads the host), so it lives here and not in broker/.
 
-// Buffer sizing (decision 35). The broker holds roughly 2-3 copies of buffered
-// record data (the request frame, the admitted batch, the encoded segment), so
-// real memory is a multiple of the cap: a 1/16 share keeps that near 1/5 of RAM.
+// The broker holds roughly 2-3 copies of buffered record data (the request
+// frame, the admitted batch, the encoded segment), so real memory is a multiple
+// of the cap. A 1/16 share keeps that near 1/5 of RAM.
 const (
 	MinBufferedBytes = 128 << 20
 	MaxBufferedCap   = 1 << 30

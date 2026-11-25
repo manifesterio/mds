@@ -8,8 +8,8 @@ import (
 )
 
 // OffsetCommit (key 8) and OffsetFetch (key 9). Offsets live in the control
-// plane, with the group (decision Q5). The broker checks nothing but the group
-// name. Each partition gets its own code.
+// plane with the group. The broker checks nothing but the group name. Each
+// partition gets its own code.
 
 // offsetCommit answers OffsetCommit. Version 0 has no generation or member, so
 // it is a manual commit (generation -1, no member), as is generation -1 at

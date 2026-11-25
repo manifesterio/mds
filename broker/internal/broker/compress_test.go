@@ -42,7 +42,7 @@ func sameButOffset(got, want []byte) bool {
 
 // Every codec, mixed with plain batches, is committed with offsets taken from
 // the header counts and served byte for byte with only the base offset (and
-// leader epoch) patched (decision 45).
+// leader epoch) patched.
 func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)

@@ -16,11 +16,11 @@ import (
 const timerExtraTime = 150 * machine.Millisecond
 
 // segmentCaps checks every sealed segment (the broker's segment_sealed fact)
-// against this seed's flush rule: at most MaxSegmentBatches batches and
-// MaxSegmentPartitions partitions with an implied commit cost (1 + partitions,
-// decisions 39, 41, 44) of at most the store's limit (none for the log store), the size rule applied exactly (the bytes
-// before the last batch stayed under MaxSegmentBytes, so a segment overshoots
-// the cap by at most its last batch), and an age of at most the window plus
+// against this seed's flush rule. At most MaxSegmentBatches batches and
+// MaxSegmentPartitions partitions. Implied commit cost is 1 + partitions, at
+// most the store's limit (none for the log store). The size rule applied exactly
+// (the bytes before the last batch stayed under MaxSegmentBytes, so a segment
+// overshoots the cap by at most its last batch). Age is at most the window plus
 // timerExtraTime. Every committed segment was sealed first.
 //
 // AtEnd repeats the partition and batch checks on the control plane's truth,
@@ -38,7 +38,7 @@ func newSegmentCaps(config broker.Config, items int, tps []core.TopicPartition, 
 }
 
 // fits reports whether a commit of parts partitions is within the store's item
-// limit (1 + parts, decisions 39, 41, 44); an unbounded store always fits.
+// limit (1 + parts). An unbounded store always fits.
 func (i *segmentCaps) fits(parts int64) bool { return i.items <= 0 || 1+parts <= int64(i.items) }
 
 func (*segmentCaps) Name() string { return "SegmentCaps" }

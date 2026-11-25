@@ -233,7 +233,6 @@ func TestFramerReassemblesSplitFrames(t *testing.T) {
 	}
 }
 
-// Brokers are stateless (decision 44): nothing fences or trips an echo broker.
 func TestNoTripsWithoutFencing(t *testing.T) {
 	for s := uint64(1); s <= 40; s++ {
 		res := Run(Config{Seed: s})

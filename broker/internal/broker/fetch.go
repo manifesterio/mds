@@ -13,11 +13,11 @@ import (
 // maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.
 const maxFetchWait = 30 * machine.Second
 
-// fetch serves each partition independently: FindSegments, then ranged GETs (one
-// per run of adjacent batches in a segment), verified and patched to each
-// batch's committed offset (decision 30).
-// A part that finds no data is parked and polled again (long poll, decision 29
-// and Q8): the Fetch answers once it has MinBytes, or when MaxWait ends.
+// fetch serves each partition independently. It runs FindSegments, then ranged
+// GETs (one per run of adjacent batches in a segment), verified and patched to
+// each batch's committed offset.
+// A part that finds no data is parked and polled again (long poll). The Fetch
+// answers once it has MinBytes, or when MaxWait ends.
 func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 	response := kmsg.NewPtrFetchResponse()
 	s.response = response
@@ -196,9 +196,9 @@ func readRef(rgs []contract.BatchRange) contract.SegmentRef {
 }
 
 // onFetchGet verifies one read from the object store. A read holds one or
-// more batches (see readRanges). A corrupt read is never returned: the whole
-// read is retried (the object itself is intact; S3 checksums cover whole
-// objects but not byte ranges, decision 27).
+// more batches (see readRanges). A corrupt read is never returned. The whole
+// read is retried. The object itself is intact. S3 checksums cover whole
+// objects but not byte ranges.
 func (b *Broker) onFetchGet(o *operation, e objectstore.GetDone) []core.Action {
 	rgs := o.readRanges()
 	if e.Err == core.ErrNotFound { // committed segments are never deleted

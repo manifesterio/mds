@@ -9,10 +9,10 @@ import (
 )
 
 // SegmentLog writes one structured log line per segment lifecycle event, built
-// from the broker's facts (decision 36) so the broker core stays free of
-// logging. The segment_sealed fact carries no segment key; the executor sees
-// the key on the first ObjectPut for it, right after the fact and in the same loop
-// goroutine, so IO pairs them and the sealed line can name the segment.
+// from the broker's facts so the broker core stays free of logging. The
+// segment_sealed fact carries no segment key. The executor sees the key on the
+// first ObjectPut for it, right after the fact and in the same loop goroutine,
+// so IO pairs them and the sealed line can name the segment.
 //
 // Events (field "event"): segment_sealed, segment_put_done, segment_committed,
 // segment_failed, backpressure_on, backpressure_off. Every segment line has

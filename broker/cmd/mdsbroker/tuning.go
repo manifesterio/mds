@@ -11,8 +11,6 @@ import (
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// tuning is the flag values that shape the segment flush rule and the produce
-// buffer (decision 35).
 type tuning struct {
 	segmentBytes   string
 	window         time.Duration

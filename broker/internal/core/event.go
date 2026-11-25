@@ -53,7 +53,7 @@ type ConnOpened struct {
 }
 
 // BytesReceived is a chunk of a TCP byte stream. Chunks may be arbitrarily
-// short: framing is the core's job (decision A).
+// short. Framing is the core's job.
 type BytesReceived struct {
 	Conn ConnID
 	Data []byte
@@ -100,8 +100,8 @@ type ObjectDone struct{ Result objectstore.Result }
 
 // ControlPlaneDone reports that a control-plane call finished. Resp is the in-process
 // response (nil unless Err == OK). Generated API response messages map through
-// controlplane/wireboundary; typed *Response fields wait for the gRPC cutover so
-// core does not import grpc (decision 57).
+// controlplane/wireboundary. Typed *Response fields wait for the gRPC cutover so
+// core does not import grpc.
 type ControlPlaneDone struct {
 	Req     machine.RequestID
 	Resp    contract.Response

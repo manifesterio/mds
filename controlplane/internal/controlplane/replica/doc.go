@@ -1,12 +1,11 @@
-// Package replica is one control-plane node's copy of the replicated log (decision 55).
-// It was called statemachine before. It keeps the node in step with the log:
-// leader or standby, catch-up, checkpoint and restore. Each log entry is applied
-// to the metadb.
+// Package replica is one control-plane node's copy of the replicated log.
+// It keeps the node in step with the log. Roles are leader or standby. It does
+// catch-up, checkpoint, and restore. Each log entry is applied to the metadb.
 //
 // It is a machine of the dst v2 contract (machine.Machine with runtime.EventData as input and
 // runtime.Action as output), so one Step runs under the simulator and under the production
-// loop. This package is an extractable unit under
-// controlplane/ autonomy (decision 56): it may import github.com/manifesterio/mds/controlplane/internal/runtime and
+// loop. This package is an extractable unit under controlplane/ autonomy.
+// It may import github.com/manifesterio/mds/controlplane/internal/runtime and
 // other controlplane packages, but not broker, simulator, system, cmd, spec, kafkawire,
 // format, net/http, Pebble, or the Dynamo SDK.
 //

@@ -12,10 +12,10 @@ import (
 )
 
 // Metrics turns the broker's timing facts into Prometheus collectors. The
-// broker core knows nothing of Prometheus (decision 36): it emits facts whose
-// durations come from event times, and this observer, at the non-deterministic
-// edge, counts them. Pass Observe as NodeConfig.Facts (or call it from a
-// wrapper) and serve Handler.
+// broker core knows nothing of Prometheus. It emits facts whose durations come
+// from event times, and this observer, at the non-deterministic edge, counts
+// them. Pass Observe as NodeConfig.Facts (or call it from a wrapper) and serve
+// Handler.
 //
 // Observe is called from the broker's single loop goroutine; the collectors are
 // safe to scrape concurrently.
