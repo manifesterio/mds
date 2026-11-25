@@ -159,12 +159,12 @@ type LocalRead struct {
 }
 
 // ControlPlaneDone is the answer to a control-plane operation. Resp is the
-// in-process response (nil unless Err == OK). Req is the log slot the
+// in-process response (nil unless Err == OK). Slot is the log slot the
 // operation was applied at, when metadb reports it.
 //
 //dst:payload
 type ControlPlaneDone struct {
-	Req     uint64
+	Slot    LogPosition
 	Resp    ControlPlaneResponse
 	Err     ErrCode
 	Outcome Outcome

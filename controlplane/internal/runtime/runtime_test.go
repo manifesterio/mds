@@ -51,7 +51,7 @@ func TestRequestsAnswerTypes(t *testing.T) {
 }
 
 func TestControlPlaneDoneAnswer(t *testing.T) {
-	d := ControlPlaneDone{Req: 9, Err: ErrUnavailable, Outcome: NotApplied, Resp: contract.ListGroupsResp{}}
+	d := ControlPlaneDone{Slot: 9, Err: ErrUnavailable, Outcome: NotApplied, Resp: contract.ListGroupsResp{}}
 	got := d.Answer()
 	if got.Err != ErrUnavailable || got.Outcome != NotApplied {
 		t.Fatalf("%+v", got)

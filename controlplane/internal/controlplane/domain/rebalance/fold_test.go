@@ -11,7 +11,7 @@ import (
 
 // inputSamples has one value of every Input case, with every field set.
 func inputSamples() []Input {
-	done := runtime.ControlPlaneDone{Req: 1, Err: runtime.ErrIO}
+	done := runtime.ControlPlaneDone{Slot: 1, Err: runtime.ErrIO}
 	return []Input{
 		Join{ReplyTo: rt(1), Group: "g", MemberID: "m", GroupInstanceID: "i", ClientID: "c", ClientHost: "h",
 			SessionTimeoutMs: 2, RebalanceTimeoutMs: 3, ProtocolType: "consumer", Protocols: []Protocol{{Name: "range", Metadata: []byte("x")}}},

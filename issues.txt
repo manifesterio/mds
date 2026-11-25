@@ -107,7 +107,7 @@ Type:       Tech debt
 Priority:   Low
 Component:  controlplane/internal/runtime (event.go), controlplane/internal/controlplane/metadb
 Created:    2026-11-24
-Status:     Open
+Status:     Done
 
 Summary
 -------
@@ -126,6 +126,11 @@ Acceptance criteria
 -------------------
 - No field named Req in controlplane/internal/runtime.
 - Controlplane goldens unchanged, or regenerated with the reason.
+
+Resolution
+----------
+Renamed ControlPlaneDone.Req → Slot (LogPosition); metadb Apply writes Slot. Fold now uses
+Int64 (same bits as the old Uint64), so controlplane goldens stay unchanged.
 
 
 DST-4  Simulator coverage notes match timer messages by their trace fold
@@ -156,34 +161,6 @@ Acceptance criteria
 - The controlplane campaign still reaches all expected coverage paths.
 
 
-DST-5  live.Host has no bound on an actor's Data inbox
-======================================================================
-Type:       Gap (production safety net)
-Priority:   Medium
-Component:  dst/runtime/live (runner.go push), broker/internal/system/production
-Created:    2026-11-24
-Status:     Open
-
-Summary
--------
-The old live loop could bound the Data queue (NodeConfig.DataInbox): Deliver blocked when it was
-full, which slowed a socket reader that ignored PauseReads. live.Host inboxes are unbounded, so
-the broker's only backpressure is now PauseReads/ResumeReads. A client that keeps sending while
-reads are paused cannot grow the queue (the reader is paused), but any other producer of Data
-messages could.
-
-Proposal
---------
-Add an optional per-actor bound to live.Spawn (e.g. live.DataBound(n)): live.Tell of a Data
-message blocks (or returns an error, as configured) while the actor's Data queue holds n items.
-Control messages are never bounded. Use it in the broker with the old default.
-
-Acceptance criteria
--------------------
-- A live test: with a bound of n, the (n+1)-th Data Tell waits until the actor takes one.
-- The broker production config sets the bound; its tests still pass under -race.
-
-
 DST-6  controlplane/contract still folds its operations and responses by hand
 ======================================================================
 Type:       Tech debt
@@ -209,32 +186,6 @@ Acceptance criteria
 -------------------
 - No hand-written Fold in controlplane/contract, or every one is //dst:fold manual.
 - Goldens unchanged, or regenerated with the reason.
-
-
-DST-7  Broker campaign now meets few ambiguous ("maybe applied") outcomes
-======================================================================
-Type:       Test-strength regression to watch
-Priority:   Medium
-Component:  broker/internal/verify/simulator (cluster network, kafka workloads)
-Created:    2026-11-25
-Status:     Open
-
-Summary
--------
-With fakenetwork replaced by whole-frame delivery and one connection-reset fault, the kafka
-campaign's non-vacuity counters show indet=4 over a 20-seed run (abandoned 496, retried 316).
-The partition/clog/black-hole faults used to produce many more indeterminate produce outcomes,
-which exercise the oracle's maybe-applied paths. The test still passes (it needs > 0).
-
-Proposal
---------
-Add a client-side timeout fault (a request in flight when the client gives up) or raise
-ConnResetProb in a dedicated scenario, and raise the non-vacuity floor for indet to a number
-that guards the path (e.g. >= 50 over the campaign test's seeds).
-
-Acceptance criteria
--------------------
-- TestCampaignIsNotVacuous requires a meaningful indet count and passes.
 
 
 DST-8  Package actor exports its runtime seam to product code

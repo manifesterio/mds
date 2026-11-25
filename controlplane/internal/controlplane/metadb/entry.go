@@ -126,14 +126,14 @@ func NewMem() *DB { return New(memory.New()) }
 // A store failure panics (fail-stop).
 func (a *DB) Apply(slot int64, e Entry) runtime.ControlPlaneDone {
 	if e.Kind == KindNoop {
-		return runtime.ControlPlaneDone{Req: uint64(slot), Outcome: runtime.Applied}
+		return runtime.ControlPlaneDone{Slot: runtime.LogPosition(slot), Outcome: runtime.Applied}
 	}
 	if e.Op == nil {
-		return runtime.ControlPlaneDone{Req: uint64(slot), Err: runtime.ErrInvalid}
+		return runtime.ControlPlaneDone{Slot: runtime.LogPosition(slot), Err: runtime.ErrInvalid}
 	}
 	d, err := a.Write(slot, e.Op)
 	mustStore(err)
-	d.Req = uint64(slot)
+	d.Slot = runtime.LogPosition(slot)
 	return d
 }
 
