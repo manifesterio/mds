@@ -189,8 +189,17 @@ than re-owning it: `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv`;
 `sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`, `EveryWhile`,
 `Timeline.PhaseStart`, `FaultCoverageRule`, `DrawBetween` / `MaybeAdd`;
 `campaign.RegisterSim` / `FromSim`; `faulty.NamedAsserts` / `ShapeOf`;
-`trace.StateHasher`. Domain schedules, fault rates, and message vocabularies stay
+`trace.StateHasher`; `core/actor/actortest`; `verify/check.Verdict`;
+`verify/history`. Domain schedules, fault rates, and message vocabularies stay
 in the product. Sched merge into sim remains deferred (sim keeps its own queue).
+
+Controlplane replica IO (shared MemoryLog/MemoryObjects, per-node storage cut,
+host-owned timeout/lost coins) stays on a product `WithExecutor`, not on
+`AddService`+`faulty.Service`. Broker fakeservices Forward cleanly because
+outside RPCs are caller-blind and partitions sit on the socket table; CP
+leader-fencing needs Issuer-scoped cut and timeout-never-applied semantics that
+`faulty` does not provide. Do not treat AddService as the required home for
+shared storage fakes.
 
 ## Stay out
 
