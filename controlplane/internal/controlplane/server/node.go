@@ -109,7 +109,7 @@ func (n *Node) envFor(self actor.Incarnation) actor.Env {
 		return n.config.Env
 	}
 	if self.Name == replicaName {
-		return &productionEnvironment{self: self}
+		return live.NewCounterEnv(self)
 	}
 	return live.NewEnv(self, nil)
 }
