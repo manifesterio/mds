@@ -5,14 +5,16 @@
 
 .PHONY: build test fmt-check vet lint modernize-check modernize ascii-check determinism generate gen-check
 
-build: fmt-check ascii-check gen-check vet lint modernize-check test determinism
+build: generate fmt-check ascii-check gen-check vet lint modernize-check test determinism
 
 test:
 	go test -race ./...
 
 # Regenerate sum-type markers, tags, folds and state hashes (dst/cmd/dstgen).
+# testdata/fresh is outside go generate ./... (testdata is skipped); generate it explicitly.
 generate:
 	go generate ./...
+	go run ./cmd/dstgen ./cmd/dstgen/testdata/fresh
 
 # Generated files and dst.tags must match the annotations, and dst.tags must not have
 # lost or renumbered a line since DSTGEN_BASE.

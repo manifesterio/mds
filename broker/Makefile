@@ -46,7 +46,7 @@ DSTGEN_BASE ?= mainline
 gen-check:
 	go run github.com/manifesterio/mds/dst/cmd/dstgen -check -base $(DSTGEN_BASE) ./...
 
-build: fmt-check ascii-check gen-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
+build: generate fmt-check ascii-check gen-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
 
 compile:
 	go build ./...
