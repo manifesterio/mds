@@ -77,11 +77,7 @@ func newStorage(s *sim) *storage {
 }
 
 func (st *storage) netDelay(r *rng.Rand) actor.Duration {
-	d := actor.Duration(r.Between(int64(netMin), int64(netMax)))
-	if r.Chance(st.s.faults.Slow) {
-		d += actor.Duration(r.Between(int64(slowMin), int64(slowMax)))
-	}
-	return d
+	return dstsim.DrawBetween(r, netMin, netMax) + dstsim.MaybeAdd(r, st.s.faults.Slow, slowMin, slowMax)
 }
 
 // ioKind returns whether call may change data, then whether it goes to the

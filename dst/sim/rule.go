@@ -1,6 +1,9 @@
 package sim
 
-import "github.com/manifesterio/mds/dst/core/actor"
+import (
+	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/core/assert"
+)
 
 // Rule checks one property of a run. Make a fresh Rule for every run, so it
 // needs no Reset. A rule reports a broken property through View.Assert.
@@ -29,3 +32,31 @@ func (v view) Now() Time                { return v.sys.q.now }
 func (v view) Phase() Phase             { return v.sys.phase }
 func (v view) Timeline() *Timeline      { return v.sys.tl }
 func (v view) Assert() actor.Assertions { return env{sys: v.sys} }
+
+// PhaseStart reports when the System announced phase p, from its sim_phase fact.
+func PhaseStart(v View, p Phase) (Time, bool) {
+	return v.Timeline().PhaseStart(p)
+}
+
+// FaultCoverage names the Sometimes handles that FaultCoverageRule records.
+type FaultCoverage struct {
+	HardCrash    assert.Sometimes
+	GracefulStop assert.Sometimes
+}
+
+// FaultCoverageRule reports a hard crash (sim_crashed cause=attrition) and a
+// graceful stop (sim_exited) from System facts.
+func FaultCoverageRule(names FaultCoverage) Rule {
+	return &faultCoverage{names: names}
+}
+
+type faultCoverage struct{ names FaultCoverage }
+
+func (*faultCoverage) Name() string { return "FaultCoverage" }
+func (*faultCoverage) Observe(View) {}
+
+func (f *faultCoverage) AtEnd(v View) {
+	tl := v.Timeline()
+	v.Assert().Sometimes(tl.HasCrashCause("attrition"), f.names.HardCrash)
+	v.Assert().Sometimes(tl.HasExited(), f.names.GracefulStop)
+}

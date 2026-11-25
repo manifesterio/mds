@@ -84,7 +84,8 @@ func (s *sim) quietPhase() {
 	start := s.now()
 	s.runUntil(func() bool {
 		waited := actor.Duration(s.now() - start)
-		return waited >= maxQuiet || (waited >= minQuiet && !s.clients.busy() && s.converged() && s.groupsSettled())
+		ready := !s.clients.busy() && s.converged() && s.groupsSettled()
+		return dstsim.QuietElapsed(waited, minQuiet, maxQuiet, ready)
 	})
 	s.stats.QuietMs = (s.now() - start) / int64(actor.Millisecond)
 	s.verdict(s.converged(), liveReplicasConverge, "after %dms of quiet the replicas did not reach the end of the log together: %s", s.stats.QuietMs, s.describeNodes())
@@ -141,7 +142,8 @@ func (s *sim) finalPhase() {
 		}
 		start := s.now()
 		s.runUntil(func() bool {
-			return actor.Duration(s.now()-start) >= maxQuiet || (!s.groupsWriting() && s.converged())
+			waited := actor.Duration(s.now() - start)
+			return dstsim.QuietElapsed(waited, 0, maxQuiet, !s.groupsWriting() && s.converged())
 		})
 	}
 	s.clients.startFinal()

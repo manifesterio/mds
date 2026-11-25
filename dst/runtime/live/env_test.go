@@ -141,7 +141,7 @@ func TestNewCounterEnvSequence(t *testing.T) {
 	if e.Uint64() != 1 || e.Uint64() != 2 || e.Uint64() != 3 {
 		t.Fatal("Uint64 must count 1, 2, 3, ...")
 	}
-	// next draw is 4; Intn(3) → 4%3 = 1
+	// next draw is 4; Intn(3) -> 4%3 = 1
 	if e.Intn(3) != 1 {
 		t.Fatal("Intn must use the counter")
 	}
@@ -151,7 +151,7 @@ func TestNewCounterEnvSequence(t *testing.T) {
 	if e.Between(5, 5) != 5 || e.Between(9, 3) != 9 {
 		t.Fatal("Between with hi <= lo must give lo")
 	}
-	// fresh env: Between(10,12) → lo + Intn(3); first draw 1 → 1%3 = 1 → 11
+	// fresh env: Between(10,12) -> lo + Intn(3); first draw 1 -> 1%3 = 1 -> 11
 	e2 := live.NewCounterEnv(actor.Incarnation{})
 	if v := e2.Between(10, 12); v != 11 {
 		t.Fatalf("Between(10, 12) = %d, want 11", v)
@@ -167,7 +167,7 @@ func TestNewCounterEnvChance(t *testing.T) {
 	if e.Chance(0) || e.Chance(-1) {
 		t.Fatal("Chance(p <= 0) must be false")
 	}
-	// draws 1: 1%1000=1 < 1000 → true for p=1
+	// draws 1: 1%1000=1 < 1000 -> true for p=1
 	if !e.Chance(1) {
 		t.Fatal("Chance(1) must be true")
 	}

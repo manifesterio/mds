@@ -71,56 +71,13 @@ func New() Preset {
 // ProgressGraceTime is the Heal offset used by the liveness rules.
 const ProgressGraceTime = 6 * actor.Second
 
-// PhaseStart reports when the System announced phase p, from its sim_phase fact.
-func PhaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
-	for _, tf := range v.Timeline().Snapshot("sim_phase") {
-		if ph, ok := tf.Fact.Field("phase").(actor.Uint64Value); ok && sim.Phase(ph) == p {
-			return tf.At, true
-		}
-	}
-	return 0, false
-}
-
-// FaultCoverage names the two assertions that FaultCoverageCheck records for one
-// scenario.
-type FaultCoverage struct {
-	HardCrash    assert.Sometimes
-	GracefulStop assert.Sometimes
-}
-
 // The fault coverage assertions of the scenario.
 var (
-	KafkaFaultCoverage = FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
+	KafkaFaultCoverage = sim.FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
 		HardCrash:    assert.NewSometimes("kafka: fault fired: hard crash"),
 		GracefulStop: assert.NewSometimes("kafka: fault fired: graceful stop"),
 	}
 )
-
-// FaultCoverageCheck reports a hard crash and a graceful stop from System facts.
-func FaultCoverageCheck(names FaultCoverage) sim.Rule {
-	return &faultCoverage{names: names}
-}
-
-type faultCoverage struct{ names FaultCoverage }
-
-func (*faultCoverage) Name() string     { return "FaultCoverage" }
-func (*faultCoverage) Observe(sim.View) {}
-
-func (f *faultCoverage) AtEnd(v sim.View) {
-	has := func(name, key, val string) bool {
-		for _, tf := range v.Timeline().Snapshot(name) {
-			if key == "" {
-				return true
-			}
-			if s, ok := tf.Fact.Field(key).(actor.StringValue); ok && string(s) == val {
-				return true
-			}
-		}
-		return false
-	}
-	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), f.names.HardCrash)
-	v.Assert().Sometimes(has("sim_exited", "", ""), f.names.GracefulStop)
-}
 
 // Swarm draws the shared fault knobs from r.
 func Swarm(r *rng.Rand, s *cluster.Settings) {

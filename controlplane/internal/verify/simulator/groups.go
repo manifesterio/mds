@@ -223,14 +223,17 @@ func (h *groupHost) fetch(t *callTry, within actor.Duration) {
 		return
 	}
 	s, n := h.s, h.n
-	dstsim.Ask(s.w, n.ref, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+	var prefix runtime.LogPosition
+	dstsim.AskDelayed(s.w, n.ref, 0, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
 		return runtime.LocalRead{ReplyTo: to, Op: t.op.fetch}
-	}, within, func(d runtime.ControlPlaneDone, ok bool) {
+	}, within, func(d runtime.ControlPlaneDone) actor.Duration {
+		prefix = n.m.Applied()
+		return s.store.netDelay(s.rand)
+	}, func(d runtime.ControlPlaneDone, ok bool) {
 		if !ok {
 			return
 		}
-		prefix := n.m.Applied()
-		s.after(s.store.netDelay(s.rand), func() { t.c.fetched(t, d, prefix) })
+		t.c.fetched(t, d, prefix)
 	})
 }
 

@@ -249,12 +249,11 @@ func (n *network) close(c *connection, s int, abort bool) {
 // reset aborts c from the network: both ends get ConnClosed{Abort: true}.
 func (n *network) reset(c *connection) {
 	n.remove(c)
-	n.sys.Fact(actor.Fact{Name: "sim_fault", Fields: []actor.Field{
-		{Key: "kind", Value: actor.StringValue("conn_reset")},
-		{Key: "service", Value: actor.StringValue("network")},
-		{Key: "a", Value: actor.StringValue(c.end[0].ep.name)},
-		{Key: "b", Value: actor.StringValue(c.end[1].ep.name)},
-	}})
+	n.sys.RecordFault("conn_reset",
+		actor.Field{Key: "service", Value: actor.StringValue("network")},
+		actor.Field{Key: "a", Value: actor.StringValue(c.end[0].ep.name)},
+		actor.Field{Key: "b", Value: actor.StringValue(c.end[1].ep.name)},
+	)
 	n.sys.Env().Reachable(connResetInjected)
 	for s := range 2 {
 		c.drop(s)

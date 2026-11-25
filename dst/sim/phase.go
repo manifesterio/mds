@@ -51,13 +51,23 @@ func (b phaseBody) Fold(h *trace.Hash) {
 
 // SchedulePhases queues the two phase changes on HostLane (PhaseHeal after
 // Faults, PhaseDrain after Faults+Heal) and sets Config.End to
-// Faults+Heal+Drain.
+// Faults+Heal+Drain. Prefer this when the product uses the three-phase
+// fault/heal/drain schedule with Config.End. Products that drive quiet and
+// final tails themselves (custom heal, convergence waits) should call
+// SetPhase and QuietElapsed instead.
 func SchedulePhases(sys *System, p Phases) {
 	at := Time(p.Faults)
 	sys.queuePhase(at, PhaseHeal)
 	at += Time(p.Heal)
 	sys.queuePhase(at, PhaseDrain)
 	sys.cfg.End = Time(p.Faults + p.Heal + p.Drain)
+}
+
+// QuietElapsed reports that a quiet wait should end: max reached, or min
+// reached while ready. Use with RunUntil for a product quiet/convergence tail
+// that does not use SchedulePhases.
+func QuietElapsed(waited, min, max actor.Duration, ready bool) bool {
+	return waited >= max || (waited >= min && ready)
 }
 
 func (sys *System) queuePhase(at Time, to Phase) {

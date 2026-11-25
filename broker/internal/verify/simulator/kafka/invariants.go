@@ -13,7 +13,7 @@ func (*progressCheck) Name() string     { return "Liveness" }
 func (*progressCheck) Observe(sim.View) {}
 
 func (p *progressCheck) AtEnd(v sim.View) {
-	heal, ok := preset.PhaseStart(v, sim.PhaseHeal)
+	heal, ok := sim.PhaseStart(v, sim.PhaseHeal)
 	v.Assert().Always(ok, kernelAnnouncedHeal)
 	after := heal + sim.Time(preset.ProgressGraceTime)
 	var produced, reads int

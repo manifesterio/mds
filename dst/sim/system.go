@@ -259,6 +259,27 @@ func (sys *System) Note(text string) { sys.logMsg(text, nil) }
 // Fact appends a host fact (source zero) to the timeline.
 func (sys *System) Fact(f actor.Fact) { sys.appendFact(actor.Incarnation{}, f) }
 
+// RecordFault records an injected host-side fault: a "sim_fault" fact with
+// kind, then the extra fields (service name is optional; pass a "service"
+// field when the fault has one). ServiceCtx.RecordFault adds the service name.
+func (sys *System) RecordFault(kind string, fields ...actor.Field) {
+	sys.counters[countFaults]++
+	all := append([]actor.Field{
+		{Key: "kind", Value: actor.StringValue(kind)},
+	}, fields...)
+	sys.systemFact(factFault, all...)
+}
+
+// Bootstrap makes a System for cfg, calls Start, and returns the host Env and
+// Rand. Use it when host code needs Env/Rand immediately and will Spawn after
+// Start (Start only boots actors already spawned). Prefer NewSystem alone when
+// Spawn/AddService must run before Start.
+func Bootstrap(cfg Config) (*System, actor.Env, *rng.Rand) {
+	sys := NewSystem(cfg)
+	sys.Start()
+	return sys, sys.Env(), sys.Rand()
+}
+
 // Cancel retires a pending queue entry. An entry that already ran, or an
 // unknown id, is ignored.
 func (sys *System) Cancel(id EntryID) { sys.q.cancel(id) }
@@ -300,6 +321,21 @@ func (sys *System) At(t Time, lane Lane, fn func()) EntryID {
 // After runs fn as a host task after d, with no lane.
 func (sys *System) After(d actor.Duration, fn func()) EntryID {
 	return sys.At(sys.q.now+Time(max(d, 0)), NoLane, fn)
+}
+
+// QuiesceEvery schedules a repeating host task every d that appends a
+// "sim_quiesce" fact with field quiescent from pred. The first fact is after
+// d; zero or negative d does nothing.
+func (sys *System) QuiesceEvery(d actor.Duration, pred func() bool) {
+	if d <= 0 {
+		return
+	}
+	var tick func()
+	tick = func() {
+		sys.systemFact(factQuiesce, actor.Field{Key: "quiescent", Value: actor.Bool(pred())})
+		sys.After(d, tick)
+	}
+	sys.After(d, tick)
 }
 
 // Start boots every spawned actor: first the actors that are not workloads,

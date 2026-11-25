@@ -90,7 +90,7 @@ func Run(cfg Config) sim.Result {
 	}
 	w.AddRule(newOracle(opts, h, c.Objects, c.ControlPlane))
 	w.AddRule(&progressCheck{hist: h})
-	w.AddRule(preset.FaultCoverageCheck(preset.KafkaFaultCoverage))
+	w.AddRule(sim.FaultCoverageRule(preset.KafkaFaultCoverage))
 	w.AddRule(newSegmentCaps(set.Broker, set.ControlPlane.MaxCommitItems, opts.topicPartitions(), c.ControlPlane))
 	w.AddRule(&segmentTiming{})
 	if cfg.ExtraRules != nil {

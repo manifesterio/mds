@@ -2,6 +2,7 @@ package campaign
 
 import (
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/manifesterio/mds/dst/sim"
@@ -35,9 +36,7 @@ func FromSim(r sim.Result, reproduce string, extras ...map[string]uint64) Result
 		Log:      simLogLines(r.Log),
 	}
 	for _, extra := range extras {
-		for k, v := range extra {
-			out.Counters[k] = v
-		}
+		maps.Copy(out.Counters, extra)
 	}
 	for name, c := range r.Coverage {
 		out.Coverage[name] = Coverage{Kind: string(c.Kind), Checks: c.Checks, Passes: c.Passes}

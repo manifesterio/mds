@@ -113,14 +113,12 @@ func newSim(cfg Config) (*sim, error) {
 		applied: make([]runtime.LogPosition, cfg.Nodes), fresh: make([]bool, cfg.Nodes),
 		byName: map[string]*simNode{},
 	}
-	s.w = dstsim.NewSystem(dstsim.Config{
+	// Bootstrap calls Start before nodes are spawned: Start boots actors it
+	// finds, and here every node boots later at a random time (run.go boot).
+	s.w, s.env, s.rand = dstsim.Bootstrap(dstsim.Config{
 		Seed: cfg.Seed, WallStart: actor.Wall(wallStart), MaxSteps: maxSteps + 1,
 		Log: cfg.Log, Tail: traceRing, HaltOnFirst: cfg.HaltOnFirst, VerifyHashes: cfg.verifyHashes,
 	})
-	s.env, s.rand = s.w.Env(), s.w.Rand()
-	// Start before the nodes are spawned: Start boots the nodes it finds, and
-	// here every node boots at a random time (run.go boot).
-	s.w.Start()
 	s.store = newStorage(s)
 	s.oracle = newOracle(s)
 	s.clients = newClientPool(s, 3)

@@ -134,20 +134,19 @@ func (c *client) attempt() {
 	s, node := p.s, p.s.nodes[op.node]
 	current := func() bool { return c.cur == op && op.attempts == try }
 	there := s.store.netDelay(s.rand)
-	s.after(there, func() {
-		dstsim.Ask(s.w, node.ref, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
-			return runtime.ControlPlaneDeliver{ReplyTo: to, Op: op.op}
-		}, clientTimeout-there, func(d runtime.ControlPlaneDone, ok bool) {
-			if !ok {
-				return // the timeout below answers the client
-			}
-			prefix := node.m.Applied()
-			s.after(s.store.netDelay(s.rand), func() {
-				if current() {
-					c.answered(d, prefix)
-				}
-			})
-		})
+	var prefix runtime.LogPosition
+	dstsim.AskDelayed(s.w, node.ref, there, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+		return runtime.ControlPlaneDeliver{ReplyTo: to, Op: op.op}
+	}, clientTimeout-there, func(d runtime.ControlPlaneDone) actor.Duration {
+		prefix = node.m.Applied()
+		return s.store.netDelay(s.rand)
+	}, func(d runtime.ControlPlaneDone, ok bool) {
+		if !ok {
+			return // the timeout below answers the client
+		}
+		if current() {
+			c.answered(d, prefix)
+		}
 	})
 	s.after(clientTimeout, func() {
 		if current() {

@@ -211,10 +211,8 @@ func (c *ServiceCtx) Later(d actor.Duration, fn func(ctx *ServiceCtx)) {
 // and the service name, then the extra fields. (Fault, from the embedded
 // Faults, is the buggify coin.)
 func (c *ServiceCtx) RecordFault(kind string, fields ...actor.Field) {
-	c.sys.counters[countFaults]++
 	all := append([]actor.Field{
-		{Key: "kind", Value: actor.StringValue(kind)},
 		{Key: "service", Value: actor.StringValue(c.b.name)},
 	}, fields...)
-	c.sys.systemFact("sim_fault", all...)
+	c.sys.RecordFault(kind, all...)
 }

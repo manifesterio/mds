@@ -172,25 +172,17 @@ func AddClient[In actor.Payload](c *Cluster, s ClientSpec[In]) actor.EntityRef[I
 	return ref
 }
 
-// quiesce appends a "sim_quiesce" fact that says whether no client has an
-// operation in flight, then queues the next one.
-func (c *Cluster) quiesce() {
-	q := true
-	for _, s := range c.clients {
-		if s.live != nil && !s.live.Quiescent() {
-			q = false
-		}
-	}
-	c.System.Fact(actor.Fact{Name: "sim_quiesce", Fields: []actor.Field{{Key: "quiescent", Value: actor.Bool(q)}}})
-	c.System.After(c.plan.QuiesceEvery, c.quiesce)
-}
-
 // Run schedules the phases and the quiesce points, boots the actors, runs the
 // System to the end and returns the result.
 func (c *Cluster) Run() sim.Result {
 	sim.SchedulePhases(c.System, c.plan.Phases)
-	if c.plan.QuiesceEvery > 0 {
-		c.System.After(c.plan.QuiesceEvery, c.quiesce)
-	}
+	c.System.QuiesceEvery(c.plan.QuiesceEvery, func() bool {
+		for _, s := range c.clients {
+			if s.live != nil && !s.live.Quiescent() {
+				return false
+			}
+		}
+		return true
+	})
 	return c.System.Run()
 }

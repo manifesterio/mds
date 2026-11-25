@@ -108,6 +108,45 @@ func Ask[Req, Rep actor.Payload](sys *System, to actor.EntityRef[Req], makeReq f
 	sys.tell("host", to.EntityID(), 0, req)
 }
 
+// AskDelayed asks to after delayBefore (Ask runs at once when delayBefore <= 0).
+// within is Ask's timeout measured from the Ask. On a timely answer, backhaul
+// runs at Reply time (capture product state there) and returns the delay
+// before done(answer, true); a non-positive delay calls done at once. On Ask
+// timeout, done(zero, false) runs with no backhaul. Leave product-level
+// parallel timeouts to the caller.
+func AskDelayed[Req, Rep actor.Payload](
+	sys *System,
+	to actor.EntityRef[Req],
+	delayBefore actor.Duration,
+	makeReq func(actor.ReplyTo[Rep]) Req,
+	within actor.Duration,
+	backhaul func(answer Rep) actor.Duration,
+	done func(answer Rep, ok bool),
+) {
+	start := func() {
+		Ask(sys, to, makeReq, within, func(rep Rep, ok bool) {
+			if !ok {
+				done(rep, false)
+				return
+			}
+			d := actor.Duration(0)
+			if backhaul != nil {
+				d = backhaul(rep)
+			}
+			if d <= 0 {
+				done(rep, true)
+				return
+			}
+			sys.After(d, func() { done(rep, true) })
+		})
+	}
+	if delayBefore <= 0 {
+		start()
+		return
+	}
+	sys.After(delayBefore, start)
+}
+
 // replyOutside answers a sim.Ask: done runs at once, while the Reply is
 // applied, so it sees the replying actor as the Reply left it.
 func (sys *System) replyOutside(r actor.ReplyID, answer actor.Payload) {

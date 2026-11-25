@@ -25,6 +25,18 @@ func (p CostParams) Sample(r *rng.Rand) actor.Duration {
 }
 
 // FastWithRareSlow is a delay that is mostly fast, with a rare slow tail.
+// Sample picks either the fast range or the slow range (replacement), not a
+// base delay plus an add-on.
+//
+// Latency patterns in sim hosts:
+//
+//   - Service / CostParams: use FastWithRareSlow (and CostParams.Pause) so a
+//     rare draw replaces the fast range. Broker presets and faulty.Faults use
+//     this on AddService paths.
+//   - Host After / AskDelayed RTT: draw a base delay with Rand.Between, then
+//     optionally add a slow extra under a fault coin (base + add-on). Controlplane
+//     netDelay uses that shape; do not force it onto FastWithRareSlow without
+//     changing hashes.
 type FastWithRareSlow struct {
 	FastMin, FastMax actor.Duration
 	SlowMin, SlowMax actor.Duration
@@ -39,5 +51,21 @@ func (t FastWithRareSlow) Sample(r *rng.Rand) actor.Duration {
 	if r.Chance(t.SlowProb) {
 		lo, hi = t.SlowMin, t.SlowMax
 	}
+	return DrawBetween(r, lo, hi)
+}
+
+// DrawBetween returns a duration in [lo, hi], both ends included. Max <= Min
+// gives Min and draws nothing. Shared by host RTT draws that are not
+// FastWithRareSlow.
+func DrawBetween(r *rng.Rand, lo, hi actor.Duration) actor.Duration {
 	return actor.Duration(r.Between(int64(lo), int64(hi)))
+}
+
+// MaybeAdd returns extra in [lo, hi] with probability p, else 0. Use with
+// DrawBetween for the host "fast base + rare slow add-on" pattern.
+func MaybeAdd(r *rng.Rand, p float64, lo, hi actor.Duration) actor.Duration {
+	if !r.Chance(p) {
+		return 0
+	}
+	return DrawBetween(r, lo, hi)
 }

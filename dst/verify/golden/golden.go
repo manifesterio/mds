@@ -3,6 +3,7 @@ package golden
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -132,7 +133,7 @@ func ParseRecord(line string) (Record, error) {
 	line = strings.TrimSpace(line)
 	scenario, rest, ok := strings.Cut(line, " ")
 	if !ok || scenario == "" {
-		return Record{}, fmt.Errorf("want \"<scenario> seed=… steps=… rand=… hash=…\"")
+		return Record{}, errors.New("want \"<scenario> seed=... steps=... rand=... hash=...\"")
 	}
 	fields := map[string]uint64{}
 	for part := range strings.SplitSeq(rest, " ") {

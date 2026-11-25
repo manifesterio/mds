@@ -17,6 +17,8 @@
 //	Service      a simulated outside system; Handle(ctx, req, reply) answers
 //	             through its Responder after a delay.
 //	Tell, Ask    sends from host code (a scenario step, a simulated client).
+//	AskDelayed   Ask with delay-before and optional reply backhaul delay.
+//	Bootstrap    NewSystem+Start with Env and Rand for host-driven setups.
 //	Phase        faults, heal, drain: when faults may fire.
 //	Lane         a FIFO group of the queue: messages from one sender to one
 //	             actor at one time keep their order; others are seeded.
