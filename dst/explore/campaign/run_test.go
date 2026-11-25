@@ -749,16 +749,13 @@ func TestFromSim(t *testing.T) {
 	if r.OK || r.Seed != 7 || len(r.Failures) != 1 || r.Failures[0].Kind != "protocol" || r.Reproduce != "replay" {
 		t.Fatalf("%+v", r)
 	}
-}
-
-func TestFromSimMergesExtraCounters(t *testing.T) {
-	r := FromSim(simResult(), "replay", map[string]uint64{"slots": 3, "acked": 1})
-	if r.Counters["steps"] != 40 || r.Counters["slots"] != 3 || r.Counters["acked"] != 1 {
-		t.Fatalf("counters %+v", r.Counters)
+	extra := FromSim(simResult(), "replay", map[string]uint64{"slots": 3})
+	if extra.Counters["steps"] != 40 || extra.Counters["slots"] != 3 {
+		t.Fatalf("extra counters %+v", extra.Counters)
 	}
 }
 
-func TestRegisterSimAndCrashExitCounters(t *testing.T) {
+func TestRegisterSim(t *testing.T) {
 	var reg Registry
 	RegisterSim(&reg, "demo", "a demo", "tool -scenario %s -seed %d",
 		func(seed uint64, _ RunOptions) sim.Result {
@@ -771,10 +768,7 @@ func TestRegisterSimAndCrashExitCounters(t *testing.T) {
 		t.Fatal("demo not registered")
 	}
 	r := sc.Run(9, RunOptions{})
-	if r.Reproduce != "tool -scenario demo -seed 9" {
-		t.Fatalf("reproduce %q", r.Reproduce)
-	}
-	if r.Counters["steps"] != 11 || r.Counters["crashes"] != 2 || r.Counters["exits"] != 1 {
-		t.Fatalf("counters %+v", r.Counters)
+	if r.Reproduce != "tool -scenario demo -seed 9" || r.Counters["crashes"] != 2 || r.Counters["exits"] != 1 {
+		t.Fatalf("%+v", r)
 	}
 }

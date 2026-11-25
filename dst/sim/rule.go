@@ -33,11 +33,6 @@ func (v view) Phase() Phase             { return v.sys.phase }
 func (v view) Timeline() *Timeline      { return v.sys.tl }
 func (v view) Assert() actor.Assertions { return env{sys: v.sys} }
 
-// PhaseStart reports when the System announced phase p, from its sim_phase fact.
-func PhaseStart(v View, p Phase) (Time, bool) {
-	return v.Timeline().PhaseStart(p)
-}
-
 // FaultCoverage names the Sometimes handles that FaultCoverageRule records.
 type FaultCoverage struct {
 	HardCrash    assert.Sometimes
@@ -57,6 +52,6 @@ func (*faultCoverage) Observe(View) {}
 
 func (f *faultCoverage) AtEnd(v View) {
 	tl := v.Timeline()
-	v.Assert().Sometimes(tl.HasCrashCause("attrition"), f.names.HardCrash)
-	v.Assert().Sometimes(tl.HasExited(), f.names.GracefulStop)
+	v.Assert().Sometimes(tl.hasFact(factCrashed, "cause", "attrition"), f.names.HardCrash)
+	v.Assert().Sometimes(tl.hasFact(factExited, "", ""), f.names.GracefulStop)
 }

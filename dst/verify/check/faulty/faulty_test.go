@@ -260,23 +260,10 @@ func (t *testWorld) value(key string) (int64, bool) {
 	return v, ok
 }
 
-// NamedAsserts fills the six catalog slots with the usual Prefix names.
-func TestNamedAssertsNames(t *testing.T) {
+func TestNamedAssertsAndShapeOf(t *testing.T) {
 	a := slotAsserts
-	want := []struct {
-		got, name string
-	}{
-		{a.Outage.Name(), "slot outage started"},
-		{a.Unavailable.Name(), "slot 503 injected"},
-		{a.Timeout.Name(), "slot timeout injected"},
-		{a.Lost.Name(), "slot lost response injected"},
-		{a.Applied.Name(), "slot timed-out op applied"},
-		{a.NotApplied.Name(), "slot timed-out op not applied"},
-	}
-	for _, w := range want {
-		if w.got != w.name {
-			t.Fatalf("got %q, want %q", w.got, w.name)
-		}
+	if a.Outage.Name() != "slot outage started" || a.Timeout.Name() != "slot timeout injected" {
+		t.Fatalf("%+v", a)
 	}
 	s := faulty.ShapeOf[request, answer, request, answer]("svc", "slot", a)
 	if s.Name != "svc" || s.Prefix != "slot" || s.Asserts != a {

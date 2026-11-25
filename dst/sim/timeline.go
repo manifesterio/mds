@@ -79,9 +79,9 @@ func (t *Timeline) PhaseStart(p Phase) (Time, bool) {
 	return 0, false
 }
 
-// HasFact reports that a fact named name was recorded. When key is non-empty,
+// hasFact reports that a fact named name was recorded. When key is non-empty,
 // one of those facts must also have that string field equal to val.
-func (t *Timeline) HasFact(name, key, val string) bool {
+func (t *Timeline) hasFact(name, key, val string) bool {
 	for _, tf := range t.Snapshot(name) {
 		if key == "" {
 			return true
@@ -91,14 +91,4 @@ func (t *Timeline) HasFact(name, key, val string) bool {
 		}
 	}
 	return false
-}
-
-// HasCrashCause reports a sim_crashed fact with the given cause field.
-func (t *Timeline) HasCrashCause(cause string) bool {
-	return t.HasFact(factCrashed, "cause", cause)
-}
-
-// HasExited reports a sim_exited fact (graceful stop).
-func (t *Timeline) HasExited() bool {
-	return t.HasFact(factExited, "", "")
 }

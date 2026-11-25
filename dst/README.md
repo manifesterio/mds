@@ -21,19 +21,19 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | Package | Role |
 |---|---|
 | `core/actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Product actor code imports this package. |
-| `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. Host kits: `Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`, `PhaseStart` / `FaultCoverageRule`, and `FastWithRareSlow`. |
-| `runtime/live` | The production runtime for the same actors: a `Host` with one goroutine per actor, Control before Data inboxes, real keyed timers, an exec function per actor for product IO, and `Ask` / `Tell` / `OnLoop` for callers outside the actors. Production Envs: `NewEnv`, `NewLoggingEnv`, `NewCounterEnv`. Real time and goroutines: it is not in the determinism gate. |
+| `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. |
+| `runtime/live` | The production runtime for the same actors: a `Host` with one goroutine per actor, Control before Data inboxes, real keyed timers, an exec function per actor for product IO, and `Ask` / `Tell` / `OnLoop` for callers outside the actors. Real time and goroutines: it is not in the determinism gate. |
 | `core/rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`), and `Derive(label)` for an independent stream that draws nothing |
-| `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap (live/clock adapters; sim keeps its own queue — see deepening plan D0) |
+| `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap (live/clock adapters; sim keeps its own queue) |
 | `core/clock` | Wall offset over `core/sched`, `AfterFunc` / `Advance` on the same heap |
 | `core/syncclock`, `core/realclock` | Clock adapters for code that needs a real or synchronised clock outside a run |
 | `core/trace` | Running FNV-1a `Hash` / `StateHasher`, optional `Ring[T]` |
 | `core/assert` | Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable with coverage; typed handles and the catalog |
 | `core/fault` | Maybe / MaybeP / Fault with per-site latch and Quiet; declared sites (`NewSite`) and the catalog |
-| `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, `Main`, plus `FromSim` / `RegisterSim` / `CrashExitCounters` for sim-backed scenarios |
+| `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
 | `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
-| `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails. `NamedAsserts` / `ShapeOf` share the usual Shape/Asserts ceremony |
-| `verify/golden` | Fixed seed-to-hash asserts plus golden file `AssertFile` / Load/Save (broker and CP pin formats) |
+| `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
+| `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
 | `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
 ## How to write an actor
@@ -180,6 +180,16 @@ A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and t
 go test ./examples/kv -run TestCampaign -count=1
 go test ./explore/campaign ./verify/check/... ./...
 ```
+
+## Host layer ownership
+
+Product simulators and production Envs should call dst for shared host glue rather
+than re-owning it: `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv`;
+`sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`,
+`Timeline.PhaseStart`, `FaultCoverageRule`, `DrawBetween` / `MaybeAdd`;
+`campaign.RegisterSim` / `FromSim`; `faulty.NamedAsserts` / `ShapeOf`;
+`trace.StateHasher`. Domain schedules, fault rates, and message vocabularies stay
+in the product. Sched merge into sim remains deferred (sim keeps its own queue).
 
 ## Stay out
 
