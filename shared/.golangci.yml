@@ -82,6 +82,11 @@ linters:
       forbid:
         - pattern: ^panic$
           msg: "return an error; panic is for impossible state only (Effective Go, Panic)"
+        # The actor runtime seam is for dst/sim and dst/runtime/live.
+        # Product code builds actors; only runtimes (and tests) open effects.
+        - pattern: ^actor\.(Effect([A-Z][A-Za-z]*)?|Binding|NewOutbox|Close|NewEntityRef|NewReplyTo|NewServiceRef|As|NewOwner|Asker|ReplyID|EntityID|ServiceID)$
+          pkg: ^github\.com/manifesterio/mds/dst/core/actor$
+          msg: "actor runtime seam is for dst/sim and dst/runtime/live only"
     funlen:
       lines: 80
       statements: 50
@@ -119,6 +124,9 @@ linters:
       - linters: [forbidigo]
         text: 'panic'
         path: '^ops/tools/|_test\.go$'
+      - linters: [forbidigo]
+        text: 'actor runtime seam'
+        path: '_test\.go$'
       - linters: [funlen, gocognit, nestif, dupl, interfacebloat]
         path: '_test\.go$'
 formatters:

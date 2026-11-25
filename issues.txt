@@ -194,7 +194,9 @@ Type:       API hygiene
 Priority:   Low
 Component:  dst/core/actor (erase.go)
 Created:    2026-11-25
-Status:     Open
+Status:     Done
+Resolution: forbidigo in broker/controlplane/shared golangci configs; tests and
+            internal/verify exempt. Smaller than moving to actorrt.
 
 Summary
 -------
