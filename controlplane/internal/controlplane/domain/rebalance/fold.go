@@ -1,6 +1,6 @@
 package rebalance
 
-//go:generate go run github.com/manifesterio/mds/dst/cmd/dstgen
+//go:generate go run github.com/manifesterio/mds/ops/tools/dstgen
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"

@@ -36,15 +36,15 @@ PG_TEST_ARGS  ?=
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
 	e2e-kafka-cli it-postgres
 
-# Regenerate sum-type markers, tags and folds (dst/cmd/dstgen).
+# Regenerate sum-type markers, tags and folds (ops/tools/dstgen).
 generate:
-	go run github.com/manifesterio/mds/dst/cmd/dstgen ./...
+	go run github.com/manifesterio/mds/ops/tools/dstgen ./...
 
 # The code dstgen writes (zz_dst_gen*.go, dst.tags) must match the annotations,
 # and dst.tags must not have lost or renumbered a line since DSTGEN_BASE.
 DSTGEN_BASE ?= mainline
 gen-check:
-	go run github.com/manifesterio/mds/dst/cmd/dstgen -check -base $(DSTGEN_BASE) ./...
+	go run github.com/manifesterio/mds/ops/tools/dstgen -check -base $(DSTGEN_BASE) ./...
 
 build: generate fmt-check ascii-check gen-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
 

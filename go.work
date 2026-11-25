@@ -5,6 +5,7 @@ use (
 	./controlplane
 	./dst
 	./ops/tools/deslop
+	./ops/tools/dstgen
 	./ops/tools/riskscore
 	./shared
 )

@@ -30,9 +30,9 @@ the product imports it: `go list -deps ./cmd/mdscontrolplane` does not list it.
 A test that compared the code with itself would prove nothing. Only tests and
 the simulators import the model. The control plane simulator reaches it through
 one file, `internal/verify/simulator/oracle.go`. The broker reaches it through
-`broker/internal/verify/speccheck/specbridge` (checks C1, C2 and C4, and the
-broker simulator) and `speccheck/specsystem` (in-memory runs). This is the one
-control plane spec of the repo.
+`broker/internal/verify/speccheck/specbridge` (C4 and the broker simulator) and
+`speccheck/specsystem` (in-memory runs). This is the one control plane spec of
+the repo.
 
 The model is deterministic: no clock, network, goroutines or files, and no map
 order reaches an answer. It is in the determinism gate (`make determinism`).
@@ -51,7 +51,3 @@ done := m.Apply(contract.CreateTopic{Name: "t", Partitions: 2}) // spec.Model
   and compares it with the model through `oracle.go`.
 - The broker reaches the model through `speccheck/specbridge` and
   `speccheck/specsystem` (see above).
-
-The bugs in the code itself are the mutants of `../ops/controlplane/mutants.txt`
-(`make mutants`): each plants one real bug in a copy of the tree and a named
-test must fail.

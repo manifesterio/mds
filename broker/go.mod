@@ -12,7 +12,6 @@ require (
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0
 	golang.org/x/sys v0.49.0
 	google.golang.org/grpc v1.69.2
-	pgregory.net/rapid v1.3.0
 )
 
 replace github.com/manifesterio/mds/controlplane => ../controlplane

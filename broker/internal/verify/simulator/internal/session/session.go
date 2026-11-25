@@ -8,7 +8,7 @@
 // and its ForgetPending live in the scope of that Sub.
 package session
 
-//go:generate go run github.com/manifesterio/mds/dst/cmd/dstgen
+//go:generate go run github.com/manifesterio/mds/ops/tools/dstgen
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"

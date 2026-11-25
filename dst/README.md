@@ -34,7 +34,7 @@ determinism check. The determinism tool is in `cmd/determinismcheck`.
 | `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
 | `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
-| `cmd/dstgen` | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
+| `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
 ## How to write an actor
 
@@ -82,7 +82,7 @@ type (
 )
 ```
 
-Run `go generate` with `//go:generate go run github.com/manifesterio/mds/dst/cmd/dstgen`. It writes `zz_dst_gen.go`
+Run `go generate` with `//go:generate go run github.com/manifesterio/mds/ops/tools/dstgen`. It writes `zz_dst_gen.go`
 (markers, `Tag`, `Fold`) and numbers each case in `dst.tags`, which is append-only: never change or reuse a number.
 
 Effects on the outbox:

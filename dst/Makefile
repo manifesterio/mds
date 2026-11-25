@@ -10,17 +10,17 @@ build: generate fmt-check ascii-check gen-check vet lint modernize-check test de
 test:
 	go test -race ./...
 
-# Regenerate sum-type markers, tags, folds and state hashes (dst/cmd/dstgen).
+# Regenerate sum-type markers, tags, folds and state hashes (ops/tools/dstgen).
 # testdata/fresh is outside go generate ./... (testdata is skipped); generate it explicitly.
 generate:
 	go generate ./...
-	go run ./cmd/dstgen ./cmd/dstgen/testdata/fresh
+	go run ../ops/tools/dstgen ../ops/tools/dstgen/testdata/fresh
 
 # Generated files and dst.tags must match the annotations, and dst.tags must not have
 # lost or renumbered a line since DSTGEN_BASE.
 DSTGEN_BASE ?= mainline
 gen-check:
-	go run ./cmd/dstgen -check -base $(DSTGEN_BASE) ./...
+	go run ../ops/tools/dstgen -check -base $(DSTGEN_BASE) ./...
 
 # Determinism gate for the single-goroutine packages (rng, sched, clock, ...).
 determinism:
