@@ -1,4 +1,0 @@
-campaign/campaign.go:156:6: unreachable func: Run
-kernel/harness_test.go:94:17: unreachable func: sendTo.Fold
-kernel/harness_test.go:111:13: unreachable func: idle.Fold
-live/live.go:84:20: unreachable func: Loop.Self
