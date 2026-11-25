@@ -198,8 +198,8 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	if commits != 1 {
 		t.Fatalf("%d commits: a too-large segment must not be retried", commits)
 	}
-	if len(h.env.viol) != 1 || h.env.viol[0] != "broker: segment exceeds the control plane's commit size" {
-		t.Fatalf("assertions %v", h.env.viol)
+	if len(h.env.Viol) != 1 || h.env.Viol[0] != "broker: segment exceeds the control plane's commit size" {
+		t.Fatalf("assertions %v", h.env.Viol)
 	}
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {
 		t.Fatalf("buffered %d, segments %d", h.b.bufBytes, len(h.b.segs))

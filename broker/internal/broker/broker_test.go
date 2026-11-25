@@ -15,6 +15,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/core/actor/actortest"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -791,14 +792,14 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 	if len(a) != 3 || !reflect.DeepEqual(a, b) {
 		t.Fatalf("keys differ: %v %v", a, b)
 	}
-	env := &testEnv{state: 7}
+	env := actortest.NewEnv(actortest.Config{Self: testSelf, Seed: 7})
 	for _, k := range a {
 		if !segKeyRE.MatchString(k) || k != segmentformat.SegmentKey([16]byte(env.NewID())) {
 			t.Fatalf("key %q", k)
 		}
 	}
 	other := startedHarness(t, DefaultConfig())
-	other.env.state = 8
+	other.env.State = 8
 	oc := other.open(1)
 	other.produceOne(oc, e("t", 0, plain(t, "a")))
 	if other.puts[0] == a[0] {

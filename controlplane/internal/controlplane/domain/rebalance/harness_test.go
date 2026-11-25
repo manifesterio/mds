@@ -10,8 +10,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/actor/actortest"
 	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/core/trace"
 )
@@ -40,37 +39,6 @@ func rt(n uint64) actor.ReplyTo[Reply] {
 // gone is the message the machine gets when the caller of call n leaves.
 // group is the group of the call, "" for a describe or a commit.
 func gone(group string, n uint64) callGone { return callGone{group: group, call: rt(n)} }
-
-// testEnv is the actor.Env of the tests. Random numbers come from the seeded stream;
-// a buggify site fires only if faults says so (nil: never). Assertions are not recorded.
-type testEnv struct {
-	rand   *rng.Rand
-	faults actor.Faults
-}
-
-func newTestEnv(faults actor.Faults) *testEnv {
-	return &testEnv{rand: rng.New(seed), faults: faults}
-}
-
-func (e *testEnv) Uint64() uint64             { return e.rand.Uint64() }
-func (e *testEnv) Intn(n int) int             { return e.rand.Intn(n) }
-func (e *testEnv) Between(lo, hi int64) int64 { return e.rand.Between(lo, hi) }
-func (e *testEnv) Chance(p float64) bool      { return e.rand.Chance(p) }
-func (e *testEnv) Duration(lo, hi actor.Duration) actor.Duration {
-	return actor.Duration(e.rand.Between(int64(lo), int64(hi)))
-}
-func (e *testEnv) NewID() actor.ID                { return newID(e.rand) }
-func (e *testEnv) Maybe(s fault.Site) bool        { return e.faults != nil && e.faults.Maybe(s) }
-func (e *testEnv) Fault(fault.Site, float64) bool { return false }
-func (e *testEnv) MaybeP(s fault.Site, p float64) bool {
-	return e.faults != nil && e.faults.MaybeP(s, p)
-}
-func (*testEnv) Self() actor.Incarnation                                              { return actor.Incarnation{Name: "rebalance"} }
-func (*testEnv) Always(bool, assert.Always, ...assert.Pair)                           {}
-func (*testEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
-func (*testEnv) Sometimes(bool, assert.Sometimes)                                     {}
-func (*testEnv) Reachable(assert.Reachable)                                           {}
-func (*testEnv) Unreachable(assert.Unreachable, ...assert.Pair)                       {}
 
 // newID draws an id from r the way the simulator does: 16 bytes of the stream.
 func newID(r *rng.Rand) actor.ID {
@@ -116,7 +84,7 @@ type harness struct {
 	replica   actor.EntityRef[runtime.EventData]
 	now       actor.Mono
 	log       *spec.ControlPlane
-	env       *testEnv
+	env       *actortest.Env
 	timers    []armed
 	seq       int
 	epoch     int // bumped by every ForgetPending
@@ -153,7 +121,9 @@ func newHarnessFaults(t *testing.T, cfg Config, faults actor.Faults) *harness {
 // newBareHarness makes a harness and its machine. The machine has not taken any message yet.
 func newBareHarness(t *testing.T, cfg Config, faults actor.Faults) *harness {
 	t.Helper()
-	env := newTestEnv(faults)
+	env := actortest.NewEnv(actortest.Config{
+		Self: actor.Incarnation{Name: "rebalance"}, Rand: rng.New(seed), Faults: faults,
+	})
 	replica := actor.NewEntityRef[runtime.EventData](actor.EntityID{Runtime: actor.NewOwner(), Slot: 1, Name: "replica"})
 	h := &harness{t: t, m: New(cfg, env, replica), replica: replica, env: env, log: spec.New(), watched: map[actor.ReplyID]Input{}}
 	shadow := rng.New(seed)
@@ -196,16 +166,16 @@ func (h *harness) step(in Input) []string {
 
 // receive runs one Receive and carries out its effects in order.
 func (h *harness) receive(in Input) {
-	o := actor.NewOutbox[Input, actor.NoIO](actor.Binding{
+	effects := actortest.Run(h.t, &h.asks, actor.Binding{
 		Self:  actor.EntityID{Name: "rebalance"},
 		Asker: actor.Asker{Kind: actor.ActorAsker, Name: "rebalance"},
-		Next:  func() uint64 { h.asks++; return h.asks },
 		Misuse: func(what string) {
 			h.t.Fatalf("misuse: %s", what)
 		},
+	}, func(o *actor.Outbox[Input, actor.NoIO]) {
+		h.m.Receive(h.at(), in, o)
 	})
-	h.m.Receive(h.at(), in, o)
-	for _, e := range actor.Close(o) {
+	for _, e := range effects {
 		h.effect(e)
 	}
 }

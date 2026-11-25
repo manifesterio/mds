@@ -15,82 +15,14 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/actor/actortest"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
-
-// testEnv is a seeded core.Environment that records assertion violations. It keeps its
-// own SplitMix64 copy and not dst/core/rng, for two reasons. Intn here uses a plain
-// modulo and dst/core/rng uses Lemire, so the streams of the seeds would change.
-// Also, broker_test.go sets the state field directly to reseed the environment.
-type testEnv struct {
-	state uint64
-	viol  []string
-	reach []string
-}
-
-func (e *testEnv) Uint64() uint64 {
-	e.state += 0x9e3779b97f4a7c15
-	z := e.state
-	z = (z ^ z>>30) * 0xbf58476d1ce4e5b9
-	z = (z ^ z>>27) * 0x94d049bb133111eb
-	return z ^ z>>31
-}
-func (e *testEnv) Intn(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return int(e.Uint64() % uint64(n))
-}
-func (e *testEnv) Between(lo, hi int64) int64 {
-	if hi <= lo {
-		return lo
-	}
-	return lo + int64(e.Intn(int(hi-lo+1)))
-}
-func (e *testEnv) Chance(p float64) bool { return p > 0 && float64(e.Uint64()%1000)/1000 < p }
-func (e *testEnv) Duration(lo, hi actor.Duration) actor.Duration {
-	return actor.Duration(e.Between(int64(lo), int64(hi)))
-}
-func (e *testEnv) Self() actor.Incarnation { return testSelf }
-func (e *testEnv) NewID() actor.ID {
-	var id actor.ID
-	for i := 0; i < 16; i += 8 {
-		v := e.Uint64()
-		for j := range 8 {
-			id[i+j] = byte(v >> (8 * j))
-		}
-	}
-	return id
-}
-func (e *testEnv) Maybe(fault.Site) bool           { return false }
-func (e *testEnv) MaybeP(fault.Site, float64) bool { return false }
-func (e *testEnv) Fault(fault.Site, float64) bool  { return false }
-func (e *testEnv) Always(c bool, p assert.Always, _ ...assert.Pair) {
-	if !c {
-		e.viol = append(e.viol, p.Name())
-	}
-}
-func (e *testEnv) AlwaysOrUnreachable(c bool, p assert.AlwaysOrUnreachable, _ ...assert.Pair) {
-	if !c {
-		e.viol = append(e.viol, p.Name())
-	}
-}
-func (e *testEnv) Sometimes(bool, assert.Sometimes) {}
-func (e *testEnv) Reachable(p assert.Reachable)     { e.reach = append(e.reach, p.Name()) }
-func (e *testEnv) Unreachable(p assert.Unreachable, _ ...assert.Pair) {
-	e.viol = append(e.viol, p.Name())
-}
 
 // testT is the part of testing.TB that the harness uses. The conformance test
 // runs the harness inside a rapid run, where the test handle is a *rapid.T and
 // not a *testing.T.
-type testT interface {
-	Helper()
-	Fatal(args ...any)
-	Fatalf(format string, args ...any)
-}
+type testT = actortest.TB
 
 // client is the test's view of one connection.
 type client struct {
@@ -124,7 +56,8 @@ func (c testControlPlane) CreateTopic(name string, partitions int32) core.ErrCod
 type harness struct {
 	t      testT
 	b      *Broker
-	env    *testEnv
+	env    *actortest.Env
+	book   *actortest.Book
 	store  *objectstore.Spec
 	cp     testControlPlane
 	config Config
@@ -137,10 +70,10 @@ type harness struct {
 	holdPut bool
 	held    []core.EventData
 
-	number  uint64                          // last pending number handed out
-	queue   []core.EventData                // adapted answers not yet received
-	timers  map[actor.TimerKey]actor.Effect // armed timers: the StartTimer of each key
-	due     map[actor.TimerKey]actor.Mono   // when each armed timer is due (fireNext)
+	number  uint64                        // last pending number handed out
+	queue   []core.EventData              // adapted answers not yet received
+	timers  map[actor.TimerKey]actor.Effect // mirror of book.Timers for tests
+	due     map[actor.TimerKey]actor.Mono // when each armed timer is due (fireNext)
 	clients map[core.ConnID]*client
 	all     []actor.Effect // every effect recorded, in order
 	paused  map[core.ConnID]bool
@@ -151,7 +84,9 @@ type harness struct {
 }
 
 func newHarness(t testT, config Config) *harness {
-	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: testControlPlane{spec.New()},
+	env := actortest.NewEnv(actortest.Config{Self: testSelf, Seed: 7})
+	h := &harness{t: t, env: env, book: &actortest.Book{Timers: map[actor.TimerKey]actortest.Record{}},
+		store: objectstore.NewSpec(), cp: testControlPlane{spec.New()},
 		config: config, timers: map[actor.TimerKey]actor.Effect{}, due: map[actor.TimerKey]actor.Mono{},
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
@@ -174,20 +109,28 @@ func startedHarness(t *testing.T, config Config) *harness {
 // out the recorded effects and returns them.
 func (h *harness) step(msg core.EventData) []actor.Effect {
 	h.now += actor.Mono(actor.Millisecond)
-	o := actor.NewOutbox[core.EventData, core.IO](actor.Binding{
-		Next:   func() uint64 { h.number++; return h.number },
-		Misuse: func(what string) { h.t.Fatalf("outbox misuse: %s", what) },
+	effects := actortest.Run(h.t, &h.number, actor.Binding{}, func(o *actor.Outbox[core.EventData, core.IO]) {
+		h.b.Receive(actor.Now{Mono: h.now, Wall: actor.Wall(h.now)}, msg, o)
 	})
-	h.b.Receive(actor.Now{Mono: h.now, Wall: actor.Wall(h.now)}, msg, o)
-	effects := actor.Close(o)
 	h.all = append(h.all, effects...)
-	for i, e := range effects {
-		if e.Kind == actor.EffectStop && i != len(effects)-1 {
-			h.t.Fatalf("Stop is not the last effect: %v", effects)
-		}
-		h.exec(e)
-	}
+	actortest.Drain(h.t, effects, h.book, actortest.Handler{
+		Strict: true,
+		AfterStart: func(e actor.Effect) {
+			h.due[e.StoredKey()] = h.now + actor.Mono(e.D)
+		},
+		Perform: h.perform,
+		Do:      func(e actor.Effect) { h.do1(e.Msg) },
+		Stop:    func(actor.Effect) { h.exited = true },
+	})
+	h.syncTimers()
 	return effects
+}
+
+func (h *harness) syncTimers() {
+	clear(h.timers)
+	for k, r := range h.book.Timers {
+		h.timers[k] = r.Effect
+	}
 }
 
 // do steps msg and then delivers queued answers until none is left.
@@ -213,10 +156,7 @@ func (h *harness) deliver(e actor.Effect, answer actor.Payload) {
 	if d, ok := answer.(core.ObjectDone); ok {
 		_, isPut = d.Result.(objectstore.PutDone)
 	}
-	msg, ok := e.Adapt(answer).(core.EventData)
-	if !ok {
-		h.t.Fatalf("the answer of %T adapts to %T", e.Msg, msg)
-	}
+	msg := actortest.Adapt[core.EventData](h.t, e, answer)
 	if (isCP && h.holdCP) || (isPut && h.holdPut) {
 		h.held = append(h.held, msg)
 		return
@@ -230,26 +170,6 @@ func (h *harness) releaseHeld() {
 	h.held = nil
 	h.queue = append(h.queue, held...)
 	h.run()
-}
-
-// exec carries out one effect, as the runtime and the executor would.
-func (h *harness) exec(e actor.Effect) {
-	switch e.Kind {
-	case actor.EffectPerform:
-		h.perform(e)
-	case actor.EffectDo:
-		h.do1(e.Msg)
-	case actor.EffectStartTimer:
-		h.timers[e.StoredKey()] = e
-		h.due[e.StoredKey()] = h.now + actor.Mono(e.D)
-	case actor.EffectCancelTimer:
-		delete(h.timers, e.StoredKey())
-	case actor.EffectStop:
-		h.exited = true
-	case actor.EffectFact:
-	default:
-		h.t.Fatalf("the broker recorded an unexpected effect %d", e.Kind)
-	}
 }
 
 // perform answers one Perform from the specs, through the hooks.
@@ -335,7 +255,7 @@ func timerOrder(key actor.TimerKey) uint64 {
 
 // fire delivers the timer under key.
 func (h *harness) fire(key actor.TimerKey) {
-	e, ok := h.timers[key]
+	e, ok := h.book.TakeTimer(key)
 	if !ok {
 		h.t.Fatalf("timer %q not armed", key)
 	}
@@ -521,7 +441,7 @@ func factsNamed(all []actor.Effect, name string) []actor.Fact {
 
 func (h *harness) noViolations() {
 	h.t.Helper()
-	if len(h.env.viol) > 0 {
-		h.t.Fatalf("assertion violations: %v", h.env.viol)
+	if len(h.env.Viol) > 0 {
+		h.t.Fatalf("assertion violations: %v", h.env.Viol)
 	}
 }

@@ -2,67 +2,13 @@ package replica_test
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/core/actor/actortest"
 )
-
-type alwaysHit struct {
-	cond    bool
-	prop    string
-	details []assert.Pair
-}
-
-type testEnv struct {
-	n      uint64
-	faults bool // Fault fires every time it is asked
-	always []alwaysHit
-}
-
-func (e *testEnv) Uint64() uint64 {
-	e.n++
-	return e.n
-}
-func (e *testEnv) Intn(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return int(e.Uint64() % uint64(n))
-}
-func (e *testEnv) Between(lo, hi int64) int64 {
-	if hi <= lo {
-		return lo
-	}
-	return lo + int64(e.Intn(int(hi-lo+1)))
-}
-func (e *testEnv) Chance(p float64) bool { return p > 0 && float64(e.Uint64()%1000)/1000 < p }
-func (e *testEnv) Duration(lo, hi actor.Duration) actor.Duration {
-	return actor.Duration(e.Between(int64(lo), int64(hi)))
-}
-func (e *testEnv) NewID() actor.ID {
-	var id actor.ID
-	u := e.Uint64()
-	for i := range id {
-		id[i] = byte(u >> (8 * (i % 8)))
-	}
-	return id
-}
-func (e *testEnv) Self() actor.Incarnation            { return actor.Incarnation{Name: "replica"} }
-func (e *testEnv) Maybe(fault.Site) bool              { return false }
-func (e *testEnv) MaybeP(fault.Site, float64) bool    { return false }
-func (e *testEnv) Fault(_ fault.Site, p float64) bool { return e.faults && p > 0 }
-func (e *testEnv) Always(cond bool, p assert.Always, details ...assert.Pair) {
-	e.always = append(e.always, alwaysHit{cond: cond, prop: p.Name(), details: details})
-}
-func (e *testEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
-func (e *testEnv) Sometimes(bool, assert.Sometimes)                                     {}
-func (e *testEnv) Reachable(assert.Reachable)                                           {}
-func (e *testEnv) Unreachable(assert.Unreachable, ...assert.Pair)                       {}
 
 // harness runs a Replica one Receive at a time and keeps what a runtime
 // would keep for it: the armed timers and the Performs not yet answered,
@@ -72,73 +18,30 @@ func (e *testEnv) Unreachable(assert.Unreachable, ...assert.Pair)               
 type harness struct {
 	t      *testing.T
 	m      *replica.Replica
-	env    *testEnv
-	number uint64                    // last pending number handed out
-	tick   uint64                    // counts recorded effects, to order forgets
-	forgot map[string]uint64         // scope -> tick of its last ForgetPending
-	timers map[actor.TimerKey]record // stored key -> the StartTimer
-	asked  map[uint64]record         // Perform number -> the Perform
-}
-
-// record is one effect the harness keeps, with the tick it was recorded at.
-type record struct {
-	effect actor.Effect
-	tick   uint64
+	env    *actortest.Env
+	book   *actortest.Book
+	number uint64 // last pending number handed out
 }
 
 func newHarness(t *testing.T, config replica.Config) *harness {
 	t.Helper()
-	env := &testEnv{}
+	env := actortest.NewEnv(actortest.Config{Self: actor.Incarnation{Name: "replica"}, Counter: true})
 	return &harness{
 		t: t, m: replica.New(config)(env), env: env,
-		forgot: map[string]uint64{}, timers: map[actor.TimerKey]record{}, asked: map[uint64]record{},
+		book: &actortest.Book{
+			Timers: map[actor.TimerKey]actortest.Record{},
+			Asked:  map[uint64]actortest.Record{},
+			Forgot: map[string]uint64{},
+		},
 	}
-}
-
-// within reports whether scope is forgetScope or below it.
-func within(scope, forgetScope string) bool {
-	return forgetScope == "" || scope == forgetScope || strings.HasPrefix(scope, forgetScope+"/")
-}
-
-// forgotten reports whether a ForgetPending of scope or of a scope above it
-// came after r.
-func (h *harness) forgotten(r record) bool {
-	for scope, at := range h.forgot {
-		if at > r.tick && within(r.effect.Scope, scope) {
-			return true
-		}
-	}
-	return false
 }
 
 // run lends the replica a fresh outbox, calls f with it, and returns the
 // recorded effects after keeping track of timers and Performs.
 func (h *harness) run(f func(o *actor.Outbox[runtime.EventData, runtime.IO])) []actor.Effect {
 	h.t.Helper()
-	o := actor.NewOutbox[runtime.EventData, runtime.IO](actor.Binding{
-		Next:   func() uint64 { h.number++; return h.number },
-		Misuse: func(what string) { h.t.Fatalf("outbox misuse: %s", what) },
-	})
-	f(o)
-	effects := actor.Close(o)
-	for i, e := range effects {
-		h.tick++
-		r := record{effect: e, tick: h.tick}
-		switch e.Kind {
-		case actor.EffectForgetPending:
-			h.forgot[e.Scope] = h.tick
-		case actor.EffectStartTimer:
-			h.timers[e.StoredKey()] = r
-		case actor.EffectCancelTimer:
-			delete(h.timers, e.StoredKey())
-		case actor.EffectPerform:
-			h.asked[e.Number] = r
-		case actor.EffectStop:
-			if i != len(effects)-1 {
-				h.t.Fatalf("Stop is not the last effect: %v", effects)
-			}
-		}
-	}
+	effects := actortest.Run(h.t, &h.number, actor.Binding{}, f)
+	actortest.Drain(h.t, effects, h.book, actortest.Handler{})
 	return effects
 }
 
@@ -164,11 +67,10 @@ func (h *harness) offer(n uint64, op replica.ClientOperation) []actor.Effect {
 // would. The Perform must still be waited for.
 func (h *harness) answerAt(at actor.Mono, e actor.Effect, done actor.Payload) []actor.Effect {
 	h.t.Helper()
-	r, ok := h.asked[e.Number]
-	if !ok || h.forgotten(r) {
+	if !h.book.Waited(e) {
 		h.t.Fatalf("answer to %T: the replica does not wait for it any more", e.Msg)
 	}
-	delete(h.asked, e.Number)
+	delete(h.book.Asked, e.Number)
 	return h.recvAt(at, deliver(h.t, e, done))
 }
 
@@ -178,28 +80,18 @@ func (h *harness) answer(e actor.Effect, done actor.Payload) []actor.Effect {
 }
 
 // waited reports whether the replica still waits for the answer of e.
-func (h *harness) waited(e actor.Effect) bool {
-	r, ok := h.asked[e.Number]
-	return ok && !h.forgotten(r)
-}
+func (h *harness) waited(e actor.Effect) bool { return h.book.Waited(e) }
 
 // armed returns the timer under the stored key, if it would still fire.
-func (h *harness) armed(key actor.TimerKey) (actor.Effect, bool) {
-	r, ok := h.timers[key]
-	if !ok || h.forgotten(r) {
-		return actor.Effect{}, false
-	}
-	return r.effect, true
-}
+func (h *harness) armed(key actor.TimerKey) (actor.Effect, bool) { return h.book.Armed(key) }
 
 // fireAt delivers the timer under the stored key at time at. It must be armed.
 func (h *harness) fireAt(at actor.Mono, key actor.TimerKey) []actor.Effect {
 	h.t.Helper()
-	e, ok := h.armed(key)
+	e, ok := h.book.TakeTimer(key)
 	if !ok {
 		h.t.Fatalf("timer %q is not armed", key)
 	}
-	delete(h.timers, key)
 	msg, ok := e.Msg.(runtime.EventData)
 	if !ok {
 		h.t.Fatalf("timer %q carries %T", key, e.Msg)
@@ -220,11 +112,7 @@ func deliver(t *testing.T, e actor.Effect, done actor.Payload) runtime.EventData
 	if e.Kind != actor.EffectPerform {
 		t.Fatalf("effect %d is not a Perform", e.Kind)
 	}
-	msg, ok := e.Adapt(done).(runtime.EventData)
-	if !ok {
-		t.Fatalf("adapt of %T did not make an EventData", e.Msg)
-	}
-	return msg
+	return actortest.Adapt[runtime.EventData](t, e, done)
 }
 
 // caller is the reply handle of ask number n of the test.

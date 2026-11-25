@@ -92,9 +92,9 @@ func TestSoftCrashForgetsWorkButKeepsRoleTimer(t *testing.T) {
 	winClaim(t, h, effects, 1, 0)
 	_, apEffect := only[runtime.LogAppend](t, h.offer(7, replica.ClientOperation{Cmd: commitCmd("k", 1)}))
 
-	h.env.faults = true
+	h.env.FaultAlways = true
 	h.fireAt(actor.Mono(2*actor.Second), keyRole)
-	h.env.faults = false
+	h.env.FaultAlways = false
 	if h.m.Ready() || h.m.IsActive() {
 		t.Fatalf("after the soft crash: ready=%v active=%v, want down", h.m.Ready(), h.m.IsActive())
 	}
