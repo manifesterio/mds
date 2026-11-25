@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+	"github.com/manifesterio/mds/dst/verify/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/core/actor"

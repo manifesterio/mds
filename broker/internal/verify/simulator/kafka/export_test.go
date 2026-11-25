@@ -2,7 +2,7 @@ package kafka
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+	"github.com/manifesterio/mds/dst/verify/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/dst/sim"
 )

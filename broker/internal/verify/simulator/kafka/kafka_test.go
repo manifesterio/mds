@@ -11,7 +11,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+	"github.com/manifesterio/mds/dst/verify/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
@@ -19,6 +19,7 @@ import (
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/verify/check/spectest"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -150,8 +151,8 @@ func violated(cfg Config) []string {
 func TestMutantsAreCaught(t *testing.T) {
 	const budget, soon = 20, 8
 	cases := []struct {
-		name string
-		bug  broker.InjectedBug
+		bug  spectest.Bug
+		inj  broker.InjectedBug
 		prop string
 	}{
 		{"BugEarlyAck: ack before CommitSegment", broker.InjectedBugEarlyAck, "kafka: acked range is committed in the control plane"},
@@ -164,35 +165,38 @@ func TestMutantsAreCaught(t *testing.T) {
 		{"BugSkipProduceCRC: produce admits a corrupted batch", broker.InjectedBugSkipProduceCRC, "kafka: committed batch is intact"},
 		{"BugSealOffByOne: size rule applied one batch late", broker.InjectedBugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
 	}
-	for _, c := range cases {
-		caught := uint64(0)
-		var props []string
-		for s := uint64(1); s <= budget && caught == 0; s++ {
-			if props = violated(Config{Seed: s, Bug: c.bug}); len(props) > 0 {
-				caught = s
-			}
+	bugs := make([]spectest.Bug, len(cases))
+	type mutant struct {
+		inj  broker.InjectedBug
+		prop string
+	}
+	byBug := make(map[spectest.Bug]mutant, len(cases))
+	for i, c := range cases {
+		bugs[i] = c.bug
+		byBug[c.bug] = mutant{c.inj, c.prop}
+	}
+	spectest.RequireCaught(t, bugs, budget, func(bug spectest.Bug, seed uint64) bool {
+		c := byBug[bug]
+		props := violated(Config{Seed: seed, Bug: c.inj})
+		if len(props) == 0 {
+			return false
 		}
-		if caught == 0 {
-			t.Errorf("mutant %q not caught in %d seeds", c.name, budget)
-			continue
-		}
-		t.Logf("mutant %q first caught by seed %d: %v", c.name, caught, props)
-		if caught > soon {
-			t.Errorf("mutant %q caught only at seed %d (want <= %d)", c.name, caught, soon)
+		t.Logf("mutant %q first caught by seed %d: %v", bug, seed, props)
+		if seed > soon {
+			t.Errorf("mutant %q caught only at seed %d (want <= %d)", bug, seed, soon)
 		}
 		if !slices.Contains(props, c.prop) {
-			t.Errorf("mutant %q: %q not among %v", c.name, c.prop, props)
+			t.Errorf("mutant %q: %q not among %v", bug, c.prop, props)
 		}
-	}
+		return true
+	})
 }
 
 // The real broker must pass every invariant on the same seeds.
 func TestRealBrokerIsClean(t *testing.T) {
-	for s := uint64(1); s <= 5; s++ {
-		if p := violated(Config{Seed: s}); len(p) > 0 {
-			t.Errorf("seed %d violated %v", s, p)
-		}
-	}
+	spectest.RequireClean(t, 5, func(seed uint64) bool {
+		return len(violated(Config{Seed: seed})) > 0
+	})
 }
 
 type tally struct {

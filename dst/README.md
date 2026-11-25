@@ -34,6 +34,7 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
 | `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
+| `verify/history` | Append-only client-operation history (`Invoke`/`Return`) for workload/oracle separation |
 | `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
 ## How to write an actor

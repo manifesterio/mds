@@ -2,7 +2,7 @@ package kafka
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+	"github.com/manifesterio/mds/dst/verify/history"
 )
 
 // History ops. One ProduceOp covers a batch and all its retries (the id and
