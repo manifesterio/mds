@@ -758,17 +758,37 @@ func TestFromSim(t *testing.T) {
 func TestRegisterSim(t *testing.T) {
 	var reg Registry
 	RegisterSim(&reg, "demo", "a demo", "tool -scenario %s -seed %d",
-		func(seed uint64, _ RunOptions) sim.Result {
-			return sim.Result{Seed: seed, Steps: 11, Crashes: 2, Exits: 1, Hash: 0x11}
+		func(seed uint64, o RunOptions) SimSeed {
+			r := sim.Result{Seed: seed, Steps: 11, Crashes: 2, Exits: 1, Hash: 0x11}
+			out := SimSeed{Result: r, Counters: CrashExitCounters(r)}
+			if !r.OK() || o.Log {
+				out.Text = "product report"
+			}
+			return out
 		},
-		CrashExitCounters,
 	)
 	sc, ok := reg.Get("demo")
 	if !ok {
 		t.Fatal("demo not registered")
 	}
 	r := sc.Run(9, RunOptions{})
-	if r.Reproduce != "tool -scenario demo -seed 9" || r.Counters["crashes"] != 2 || r.Counters["exits"] != 1 {
+	if r.Reproduce != "tool -scenario demo -seed 9" || r.Counters["crashes"] != 2 || r.Counters["exits"] != 1 || r.Text != "" {
 		t.Fatalf("%+v", r)
+	}
+	logged := sc.Run(9, RunOptions{Log: true})
+	if logged.Text != "product report" {
+		t.Fatalf("text on log: %+v", logged)
+	}
+	RegisterSim(&reg, "fail", "a failing demo", "tool -scenario %s -seed %d",
+		func(seed uint64, _ RunOptions) SimSeed {
+			s := FailSimSeed(seed, "p", "d")
+			s.Text = "fail report"
+			return s
+		},
+	)
+	fail, _ := reg.Get("fail")
+	fr := fail.Run(1, RunOptions{})
+	if fr.OK || fr.Text != "fail report" || len(fr.Failures) != 1 || fr.Failures[0].Kind != "protocol" {
+		t.Fatalf("%+v", fr)
 	}
 }

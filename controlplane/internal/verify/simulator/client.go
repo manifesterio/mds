@@ -4,6 +4,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/core/actor"
 	dstsim "github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 const (
@@ -177,7 +178,7 @@ func (c *client) answered(d runtime.ControlPlaneDone, prefix runtime.LogPosition
 	if op.attempts >= limit {
 		s.stats.GaveUp++
 		if op.final {
-			s.violation(finalReadsAnswered, "node cp-%d did not answer %T in the quiet tail (last error %v)", op.node, op.op, d.Err)
+			check.Violation(s.env, finalReadsAnswered, "node cp-%d did not answer %T in the quiet tail (last error %v)", op.node, op.op, d.Err)
 		}
 		c.finish()
 		return

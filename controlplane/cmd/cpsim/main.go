@@ -40,7 +40,6 @@ func config(p *product) campaign.Config {
 		Tool: "cpsim",
 		Defaults: campaign.Options{
 			CheckEvery: checkEvery,
-			// The summary line of a scenario keeps its form: slots, then acked writes.
 			SummaryCounters: []campaign.SummaryCounter{
 				{Key: "slots", Format: "%7d slots"},
 				{Key: "acked", Format: "%6d acked writes"},
@@ -59,25 +58,31 @@ func registry(p *product) *campaign.Registry {
 	var reg campaign.Registry
 	for _, name := range simulator.ScenarioNames() {
 		sc, _ := simulator.ScenarioByName(name)
-		reg.Add(campaign.Scenario{Name: sc.Name, Detail: sc.Detail, Run: runner(sc.Name, p)})
+		campaign.RegisterSim(&reg, sc.Name, sc.Detail,
+			"go run ./cmd/cpsim -scenario %s -seed %d",
+			runner(sc.Name, p),
+		)
 	}
 	return &reg
 }
 
-// runner makes the Run function of one scenario.
-func runner(scenario string, p *product) func(uint64, campaign.RunOptions) campaign.Result {
-	return func(seed uint64, o campaign.RunOptions) campaign.Result {
+// runner keeps product Stats and Report text; ExtraFlags stay on Config.
+func runner(scenario string, p *product) func(uint64, campaign.RunOptions) campaign.SimSeed {
+	return func(seed uint64, o campaign.RunOptions) campaign.SimSeed {
 		res, err := simulator.Run(simulator.Config{
 			Seed: seed, Scenario: scenario, Nodes: p.nodes, Steps: p.steps, Bug: simulator.Bug(p.bug),
 			Log: o.Log, HaltOnFirst: o.HaltOnFirst,
 		})
 		if err != nil {
-			return campaign.Result{Seed: seed, Failures: []campaign.Failure{{Kind: "protocol", Property: "scenario", Detail: err.Error()}}}
+			return campaign.FailSimSeed(seed, "scenario", err.Error())
 		}
-		out := campaign.FromSim(res.Result, res.Reproduce(), map[string]uint64{
-			"slots": uint64(res.Stats.LogSlots),
-			"acked": uint64(res.Stats.Acked),
-		})
+		out := campaign.SimSeed{
+			Result: res.Result,
+			Counters: map[string]uint64{
+				"slots": uint64(res.Stats.LogSlots),
+				"acked": uint64(res.Stats.Acked),
+			},
+		}
 		if !res.OK() || o.Log {
 			out.Text = simulator.Report(res)
 		}

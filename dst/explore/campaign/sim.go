@@ -62,20 +62,37 @@ func CrashExitCounters(r sim.Result) map[string]uint64 {
 	}
 }
 
-// RegisterSim adds a scenario whose Run returns a sim.Result. reproduceFmt is
-// fmt.Sprintf'd with the scenario name and the seed. When counters is non-nil,
-// its map is merged into the campaign result (after steps).
-func RegisterSim(reg *Registry, name, detail, reproduceFmt string, run func(uint64, RunOptions) sim.Result, counters func(sim.Result) map[string]uint64) {
+// SimSeed is one product sim run for RegisterSim: the sim.Result plus optional
+// product Counters (Stats stay product-side) and Text (a product report).
+type SimSeed struct {
+	Result   sim.Result
+	Counters map[string]uint64
+	Text     string
+}
+
+// FailSimSeed is a SimSeed for a setup error (unknown scenario, bad flags, ...).
+func FailSimSeed(seed uint64, property, detail string) SimSeed {
+	return SimSeed{Result: sim.Result{
+		Seed: seed,
+		Failures: []sim.Failure{{
+			Kind: sim.FailProtocol, Property: property, Detail: detail,
+		}},
+	}}
+}
+
+// RegisterSim adds a scenario whose Run returns a SimSeed. reproduceFmt is
+// fmt.Sprintf'd with the scenario name and the seed. Counters are merged into
+// the campaign result after steps. When Text is set, failed seeds and Replay
+// print it in place of the standard failure lines.
+func RegisterSim(reg *Registry, name, detail, reproduceFmt string, run func(uint64, RunOptions) SimSeed) {
 	reg.Add(Scenario{
 		Name:   name,
 		Detail: detail,
 		Run: func(seed uint64, o RunOptions) Result {
-			r := run(seed, o)
-			var extra map[string]uint64
-			if counters != nil {
-				extra = counters(r)
-			}
-			return FromSim(r, fmt.Sprintf(reproduceFmt, name, r.Seed), extra)
+			s := run(seed, o)
+			out := FromSim(s.Result, fmt.Sprintf(reproduceFmt, name, s.Result.Seed), s.Counters)
+			out.Text = s.Text
+			return out
 		},
 	})
 }

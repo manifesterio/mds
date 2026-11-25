@@ -49,10 +49,7 @@ var (
 	segmentListsNeverGoBackwards  = assert.NewAlwaysOnFailure("sim: segment lists never go backwards")                 //determinismcheck:ok catalog handle, set once at start
 )
 
-// These two are recorded by dst/verify/check (Checker.NoHole and check.Replay), which
-// builds the name from the prefix "sim: " (see sim.check). The check code does not
-// use a handle yet, so the names are declared here only to put them in the catalog.
 var (
-	_ = assert.NewAlways("sim: log has no hole")
-	_ = assert.NewAlways("sim: log entries decode")
+	logHasNoHole     = assert.NewAlways("sim: log has no hole")     //determinismcheck:ok catalog handle, set once at start
+	logEntriesDecode = assert.NewAlways("sim: log entries decode") //determinismcheck:ok catalog handle, set once at start
 )

@@ -2,10 +2,16 @@ package check_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/verify/check"
+)
+
+var (
+	verdictHandle = assert.NewAlways("check test: verdict handle")
+	holeHandle    = assert.NewAlways("check test: log has no hole")
 )
 
 type fakeLog struct {
@@ -127,5 +133,53 @@ func TestConverged(t *testing.T) {
 func TestAllEqual(t *testing.T) {
 	if !check.AllEqual[uint64](nil) || !check.AllEqual([]uint64{4, 4}) || check.AllEqual([]uint64{4, 5}) {
 		t.Fatal("AllEqual")
+	}
+}
+
+type recordAlways struct {
+	ok   []bool
+	name []string
+	det  []string
+}
+
+func (r *recordAlways) Always(cond bool, p assert.Always, details ...assert.Pair) {
+	r.ok = append(r.ok, cond)
+	r.name = append(r.name, p.Name())
+	if len(details) > 0 {
+		r.det = append(r.det, fmt.Sprint(details[0].Value))
+	} else {
+		r.det = append(r.det, "")
+	}
+}
+
+func TestVerdictHandle(t *testing.T) {
+	var rec recordAlways
+	if !check.Verdict(&rec, true, verdictHandle, "unused %d", 1) {
+		t.Fatal("ok path")
+	}
+	if check.Verdict(&rec, false, verdictHandle, "bad %d", 7) {
+		t.Fatal("fail path")
+	}
+	check.Violation(&rec, verdictHandle, "broke %s", "x")
+	if len(rec.ok) != 3 || !rec.ok[0] || rec.ok[1] || rec.ok[2] {
+		t.Fatalf("ok=%v", rec.ok)
+	}
+	if rec.det[0] != "" || rec.det[1] != "bad 7" || rec.det[2] != "broke x" {
+		t.Fatalf("det=%v", rec.det)
+	}
+	if rec.name[0] != verdictHandle.Name() {
+		t.Fatalf("name=%q", rec.name[0])
+	}
+}
+
+func TestNoHoleUsesHoleHandle(t *testing.T) {
+	var fails []string
+	c := check.Checker{
+		Log:  assert.New(func(p, d string) { fails = append(fails, p+": "+d) }),
+		Hole: holeHandle,
+	}
+	c.NoHole(fakeLog{entries: [][]byte{{1}}, hole: true})
+	if len(fails) != 1 || fails[0][:len(holeHandle.Name())] != holeHandle.Name() {
+		t.Fatalf("fails=%v", fails)
 	}
 }

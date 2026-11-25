@@ -3,6 +3,7 @@ package simulator
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/dst/core/actor"
+	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
 // Faults are the probabilities and rates of one scenario. A zero value means no
@@ -100,33 +101,13 @@ func replicaConfig(idx int, f Faults, bug Bug) replica.Config {
 	return cfg
 }
 
-// gap draws a random gap around mean.
-func (s *sim) gap(mean actor.Duration) actor.Duration {
-	return actor.Duration(s.rand.Between(int64(mean)/2, int64(mean)*3/2))
-}
-
 // startNemesis begins the node faults that the scenario asks for.
 func (s *sim) startNemesis() {
 	f := s.faults
-	s.every(f.CrashEvery, s.crashOne)
-	s.every(f.PauseEvery, s.pauseOne)
-	s.every(f.PartitionEvery, s.partitionOne)
-}
-
-// every runs fn about every mean, until the quiet tail starts.
-func (s *sim) every(mean actor.Duration, fn func()) {
-	if mean <= 0 {
-		return
-	}
-	var tick func()
-	tick = func() {
-		if s.quiet {
-			return
-		}
-		fn()
-		s.after(s.gap(mean), tick)
-	}
-	s.after(s.gap(mean), tick)
+	still := func() bool { return !s.quiet }
+	dstsim.EveryWhile(s.w, f.CrashEvery, still, s.crashOne)
+	dstsim.EveryWhile(s.w, f.PauseEvery, still, s.pauseOne)
+	dstsim.EveryWhile(s.w, f.PartitionEvery, still, s.partitionOne)
 }
 
 // victim picks the node for a fault: the writer if the scenario aims at it and

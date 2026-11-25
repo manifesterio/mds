@@ -323,6 +323,26 @@ func (sys *System) QuiesceEvery(d actor.Duration, pred func() bool) {
 	sys.After(d, tick)
 }
 
+// EveryWhile schedules fn about every mean (jittered in [mean/2, mean*3/2]
+// via sys.Rand) until still returns false. The first call is after one gap;
+// mean <= 0 does nothing. Use for periodic host faults that stop when a
+// quiet/heal predicate flips; which fault fn applies stays product-side.
+func EveryWhile(sys *System, mean actor.Duration, still func() bool, fn func()) {
+	if mean <= 0 {
+		return
+	}
+	gap := func() actor.Duration { return DrawBetween(sys.Rand(), mean/2, mean*3/2) }
+	var tick func()
+	tick = func() {
+		if still != nil && !still() {
+			return
+		}
+		fn()
+		sys.After(gap(), tick)
+	}
+	sys.After(gap(), tick)
+}
+
 // Start boots every spawned actor: first the actors that are not workloads,
 // in spawn order, then the workloads. Spawn every actor before Start; an
 // actor spawned later stays down until Boot. RunUntil calls Start if it was not

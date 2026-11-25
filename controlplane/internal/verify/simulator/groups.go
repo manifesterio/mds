@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/trace"
 	dstsim "github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 // The host of the rebalance actor (docs/architecture.md section 11). In
@@ -203,7 +204,7 @@ func (h *groupHost) done(gc *groupCall, r rebalance.Reply, ok bool) {
 	gc.gone = true
 	h.s.env.Reachable(callAbandoned)
 	if t := gc.try; !t.onPurpose && t.quiet {
-		h.s.violation(everyCallGetsAnswer, "%s: %s sent a call in the quiet tail and had no answer after %dms",
+		check.Violation(h.s.env, everyCallGetsAnswer, "%s: %s sent a call in the quiet tail and had no answer after %dms",
 			h.n.name(), t.c.name, t.deadline/actor.Millisecond)
 	}
 	gc.try.answered(runtime.ErrTimeout, nil)
@@ -337,16 +338,16 @@ func (h *groupHost) asked(e actor.Effect, load bool, r *receiveNotes) bool {
 func (h *groupHost) replied(e actor.Effect, r *receiveNotes) {
 	reply, _ := e.Msg.(rebalance.Reply)
 	if reply.Err == runtime.OK && !h.told {
-		h.s.violation(machineAnswersOnlyWithRole, "%s: the machine answered call %d OK after it was told that it lost the role", h.n.name(), e.Reply.Number)
+		check.Violation(h.s.env, machineAnswersOnlyWithRole, "%s: the machine answered call %d OK after it was told that it lost the role", h.n.name(), e.Reply.Number)
 	}
 	r.unavailable = r.unavailable || reply.Err == runtime.ErrUnavailable
 	gc := h.calls[e.Reply]
 	switch {
 	case gc == nil:
-		h.s.violation(everyCallGetsOneAnswer, "%s: the machine answered call %d, which it never got", h.n.name(), e.Reply.Number)
+		check.Violation(h.s.env, everyCallGetsOneAnswer, "%s: the machine answered call %d, which it never got", h.n.name(), e.Reply.Number)
 		return
 	case gc.replies > 0:
-		h.s.violation(everyCallGetsOneAnswer, "%s: the machine answered call %d twice", h.n.name(), e.Reply.Number)
+		check.Violation(h.s.env, everyCallGetsOneAnswer, "%s: the machine answered call %d twice", h.n.name(), e.Reply.Number)
 	case gc.gone:
 		h.s.env.Reachable(lateReplyAbandonedCallDropped)
 	}

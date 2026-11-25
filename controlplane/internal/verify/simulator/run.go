@@ -53,7 +53,7 @@ func (s *sim) runUntil(stop func() bool) {
 			return true
 		}
 		if s.steps() >= maxSteps {
-			s.violation(runEnds, "more than %d steps", maxSteps)
+			check.Violation(s.env, runEnds, "more than %d steps", maxSteps)
 			return true
 		}
 		return false
@@ -88,7 +88,7 @@ func (s *sim) quietPhase() {
 		return dstsim.QuietElapsed(waited, minQuiet, maxQuiet, ready)
 	})
 	s.stats.QuietMs = (s.now() - start) / int64(actor.Millisecond)
-	s.verdict(s.converged(), liveReplicasConverge, "after %dms of quiet the replicas did not reach the end of the log together: %s", s.stats.QuietMs, s.describeNodes())
+	check.Verdict(s.env, s.converged(), liveReplicasConverge, "after %dms of quiet the replicas did not reach the end of the log together: %s", s.stats.QuietMs, s.describeNodes())
 	if s.consumers != nil {
 		s.oracle.checkGroupsSettled(s.consumers)
 	}
@@ -164,7 +164,7 @@ func (s *sim) finish() {
 func (s *sim) checkSameState() {
 	for _, n := range s.nodes {
 		if r := n.replica(); r != nil {
-			s.verdict(s.store.quietAfter(r.Applied()), liveReplicasConverge, "%s is at slot %d and misses commands of the log", n.name(), r.Applied())
+			check.Verdict(s.env, s.store.quietAfter(r.Applied()), liveReplicasConverge, "%s is at slot %d and misses commands of the log", n.name(), r.Applied())
 		}
 	}
 }

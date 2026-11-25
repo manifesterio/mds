@@ -186,7 +186,7 @@ go test ./explore/campaign ./verify/check/... ./...
 
 Product simulators and production Envs should call dst for shared host glue rather
 than re-owning it: `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv`;
-`sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`,
+`sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`, `EveryWhile`,
 `Timeline.PhaseStart`, `FaultCoverageRule`, `DrawBetween` / `MaybeAdd`;
 `campaign.RegisterSim` / `FromSim`; `faulty.NamedAsserts` / `ShapeOf`;
 `trace.StateHasher`. Domain schedules, fault rates, and message vocabularies stay

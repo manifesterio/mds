@@ -41,14 +41,51 @@ type Log interface {
 	QuietAfter(from Slot) bool
 }
 
-// Checker records verdicts as properties named Prefix + name.
+// Checker records verdicts as properties named Prefix + name, or through the
+// typed Hole and Decode handles when those are set.
 type Checker struct {
 	Log    *assert.Log
 	Prefix string
+	// Hole is the Always for NoHole. When its name is empty, NoHole uses
+	// Prefix + "log has no hole".
+	Hole assert.Always
+	// Decode is the Always for Replay decode failures. When its name is empty,
+	// Replay uses Prefix + "log entries decode".
+	Decode assert.Always
+}
+
+// Recorder records Always properties. actor.Assertions and actor.Env satisfy it.
+type Recorder interface {
+	Always(cond bool, p assert.Always, details ...assert.Pair)
+}
+
+// LogRecorder adapts *assert.Log to Recorder using the handle's catalog name.
+type LogRecorder struct{ Log *assert.Log }
+
+// Always implements Recorder.
+func (r LogRecorder) Always(cond bool, p assert.Always, details ...assert.Pair) {
+	r.Log.Always(cond, assert.Property(p.Name()), details...)
+}
+
+// Verdict records ok under p and returns ok, so the caller can skip work after a
+// failure. The detail is formatted only when the check fails.
+func Verdict(a Recorder, ok bool, p assert.Always, format string, args ...any) bool {
+	if ok {
+		a.Always(true, p)
+		return true
+	}
+	a.Always(false, p, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
+	return false
+}
+
+// Violation records a failed Always with a formatted detail. The run goes on.
+func Violation(a Recorder, p assert.Always, format string, args ...any) {
+	Verdict(a, false, p, format, args...)
 }
 
 // Verdict records a check and returns ok, so the caller can skip work after a
-// failure. The detail is formatted only when the check fails.
+// failure. The detail is formatted only when the check fails. Prefer the
+// package-level Verdict with an assert.Always handle when the name is fixed.
 func (c Checker) Verdict(ok bool, property, format string, args ...any) bool {
 	p := assert.Property(c.Prefix + property)
 	if ok {
@@ -59,10 +96,19 @@ func (c Checker) Verdict(ok bool, property, format string, args ...any) bool {
 	return false
 }
 
+// verdictNamed records under handle when its name is set, else Prefix + name.
+func (c Checker) verdictNamed(ok bool, handle assert.Always, name, format string, args ...any) bool {
+	if handle.Name() != "" {
+		return Verdict(LogRecorder{c.Log}, ok, handle, format, args...)
+	}
+	return c.Verdict(ok, name, format, args...)
+}
+
 // NoHole checks that the log has no slot missing below its last slot.
 func (c Checker) NoHole(l Log) {
 	end, hole := l.End()
-	c.Verdict(!hole, "log has no hole", "the log history has a slot missing below its last slot (contiguous up to %d)", end)
+	c.verdictNamed(!hole, c.Hole, "log has no hole",
+		"the log history has a slot missing below its last slot (contiguous up to %d)", end)
 }
 
 // Replay applies the log to spec, slot by slot, in log order. decode turns one
@@ -78,7 +124,7 @@ func Replay[Op, Spec any](c Checker, l Log, spec Spec,
 	judge(0)
 	for slot := range end {
 		ops, err := decode(l.Entry(slot))
-		if !c.Verdict(err == nil, "log entries decode", "slot %d: %v", slot, err) {
+		if !c.verdictNamed(err == nil, c.Decode, "log entries decode", "slot %d: %v", slot, err) {
 			return false
 		}
 		for _, op := range ops {

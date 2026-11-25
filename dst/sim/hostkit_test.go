@@ -32,6 +32,18 @@ func TestBootstrapRecordFaultQuiesce(t *testing.T) {
 	}
 }
 
+func TestEveryWhile(t *testing.T) {
+	t.Parallel()
+	sys, _, _ := sim.Bootstrap(sim.Config{Seed: 2, End: sim.Time(10 * actor.Second)})
+	n := 0
+	sim.EveryWhile(sys, actor.Second, func() bool { return n < 3 }, func() { n++ })
+	sim.EveryWhile(sys, 0, func() bool { return true }, func() { t.Fatal("mean 0") })
+	_ = sys.Run()
+	if n != 3 {
+		t.Fatalf("ticks = %d", n)
+	}
+}
+
 func TestAskDelayed(t *testing.T) {
 	t.Parallel()
 	w := newWorld(11)

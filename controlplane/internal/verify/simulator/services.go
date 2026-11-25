@@ -315,7 +315,7 @@ func (st *storage) committed(slot runtime.LogPosition, data []byte) {
 		return
 	}
 	if first, ok := st.epochWriter.Note(epoch, writer); !ok {
-		st.s.violation(oneWriterPerEpoch, "epoch %d has entries from %q and from %q (slot %d)", epoch, first, writer, slot)
+		check.Violation(st.s.env, oneWriterPerEpoch, "epoch %d has entries from %q and from %q (slot %d)", epoch, first, writer, slot)
 	}
 }
 
@@ -329,7 +329,7 @@ func (st *storage) applyClaim(c runtime.LogClaimEpoch) actor.Payload {
 	}
 	if won {
 		if first, ok := st.epochOwner.Note(epoch, owner); !ok {
-			st.s.violation(oneWriterPerEpoch, "epoch %d was won by %q and by %q", epoch, first, owner)
+			check.Violation(st.s.env, oneWriterPerEpoch, "epoch %d was won by %q and by %q", epoch, first, owner)
 		}
 	}
 	return runtime.LogClaimEpochDone{Epoch: epoch, Owner: owner, Won: won, Err: runtime.OK, Outcome: runtime.Applied}

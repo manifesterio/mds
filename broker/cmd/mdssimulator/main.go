@@ -14,7 +14,6 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/dst/explore/campaign"
-	"github.com/manifesterio/mds/dst/sim"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -50,10 +49,10 @@ func registry() *campaign.Registry {
 	var reg campaign.Registry
 	campaign.RegisterSim(&reg, "kafka", "the broker under a Kafka workload",
 		"go run ./cmd/mdssimulator -scenario %s -seed %d",
-		func(seed uint64, o campaign.RunOptions) sim.Result {
-			return kafka.Run(kafka.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
+		func(seed uint64, o campaign.RunOptions) campaign.SimSeed {
+			r := kafka.Run(kafka.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
+			return campaign.SimSeed{Result: r, Counters: campaign.CrashExitCounters(r)}
 		},
-		campaign.CrashExitCounters,
 	)
 	return &reg
 }
