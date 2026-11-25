@@ -111,3 +111,125 @@ func Save(path string, got map[uint64]uint64) error {
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
+
+// Record is one richer golden line: scenario, seed, steps, rand draws, and hash.
+// On disk: "<scenario> seed=<n> steps=<n> rand=<n> hash=<016x>".
+type Record struct {
+	Scenario string
+	Seed     uint64
+	Steps    uint64
+	Rand     uint64
+	Hash     uint64
+}
+
+// FormatRecord renders r in the richer golden line form.
+func FormatRecord(r Record) string {
+	return fmt.Sprintf("%s seed=%d steps=%d rand=%d hash=%016x", r.Scenario, r.Seed, r.Steps, r.Rand, r.Hash)
+}
+
+// ParseRecord parses one richer golden line.
+func ParseRecord(line string) (Record, error) {
+	line = strings.TrimSpace(line)
+	scenario, rest, ok := strings.Cut(line, " ")
+	if !ok || scenario == "" {
+		return Record{}, fmt.Errorf("want \"<scenario> seed=… steps=… rand=… hash=…\"")
+	}
+	fields := map[string]uint64{}
+	for part := range strings.SplitSeq(rest, " ") {
+		key, val, ok := strings.Cut(part, "=")
+		if !ok {
+			return Record{}, fmt.Errorf("want key=value in %q", part)
+		}
+		base := 10
+		if key == "hash" {
+			base = 16 // FormatRecord writes hash as bare %016x (no 0x prefix)
+		}
+		n, err := strconv.ParseUint(val, base, 64)
+		if err != nil {
+			return Record{}, fmt.Errorf("%s: %w", key, err)
+		}
+		fields[key] = n
+	}
+	for _, key := range []string{"seed", "steps", "rand", "hash"} {
+		if _, ok := fields[key]; !ok {
+			return Record{}, fmt.Errorf("missing %s", key)
+		}
+	}
+	return Record{
+		Scenario: scenario,
+		Seed:     fields["seed"],
+		Steps:    fields["steps"],
+		Rand:     fields["rand"],
+		Hash:     fields["hash"],
+	}, nil
+}
+
+// LoadRecords reads richer golden lines from path. Blank lines and # comments
+// are ignored. Order is file order.
+func LoadRecords(path string) ([]Record, error) {
+	f, err := os.Open(path) //nolint:gosec // G304: path is the caller's golden file by design
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	var out []Record
+	sc := bufio.NewScanner(f)
+	lineNo := 0
+	for sc.Scan() {
+		lineNo++
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		r, err := ParseRecord(line)
+		if err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", path, lineNo, err)
+		}
+		out = append(out, r)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SaveRecords writes records as richer golden lines (file order preserved).
+func SaveRecords(path string, records []Record) error {
+	var b strings.Builder
+	for _, r := range records {
+		b.WriteString(FormatRecord(r))
+		b.WriteByte('\n')
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o600)
+}
+
+// AssertFile compares got to the richer golden file at path. When update is
+// true, the file is rewritten from got and the test passes.
+func AssertFile(t testing.TB, path string, got []Record, update bool) {
+	t.Helper()
+	if update {
+		if err := SaveRecords(path, got); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := LoadRecords(path)
+	if err != nil {
+		t.Fatalf("%v (create it with -update-golden)", err)
+	}
+	gotText := formatRecords(got)
+	wantText := formatRecords(want)
+	if gotText != wantText {
+		t.Fatalf("trace hashes changed. If this is intended, review it and re-run with -update-golden.\nwant:\n%sgot:\n%s", wantText, gotText)
+	}
+}
+
+func formatRecords(records []Record) string {
+	var b strings.Builder
+	for _, r := range records {
+		b.WriteString(FormatRecord(r))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}

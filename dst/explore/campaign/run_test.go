@@ -750,3 +750,31 @@ func TestFromSim(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestFromSimMergesExtraCounters(t *testing.T) {
+	r := FromSim(simResult(), "replay", map[string]uint64{"slots": 3, "acked": 1})
+	if r.Counters["steps"] != 40 || r.Counters["slots"] != 3 || r.Counters["acked"] != 1 {
+		t.Fatalf("counters %+v", r.Counters)
+	}
+}
+
+func TestRegisterSimAndCrashExitCounters(t *testing.T) {
+	var reg Registry
+	RegisterSim(&reg, "demo", "a demo", "tool -scenario %s -seed %d",
+		func(seed uint64, _ RunOptions) sim.Result {
+			return sim.Result{Seed: seed, Steps: 11, Crashes: 2, Exits: 1, Hash: 0x11}
+		},
+		CrashExitCounters,
+	)
+	sc, ok := reg.Get("demo")
+	if !ok {
+		t.Fatal("demo not registered")
+	}
+	r := sc.Run(9, RunOptions{})
+	if r.Reproduce != "tool -scenario demo -seed 9" {
+		t.Fatalf("reproduce %q", r.Reproduce)
+	}
+	if r.Counters["steps"] != 11 || r.Counters["crashes"] != 2 || r.Counters["exits"] != 1 {
+		t.Fatalf("counters %+v", r.Counters)
+	}
+}

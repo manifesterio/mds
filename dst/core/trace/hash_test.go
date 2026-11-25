@@ -10,6 +10,9 @@ func TestNewOffset(t *testing.T) {
 	if got, want := trace.New().Sum(), uint64(0xcbf29ce484222325); got != want {
 		t.Fatalf("offset %#x want %#x", got, want)
 	}
+	if trace.NewStateHasher() != trace.New() {
+		t.Fatal("NewStateHasher differs from New")
+	}
 }
 
 func TestGoldenFolds(t *testing.T) {

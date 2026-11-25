@@ -5,6 +5,11 @@ package trace
 // Invariant: identical fold sequences yield identical Sum.
 type Hash uint64
 
+// StateHasher is the FNV-1a fold for product run state. Prefer this name at
+// product boundaries; it is the same type as Hash. Use it instead of hash/fnv,
+// which is off the determinism allow-list.
+type StateHasher = Hash
+
 const (
 	fnvOffset = 14695981039346656037
 	fnvPrime  = fnvP1
@@ -12,6 +17,9 @@ const (
 
 // New returns the FNV-1a offset basis.
 func New() Hash { return fnvOffset }
+
+// NewStateHasher returns a StateHasher at the FNV-1a offset basis.
+func NewStateHasher() StateHasher { return New() }
 
 // Sum is the hash so far.
 func (h Hash) Sum() uint64 { return uint64(h) }

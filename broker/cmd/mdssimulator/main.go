@@ -9,7 +9,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"os"
 
@@ -49,30 +48,12 @@ func config() campaign.Config {
 // registry has one scenario: kafka (the broker under a Kafka workload).
 func registry() *campaign.Registry {
 	var reg campaign.Registry
-	add(&reg, "kafka", "the broker under a Kafka workload",
+	campaign.RegisterSim(&reg, "kafka", "the broker under a Kafka workload",
+		"go run ./cmd/mdssimulator -scenario %s -seed %d",
 		func(seed uint64, o campaign.RunOptions) sim.Result {
 			return kafka.Run(kafka.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
-		})
-	return &reg
-}
-
-// add registers a scenario that runs one seed with run.
-func add(reg *campaign.Registry, name, detail string, run func(uint64, campaign.RunOptions) sim.Result) {
-	reg.Add(campaign.Scenario{
-		Name:   name,
-		Detail: detail,
-		Run: func(seed uint64, o campaign.RunOptions) campaign.Result {
-			return fromSim(name, run(seed, o))
 		},
-	})
-}
-
-// fromSim turns the result of one seed into a campaign result. It adds the
-// replay command and the two counters (crashes and exits) that the old tool
-// printed for each seed.
-func fromSim(scenario string, r sim.Result) campaign.Result {
-	out := campaign.FromSim(r, fmt.Sprintf("go run ./cmd/mdssimulator -scenario %s -seed %d", scenario, r.Seed))
-	out.Counters["crashes"] = uint64(r.Crashes)
-	out.Counters["exits"] = uint64(r.Exits)
-	return out
+		campaign.CrashExitCounters,
+	)
+	return &reg
 }

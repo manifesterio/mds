@@ -21,10 +21,10 @@ var simKindNames = map[sim.FailKind]string{
 const KindNotRepeatable = "nondeterminism"
 
 // FromSim turns the result of a sim run into a campaign result. The
-// counter "steps" is set. A scenario may add its own counters to the
-// returned value. When reproduce is empty, the campaign makes the replay
-// command from Options.Tool.
-func FromSim(r sim.Result, reproduce string) Result {
+// counter "steps" is set. Each extra map is merged into Counters after
+// that. When reproduce is empty, the campaign makes the replay command
+// from Options.Tool.
+func FromSim(r sim.Result, reproduce string, extras ...map[string]uint64) Result {
 	out := Result{
 		Seed: r.Seed, Hash: r.Hash, Steps: r.Steps, RandCalls: r.RandCalls,
 		OK: r.OK(), Reproduce: reproduce,
@@ -33,6 +33,11 @@ func FromSim(r sim.Result, reproduce string) Result {
 		Sites:    r.Sites,
 		Tail:     simLogLines(r.Tail),
 		Log:      simLogLines(r.Log),
+	}
+	for _, extra := range extras {
+		for k, v := range extra {
+			out.Counters[k] = v
+		}
 	}
 	for name, c := range r.Coverage {
 		out.Coverage[name] = Coverage{Kind: string(c.Kind), Checks: c.Checks, Passes: c.Passes}
@@ -48,6 +53,32 @@ func FromSim(r sim.Result, reproduce string) Result {
 		})
 	}
 	return out
+}
+
+// CrashExitCounters reports crashes and exits of a sim run for campaign summaries.
+func CrashExitCounters(r sim.Result) map[string]uint64 {
+	return map[string]uint64{
+		"crashes": uint64(r.Crashes),
+		"exits":   uint64(r.Exits),
+	}
+}
+
+// RegisterSim adds a scenario whose Run returns a sim.Result. reproduceFmt is
+// fmt.Sprintf'd with the scenario name and the seed. When counters is non-nil,
+// its map is merged into the campaign result (after steps).
+func RegisterSim(reg *Registry, name, detail, reproduceFmt string, run func(uint64, RunOptions) sim.Result, counters func(sim.Result) map[string]uint64) {
+	reg.Add(Scenario{
+		Name:   name,
+		Detail: detail,
+		Run: func(seed uint64, o RunOptions) Result {
+			r := run(seed, o)
+			var extra map[string]uint64
+			if counters != nil {
+				extra = counters(r)
+			}
+			return FromSim(r, fmt.Sprintf(reproduceFmt, name, r.Seed), extra)
+		},
+	})
 }
 
 // simLogLines formats step lines as "step time text".

@@ -90,7 +90,7 @@ func (b *Broker) onBytes(e core.BytesReceived, outbox *brokerOutbox) {
 	if c == nil || c.closing {
 		return
 	}
-	c.rx.bytes(e.Data)
+	c.rx.Bytes(e.Data)
 	frames, err := c.fr.Push(e.Data)
 	for _, f := range frames {
 		if c.closing {

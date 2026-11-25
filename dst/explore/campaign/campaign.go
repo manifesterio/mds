@@ -7,7 +7,7 @@
 //
 //   - campaign.go: Result, Summary and RunSeeds (the parallel fold)
 //   - registry.go: Scenario, RunOptions and Registry
-//   - sim.go: FromSim
+//   - sim.go: FromSim, RegisterSim
 //   - options.go: Config, Options and ParseOptions (flags and variables)
 //   - run.go: RunCampaign, Replay and Main
 //   - report.go: Report, its text and JSON
