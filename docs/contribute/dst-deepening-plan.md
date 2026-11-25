@@ -1,6 +1,6 @@
 # DST deepening plan: absorb undifferentiated host work
 
-**Status:** in progress on `slim/verification`  
+**Status:** done on `slim/verification` (Phase G recorded)  
 **Thesis:** `dst` packages look shallow because broker and controlplane each own a private host layer on top of dst verbs. Depth belongs in dst. Product oracles/protocols stay product-side.  
 **Success (primary):** host patterns that both products reinvent become first-class dst APIs, and products stop reimplementing them.  
 **Success (secondary):** deslop `shallow-package` / unused-export pressure on `dst` eases because packages gain owned implementation behind those APIs — not because we “declare findings noise.”
@@ -366,7 +366,12 @@ Run full verification + deslop. Write Outcome section into docs/contribute/dst-d
 
 ## Baseline
 
-_(Phase 0 agent fills this in.)_
+Phase 0 section was not filled in-doc. Pre-deepening deslop for `dst` (from the inventory chat that motivated this plan):
+
+- **dst findings:** 9 (`shallow-package` 7 + `tangle` 2)
+- **shallow shown/hidden:** `assert` 21/0, `fault` 9/2, `rng` 9/0, `sched` 7/3, `trace` 9/3, `runtime/live` 10/2, `sim` 50/28
+- **tangle:** `core/actor` (4 types), `sim` (8 types)
+- No `module-layer` or `field-leak` in dst.
 
 ## Phase D0 — Spike outcome: **DEFER**
 
@@ -398,4 +403,58 @@ Explicit deferral recorded. Working tree unmigrated. D1 not started.
 
 ## Outcome
 
-_(Phase G agent fills this in.)_
+Phase G hunt (2026-11-25): **no remaining undifferentiated copies** of Phase A–F patterns. Nothing safe/hash-neutral left to delete or migrate.
+
+### What moved into dst
+
+| Area | dst ownership | Product call sites |
+|---|---|---|
+| A Env | `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv` | broker `production.NewEnv` thin wrapper; CP `envFor` picks Counter vs NewEnv |
+| B campaign | `RegisterSim`, `CrashExitCounters`, `FromSim` extras | broker `mdssimulator` uses `RegisterSim` |
+| B golden | `verify/golden.AssertFile` | broker kafka golden test imports dst golden |
+| B trace | `trace.StateHasher` / `NewStateHasher` | broker `stateHasher` wraps it |
+| C host kits | `Bootstrap`, `System.RecordFault`, `AskDelayed`, `QuiesceEvery`, `PhaseStart`, `FaultCoverageRule`, `FastWithRareSlow` | CP sim bootstrap + Ask RTT; broker cluster quiesce + network faults; kafka/preset coverage |
+| E exports | unused sim symbols unexported | (compile-only product touch) |
+| F faulty | `NamedAsserts`, `ShapeOf` | broker objectstore/controlplane fakes |
+
+### What stayed product (differentiated)
+
+- Kafka oracle, segment caps/timing, connection-table network semantics
+- CP Executor-based fakes (not forced onto `AddService`)
+- RoleChanged / companion-actor protocol; product IO Answer switches
+- Assert/fault **names** and catalogs; planted bugs; swarm menus; segment knobs
+- CP `cpsim` runner: product ExtraFlags, `Report`/`Text`, slots/acked counters via `FromSim` (not crash/exit glue)
+- Test Envs with viol/fault recording (`broker` harness, kafka `fakeEnv`, CP replica/rebalance) — allowed; no dst `NewTestEnv` invented
+- Broker `production.NewEnv` stays as the `core.Environment` product façade over `live.NewLoggingEnv`
+
+### D0 deferral (brief)
+
+`sched` remains live/clock-only; `sim` keeps `queue.go`. Zero-drift sit-on-sched fails on tie draws, lane FIFO, trace entry kinds, cancel/peek, and Jump. See Phase D0 section above. No D1.
+
+### Deslop trailing check (`go run ./ops/tools/deslop`)
+
+| | Before (pre-deepening) | After (Phase G) |
+|---|---|---|
+| dst findings | 9 | **9** |
+| by area line | dst=9 … | dst=9 controlplane=21 broker=11 |
+| `sim` shown/hidden | 50 / 28 | **58 / 30** |
+| `runtime/live` shown/hidden | 10 / 2 | **12 / 2** |
+| `trace` shown/hidden | 9 / 3 | **10 / 3** |
+
+Finding **count** did not drop: absorbing host kits added named exports (`Bootstrap`, `AskDelayed`, `NewLoggingEnv`, …), so shallow heuristics still fire. Depth moved behind those APIs (products no longer own the host layer). That matches the plan’s primary success metric over “silence deslop.”
+
+### Remaining dst shallow / tangle — classified
+
+| Finding | Class | Reason |
+|---|---|---|
+| shallow `core/assert`, `fault`, `rng`, `sched`, `trace` | **accepted** | Shared vocabulary packages: many small exports, little to hide by design |
+| shallow `runtime/live` | **accepted** | Production Host + Env constructors are the intentional surface |
+| shallow `sim` (58/30) | **accepted-with-reason** | Fat host/kernel API is the product of deepening; hidden helpers grew slightly. Further cut is Phase-E-style unexport only when namers go to zero — not file-merge theater |
+| tangle `core/actor` | **accepted** | Typed effects ↔ erased refs across outbox/refs; required dual-runtime seam |
+| tangle `sim` | **accepted** | System/env/service/slot cluster across files; real ownership split would not shrink product copies |
+| CP/broker shallow & tangle outside dst | **out of scope** | Product domain packages; not host-layer absorption |
+
+### Follow-ups (optional, not blocking)
+
+- None required for host-layer absorption.
+- If deslop pressure on `sim` bothers later: measure external namers again and unexport only true dead weight (Phase E discipline), or teach deslop a “kernel surface” allow — do **not** merge files to silence tangle.
