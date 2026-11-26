@@ -203,7 +203,7 @@ func (h *host[In, IO]) pump() {
 	if !h.receive(it.msg) || !h.up {
 		return
 	}
-	cost := max(h.cost.Sample(sys.rand), 0)
+	cost := max(h.cost.Sample(sys.Env()), 0)
 	h.busy = now + Time(cost)
 	if !h.empty() {
 		sys.ensureWake(&h.actorBase, h.busy)

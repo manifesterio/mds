@@ -25,6 +25,7 @@ func (e env) Duration(lo, hi actor.Duration) actor.Duration {
 func (e env) Uint64() uint64               { return e.sys.rand.Uint64() }
 func (e env) Intn(n int) int               { return e.sys.rand.Intn(n) }
 func (e env) Between(lo, hi int64) int64   { return e.sys.rand.Between(lo, hi) }
+func (e env) Float64() float64             { return e.sys.rand.Float64() }
 func (e env) Chance(p float64) bool        { return e.sys.rand.Chance(p) }
 func (e env) Maybe(s fault.Site) bool      { return e.sys.faults.Maybe(s) }
 func (e env) Reachable(p assert.Reachable) { e.sys.asserts.Reachable(assert.Property(p.Name())) }

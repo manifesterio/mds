@@ -2,7 +2,6 @@ package sim
 
 import (
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/rng"
 )
 
 // CostParams is the CPU model of a node: how long the node is busy after one
@@ -16,7 +15,7 @@ type CostParams struct {
 
 // Sample draws the cost of one Step: PerEvent, plus a Pause sample with
 // probability PauseProb.
-func (p CostParams) Sample(r *rng.Rand) actor.Duration {
+func (p CostParams) Sample(r actor.Rand) actor.Duration {
 	d := p.PerEvent
 	if r.Chance(p.PauseProb) {
 		d += p.Pause.Sample(r)
@@ -37,7 +36,7 @@ type FastWithRareSlow struct {
 // Sample draws one delay: a coin for the slow tail, then a value in the chosen
 // range, both ends included. A range with Max <= Min gives Min and draws
 // nothing.
-func (t FastWithRareSlow) Sample(r *rng.Rand) actor.Duration {
+func (t FastWithRareSlow) Sample(r actor.Rand) actor.Duration {
 	lo, hi := t.FastMin, t.FastMax
 	if r.Chance(t.SlowProb) {
 		lo, hi = t.SlowMin, t.SlowMax
@@ -47,12 +46,12 @@ func (t FastWithRareSlow) Sample(r *rng.Rand) actor.Duration {
 
 // DrawBetween returns a duration in [lo, hi], both ends included. Max <= Min
 // gives Min and draws nothing.
-func DrawBetween(r *rng.Rand, lo, hi actor.Duration) actor.Duration {
+func DrawBetween(r actor.Rand, lo, hi actor.Duration) actor.Duration {
 	return actor.Duration(r.Between(int64(lo), int64(hi)))
 }
 
 // MaybeAdd returns extra in [lo, hi] with probability p, else 0.
-func MaybeAdd(r *rng.Rand, p float64, lo, hi actor.Duration) actor.Duration {
+func MaybeAdd(r actor.Rand, p float64, lo, hi actor.Duration) actor.Duration {
 	if !r.Chance(p) {
 		return 0
 	}

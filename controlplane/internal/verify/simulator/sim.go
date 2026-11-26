@@ -5,7 +5,6 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/rng"
 	dstsim "github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check"
 )
@@ -66,7 +65,7 @@ type sim struct {
 	scenario  Scenario
 	w         *dstsim.System // the actors, the queue and the hash
 	env       actor.Env      // the Env of the System: the random stream, buggify and assertions
-	rand      *rng.Rand
+	rand      actor.Rand
 	store     *storage
 	nodes     []*simNode
 	byName    map[string]*simNode // by actor name of the replica (cp-<idx>)
@@ -114,10 +113,11 @@ func newSim(cfg Config) (*sim, error) {
 	}
 	// Bootstrap calls Start before nodes are spawned: Start boots actors it
 	// finds, and here every node boots later at a random time (run.go boot).
-	s.w, s.env, s.rand = dstsim.Bootstrap(dstsim.Config{
+	s.w, s.env = dstsim.Bootstrap(dstsim.Config{
 		Seed: cfg.Seed, WallStart: actor.Wall(wallStart), MaxSteps: maxSteps + 1,
 		Log: cfg.Log, Tail: traceRing, HaltOnFirst: cfg.HaltOnFirst, VerifyHashes: cfg.verifyHashes,
 	})
+	s.rand = s.env
 	s.store = newStorage(s)
 	s.oracle = newOracle(s)
 	s.clients = newClientPool(s, 3)

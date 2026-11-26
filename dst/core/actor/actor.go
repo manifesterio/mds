@@ -128,6 +128,8 @@ type Rand interface {
 	// Between returns a value in [lo, hi], both ends included. It returns lo,
 	// and draws nothing, when hi <= lo.
 	Between(lo, hi int64) int64
+	// Float64 returns a value in [0, 1).
+	Float64() float64
 	// Chance is true with probability p. It draws nothing when p <= 0.
 	Chance(p float64) bool
 	// Duration is Between for durations.

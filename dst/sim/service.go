@@ -5,7 +5,6 @@ import (
 
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/rng"
 )
 
 // Service simulates one outside system (an object store, a log, the control
@@ -182,9 +181,6 @@ type ServiceCtx struct {
 
 // Now is the virtual time.
 func (c *ServiceCtx) Now() actor.Mono { return actor.Mono(c.sys.q.now) }
-
-// Rng is the run's random stream, for helpers that take an *rng.Rand.
-func (c *ServiceCtx) Rng() *rng.Rand { return c.sys.rand }
 
 // Injector is the run's buggify injector, for helpers that take one.
 func (c *ServiceCtx) Injector() *fault.Injector { return c.sys.faults }

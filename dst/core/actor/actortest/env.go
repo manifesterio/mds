@@ -95,6 +95,14 @@ func (e *Env) Between(lo, hi int64) int64 {
 	return lo + int64(e.Intn(int(hi-lo+1)))
 }
 
+// Float64 implements actor.Rand.
+func (e *Env) Float64() float64 {
+	if e.rand != nil {
+		return e.rand.Float64()
+	}
+	return float64(e.Uint64()>>11) / (1 << 53)
+}
+
 // Chance implements actor.Rand.
 func (e *Env) Chance(p float64) bool {
 	if e.rand != nil {

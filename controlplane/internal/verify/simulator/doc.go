@@ -8,7 +8,7 @@
 // Rules of a run:
 //   - one goroutine, no real time, no real IO, no map iteration that decides
 //     behavior;
-//   - one seeded random stream (see Rand). Every choice comes from it;
+//   - one seeded random stream (the actor.Rand of the run Env). Every choice comes from it;
 //   - time moves only when the scheduler takes the next event from the queue.
 //
 // The oracle is the control-plane spec (oracle.go is the only file of this

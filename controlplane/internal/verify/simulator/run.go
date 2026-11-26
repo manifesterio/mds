@@ -177,7 +177,7 @@ func (s *sim) result() Result {
 		{Key: "steps", Value: actor.Uint64Value(s.w.Steps())},
 		{Key: "acked", Value: actor.Uint64Value(s.stats.Acked)},
 		{Key: "log_slots", Value: actor.Uint64Value(s.stats.LogSlots)},
-		{Key: "rand_calls", Value: actor.Uint64Value(s.rand.Calls())},
+		{Key: "rand_calls", Value: actor.Uint64Value(s.w.Draws())},
 	}})
 	return Result{Result: s.w.Finish(), Scenario: s.cfg.Scenario, EndMs: s.now() / int64(actor.Millisecond), Stats: s.stats}
 }

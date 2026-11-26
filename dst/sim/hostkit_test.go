@@ -9,9 +9,9 @@ import (
 
 func TestBootstrapRecordFaultQuiesce(t *testing.T) {
 	t.Parallel()
-	sys, env, r := sim.Bootstrap(sim.Config{Seed: 1, End: sim.Time(2*actor.Second + 1)})
-	if env == nil || r == nil {
-		t.Fatal("Bootstrap nil Env/Rand")
+	sys, env := sim.Bootstrap(sim.Config{Seed: 1, End: sim.Time(2*actor.Second + 1)})
+	if env == nil {
+		t.Fatal("Bootstrap nil Env")
 	}
 	sys.RecordFault("host_fault")
 	if len(sys.Timeline().Snapshot("sim_fault")) != 1 {
@@ -34,7 +34,7 @@ func TestBootstrapRecordFaultQuiesce(t *testing.T) {
 
 func TestEveryWhile(t *testing.T) {
 	t.Parallel()
-	sys, _, _ := sim.Bootstrap(sim.Config{Seed: 2, End: sim.Time(10 * actor.Second)})
+	sys, _ := sim.Bootstrap(sim.Config{Seed: 2, End: sim.Time(10 * actor.Second)})
 	n := 0
 	sim.EveryWhile(sys, actor.Second, func() bool { return n < 3 }, func() { n++ })
 	sim.EveryWhile(sys, 0, func() bool { return true }, func() { t.Fatal("mean 0") })

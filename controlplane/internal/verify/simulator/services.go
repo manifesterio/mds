@@ -10,7 +10,6 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/rng"
 	dstsim "github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check"
 )
@@ -76,7 +75,7 @@ func newStorage(s *sim) *storage {
 	}
 }
 
-func (st *storage) netDelay(r *rng.Rand) actor.Duration {
+func (st *storage) netDelay(r actor.Rand) actor.Duration {
 	return dstsim.DrawBetween(r, netMin, netMax) + dstsim.MaybeAdd(r, st.s.faults.Slow, slowMin, slowMax)
 }
 
@@ -105,7 +104,7 @@ func isLogCall(call runtime.IO) bool {
 	return log
 }
 
-func (st *storage) decide(r *rng.Rand, call runtime.IO) callMode {
+func (st *storage) decide(r actor.Rand, call runtime.IO) callMode {
 	f := st.s.faults
 	if st.s.quiet {
 		return callOK

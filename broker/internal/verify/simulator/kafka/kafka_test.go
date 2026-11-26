@@ -292,6 +292,7 @@ func (e *fakeEnv) Between(lo, hi int64) int64 {
 func (e *fakeEnv) Duration(lo, hi actor.Duration) actor.Duration {
 	return actor.Duration(e.Between(int64(lo), int64(hi)))
 }
+func (e *fakeEnv) Float64() float64                                                   { return float64(e.Uint64()>>11) / (1 << 53) }
 func (*fakeEnv) Chance(float64) bool                                                  { return false }
 func (*fakeEnv) Self() actor.Incarnation                                              { return actor.Incarnation{Name: "w"} }
 func (*fakeEnv) Maybe(fault.Site) bool                                                { return false }

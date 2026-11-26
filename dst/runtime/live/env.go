@@ -95,6 +95,8 @@ func (e *chachaEnv) Between(lo, hi int64) int64 {
 	return between(e.Uint64(), lo, hi)
 }
 
+func (e *chachaEnv) Float64() float64 { return float64(e.Uint64()>>11) / (1 << 53) }
+
 func (e *chachaEnv) Chance(p float64) bool {
 	if p <= 0 {
 		return false
@@ -171,6 +173,8 @@ func (e *counterEnv) Between(lo, hi int64) int64 {
 func (e *counterEnv) Duration(lo, hi actor.Duration) actor.Duration {
 	return actor.Duration(e.Between(int64(lo), int64(hi)))
 }
+
+func (e *counterEnv) Float64() float64 { return float64(e.Uint64()>>11) / (1 << 53) }
 
 func (e *counterEnv) Chance(p float64) bool {
 	return p > 0 && float64(e.Uint64()%1000) < p*1000

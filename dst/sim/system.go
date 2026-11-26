@@ -219,8 +219,8 @@ func (sys *System) Wall() actor.Wall { return sys.cfg.WallStart + actor.Wall(sys
 // Steps is the number of queue entries taken so far.
 func (sys *System) Steps() uint64 { return sys.steps }
 
-// Rand is the one random stream of the run.
-func (sys *System) Rand() *rng.Rand { return sys.rand }
+// Draws is the number of draws from the run stream so far.
+func (sys *System) Draws() uint64 { return sys.rand.Calls() }
 
 // Env is the run's Rand, Faults and Assertions for host code. Its Self is
 // the zero Incarnation.
@@ -255,14 +255,14 @@ func (sys *System) RecordFault(kind string, fields ...actor.Field) {
 	sys.systemFact(factFault, all...)
 }
 
-// Bootstrap makes a System for cfg, calls Start, and returns the host Env and
-// Rand. Use it when host code needs Env/Rand immediately and will Spawn after
-// Start (Start only boots actors already spawned). Prefer NewSystem alone when
+// Bootstrap makes a System for cfg, calls Start, and returns the host Env.
+// Use it when host code needs Env immediately and will Spawn after Start
+// (Start only boots actors already spawned). Prefer NewSystem alone when
 // Spawn/AddService must run before Start.
-func Bootstrap(cfg Config) (*System, actor.Env, *rng.Rand) {
+func Bootstrap(cfg Config) (*System, actor.Env) {
 	sys := NewSystem(cfg)
 	sys.Start()
-	return sys, sys.Env(), sys.Rand()
+	return sys, sys.Env()
 }
 
 // cancel retires a pending queue entry. An entry that already ran, or an
@@ -324,14 +324,14 @@ func (sys *System) QuiesceEvery(d actor.Duration, pred func() bool) {
 }
 
 // EveryWhile schedules fn about every mean (jittered in [mean/2, mean*3/2]
-// via sys.Rand) until still returns false. The first call is after one gap;
+// via sys.Env) until still returns false. The first call is after one gap;
 // mean <= 0 does nothing. Use for periodic host faults that stop when a
 // quiet/heal predicate flips; which fault fn applies stays product-side.
 func EveryWhile(sys *System, mean actor.Duration, still func() bool, fn func()) {
 	if mean <= 0 {
 		return
 	}
-	gap := func() actor.Duration { return DrawBetween(sys.Rand(), mean/2, mean*3/2) }
+	gap := func() actor.Duration { return DrawBetween(sys.Env(), mean/2, mean*3/2) }
 	var tick func()
 	tick = func() {
 		if still != nil && !still() {

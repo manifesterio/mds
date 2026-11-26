@@ -36,7 +36,6 @@ import (
 
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/core/trace"
 	"github.com/manifesterio/mds/dst/sim"
 )
@@ -223,7 +222,7 @@ func (s *Service[Req, Rep, Op, Res]) EnterRecovery() { s.recovery = true }
 
 // between returns a value in [lo, hi). It draws once when hi > lo, even when
 // there is only one value, and never when hi <= lo.
-func between(r *rng.Rand, lo, hi int64) int64 {
+func between(r actor.Rand, lo, hi int64) int64 {
 	if hi <= lo {
 		return lo
 	}
@@ -235,7 +234,7 @@ func between(r *rng.Rand, lo, hi int64) int64 {
 // records the fault that wins. A refusal beats a timeout, and a timeout beats a
 // lost reply.
 func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Field) kind {
-	r, now, f, pre, a := ctx.Rng(), ctx.Now(), s.faults, s.shape.Prefix, s.shape.Asserts
+	r, now, f, pre, a := ctx, ctx.Now(), s.faults, s.shape.Prefix, s.shape.Asserts
 	if now >= s.until && r.Chance(f.Outage.Prob) {
 		d := f.Outage.Dur[0]
 		if f.Outage.Dur[1] > d {
@@ -274,7 +273,7 @@ func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Fie
 // EnterRecovery, only the two delays are drawn. Fault facts name the call by
 // its number in this service ("req").
 func (s *Service[Req, Rep, Op, Res]) Handle(ctx *sim.ServiceCtx, req Req, reply sim.Responder[Rep]) {
-	r, now, f := ctx.Rng(), ctx.Now(), s.faults
+	r, now, f := ctx, ctx.Now(), s.faults
 	op := s.shape.Op(req)
 	s.nextID++
 	id := s.nextID
@@ -316,7 +315,7 @@ func (s *Service[Req, Rep, Op, Res]) land(ctx *sim.ServiceCtx, id uint64) {
 	s.plans = slices.Delete(s.plans, i, i+1)
 	apply := true
 	if pl.kind == replyTimeout {
-		apply = ctx.Rng().Chance(0.5)
+		apply = ctx.Chance(0.5)
 		ctx.Sometimes(apply, s.shape.Asserts.Applied)
 		ctx.Sometimes(!apply, s.shape.Asserts.NotApplied)
 	}
