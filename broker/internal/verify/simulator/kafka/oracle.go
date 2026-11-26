@@ -5,12 +5,12 @@ import (
 	"strconv"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/history"
 )
 
 // expectedLogChecker is the invariant that owns the reconstructed logs and every check

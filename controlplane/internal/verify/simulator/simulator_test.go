@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/verify/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/spectest"
 )
 
 func mustRun(t *testing.T, cfg Config) Result {

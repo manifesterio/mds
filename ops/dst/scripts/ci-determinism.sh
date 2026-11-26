@@ -5,9 +5,7 @@
 # Opt-out rule: every package under ./core/..., ./internal/... and ./sim/... is in the gate by
 # default, so a new package is checked without editing this script. A package
 # that must stay out (it uses goroutines, wall time or files on purpose) is listed
-# by import path in ../ops/dst/determinism-exclude.txt, with a reason. Packages
-# outside those trees that stay in the gate are listed explicitly below
-# (./verify/check, ./verify/check/faulty, ./verify/history).
+# by import path in ../ops/dst/determinism-exclude.txt, with a reason.
 # The script prints the final package list before it runs the check.
 set -euo pipefail
 cd "$(dirname "$0")/../../../dst"
@@ -26,7 +24,6 @@ while IFS= read -r imp; do
   fi
   pkgs+=("./${imp#"$module_prefix"}")
 done <<< "$imports"
-pkgs+=(./verify/check ./verify/check/faulty ./verify/history)
 
 echo "== determinism packages (${#pkgs[@]}), excluded: $(printf '%s\n' "$excluded" | wc -l | tr -d ' ') listed in ${exclude_file}"
 printf '  %s\n' "${pkgs[@]}"

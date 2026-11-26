@@ -42,7 +42,6 @@ google.golang.org/protobuf/reflect/protoreflect
 # Deliberately absent: model and examples (not audited for determinism).
 github.com/manifesterio/mds/dst/core/assert
 github.com/manifesterio/mds/dst/explore/campaign
-github.com/manifesterio/mds/dst/verify/check
 github.com/manifesterio/mds/dst/core/fault
 github.com/manifesterio/mds/dst/verify/golden
 github.com/manifesterio/mds/dst/sim

@@ -204,7 +204,7 @@ type EnvSettings struct {
 // because a silent fallback would hide a typing mistake. An empty value counts
 // as not set, so that "VAR=" in a shell is not a bad value. This is the one
 // place that parses these variables: ParseOptions uses it, and so does the
-// spec toolkit (dst/verify/check/spectest) for its tests.
+// spec toolkit (dst/verify/spectest) for its tests.
 func ReadEnv(prefix string, getenv func(string) string) (EnvSettings, error) {
 	e := envReader{prefix: prefix, getenv: getenv}
 	var out EnvSettings

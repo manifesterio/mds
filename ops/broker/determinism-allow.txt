@@ -39,12 +39,6 @@ github.com/manifesterio/mds/dst/sim
 github.com/manifesterio/mds/dst/internal/rng
 github.com/manifesterio/mds/dst/internal/assertlog
 github.com/manifesterio/mds/dst/internal/inject
-# Faulty: a fault-free spec with timing and faults around it (the simulated object store and
-# control plane are built on it). Deterministic, and it has its own determinism gate in dst.
-github.com/manifesterio/mds/dst/verify/check/faulty
-# Client-operation history record used by the kafka scenario and its oracle. Product-agnostic;
-# lives in dst. First-party, own determinism gate in dst.
-github.com/manifesterio/mds/dst/verify/history
 
 # The control plane contract (github.com/manifesterio/mds/controlplane/contract): plain data and
 # the Tag and Fold of the control plane operations and responses. It imports only dst, shared/objectstore,

@@ -1,8 +1,8 @@
 package fakeservices
 
 import (
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 // The assertions of the simulated services. Each one is declared once here, as a

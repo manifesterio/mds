@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 var (

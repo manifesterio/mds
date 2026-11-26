@@ -6,8 +6,7 @@
 // scenario, so a rule reads a typed value and not an empty interface. A scenario
 // uses a sealed sum for each of them.
 //
-// This is a harness kit, not actor core: today only the broker Kafka scenario
-// uses it.
+// It is owned by the broker Kafka scenario.
 package history
 
 import (

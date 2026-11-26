@@ -27,10 +27,8 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `core/assert` | Typed handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable), `Coverage` and the catalog |
 | `core/fault` | Declared buggify sites (`NewSite`, `NewFaultSite`), `SiteCount` and the catalog |
 | `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
-| `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
-| `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
+| `verify/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
-| `verify/history` | Append-only client-operation history (`Invoke`/`Return`) for workload/oracle separation |
 | `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
 The run stream (SplitMix64) is internal (`internal/rng`): code draws through `actor.Rand` (the Env), and host setup before a `System` exists uses `sim.DeriveRand(seed, label)`.
@@ -178,7 +176,7 @@ A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and t
 
 ```bash
 go test ./examples/kv -run TestCampaign -count=1
-go test ./explore/campaign ./verify/check/... ./...
+go test ./explore/campaign ./verify/... ./...
 ```
 
 ## Host layer ownership
@@ -187,14 +185,14 @@ Product simulators and production Envs should call dst for shared host glue rath
 than re-owning it: `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv`;
 `sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`, `EveryWhile`,
 `Timeline.PhaseStart`, `FaultCoverageRule`, `DrawBetween` / `MaybeAdd`;
-`campaign.RegisterSim` / `FromSim`; `faulty.NamedAsserts` / `ShapeOf`;
-`trace.StateHasher`; `core/actor/actortest`; `verify/check.Verdict`;
-`verify/history`. Domain schedules, fault rates, and message vocabularies stay
+`campaign.RegisterSim` / `FromSim`;
+`trace.StateHasher`; `core/actor/actortest`.
+Domain schedules, fault rates, and message vocabularies stay
 in the product. Sched merge into sim remains deferred (sim keeps its own queue).
 
 Controlplane replica IO (shared MemoryLog/MemoryObjects, per-node storage cut,
 host-owned timeout/lost coins) stays on a product `WithExecutor`, not on
-`AddService`+`faulty.Service`. Broker fakeservices Forward cleanly because
+`AddService`+`faulty.Service` (the broker faulty kit). Broker fakeservices Forward cleanly because
 outside RPCs are caller-blind and partitions sit on the socket table; CP
 leader-fencing needs Issuer-scoped cut and timeout-never-applied semantics that
 `faulty` does not provide. Do not treat AddService as the required home for
@@ -209,8 +207,8 @@ These stay out of this module on purpose:
 - Product I/O fakes beyond the tiny KV examples
 - Full network-partition simulators
 
-Generic spec machinery is in: `verify/check/spectest` and `verify/check/faulty` work on any spec with `Apply` and
-`StateHash`. They have no product words. A product brings its own spec, its own fault numbers and its
+Generic spec machinery is in: `verify/spectest` works on any spec with `Apply` and
+`StateHash`. It has no product words. A product brings its own spec, its own fault numbers and its
 own message types.
 
 Product wall clocks, product fault policy, and domain IDs belong in the importing project.

@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/core/actor"
 	dstsim "github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 const (

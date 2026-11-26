@@ -5,10 +5,10 @@ package preset
 import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 // Preset is the fault defaults and the phase schedule shared by the scenarios.

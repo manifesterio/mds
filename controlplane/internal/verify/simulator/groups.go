@@ -6,10 +6,10 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/trace"
 	dstsim "github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 // The host of the rebalance actor (docs/architecture.md section 11). In

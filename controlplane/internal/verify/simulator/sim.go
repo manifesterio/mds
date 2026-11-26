@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/core/actor"
 	dstsim "github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/check"
 )
 
 // Config is one run.
@@ -147,7 +147,7 @@ func (s *sim) steps() int       { return int(s.w.Steps()) }
 // after runs run as a host task d from now. A negative d counts as zero.
 func (s *sim) after(d actor.Duration, run func()) { s.w.After(d, run) }
 
-// check returns the checker of dst/verify/check. Hole and Decode are the catalog
+// check returns the checker of controlplane/internal/verify/check. Hole and Decode are the catalog
 // handles for the built-in log checks.
 func (s *sim) check() check.Checker {
 	return check.Checker{Rec: s.env, Hole: logHasNoHole, Decode: logEntriesDecode}

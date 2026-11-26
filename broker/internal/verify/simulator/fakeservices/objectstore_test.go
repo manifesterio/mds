@@ -8,9 +8,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/check/faulty"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

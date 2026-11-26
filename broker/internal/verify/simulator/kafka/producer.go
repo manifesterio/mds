@@ -6,12 +6,12 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/trace"
-	"github.com/manifesterio/mds/dst/verify/history"
 )
 
 // batch is one produce batch for one partition, retried unchanged until

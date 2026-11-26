@@ -4,11 +4,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/trace"
 	"github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
 
 // The tests use a tiny spec: a map from a name to a number. A "set" op stores a
