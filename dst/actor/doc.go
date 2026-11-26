@@ -8,6 +8,10 @@
 // one ask with R, a ServiceRef[Req, Rep] calls a simulated service. Strings
 // are only identity labels (names, timer keys).
 //
+// The types here are aliases of dst/internal/core. The runtime side (making
+// outboxes, refs and bindings, closing an outbox) lives there, so only
+// dst/sim and dst/live can reach it; product code cannot import it.
+//
 // Glossary:
 //
 //	Actor        a state machine: Receive(now, msg, outbox) and StateHash.

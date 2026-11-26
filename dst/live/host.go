@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // The ways Host.Run, Ask, Tell and OnLoop can end.
@@ -62,7 +63,7 @@ const defaultStopGrace = 5 * actor.Second
 // actors that talk to each other.
 type Host struct {
 	cfg   HostConfig
-	owner *actor.Owner
+	owner *core.Owner
 
 	mu       sync.Mutex
 	actors   []hosted
@@ -87,7 +88,7 @@ func NewHost(cfg HostConfig) *Host {
 		cfg.Env = func(self actor.Incarnation) actor.Env { return NewEnv(self, nil) }
 	}
 	return &Host{
-		cfg: cfg, owner: actor.NewOwner(), names: map[string]bool{},
+		cfg: cfg, owner: core.NewOwner(), names: map[string]bool{},
 		outside: map[uint64]*outsideCall{}, ended: make(chan struct{}),
 	}
 }
@@ -133,7 +134,7 @@ func Spawn[In, IO actor.Payload](h *Host, p actor.Props[In, IO], exec func(ctx *
 	a := newActorRunner(h, len(h.actors), p, exec, o.after)
 	h.names[p.Name] = true
 	h.actors = append(h.actors, a)
-	return actor.NewEntityRef[In](a.entityID())
+	return core.NewEntityRef[In](a.entityID())
 }
 
 // SpawnOption configures a live actor.

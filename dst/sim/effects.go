@@ -2,6 +2,7 @@ package sim
 
 import (
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // apply carries out the effects of one Receive in record order. Each is
@@ -106,7 +107,7 @@ func (h *host[In, IO]) execute(io actor.Payload, n uint64) {
 		sys.Fail(FailProtocol, "no_executor", h.name+": Do or Perform without WithExecutor")
 		return
 	}
-	v, ok := actor.As[IO](io)
+	v, ok := core.As[IO](io)
 	if !ok {
 		sys.Fail(FailProtocol, "wrong_io_type", h.name+": the IO value is not of the actor's IO type")
 		return

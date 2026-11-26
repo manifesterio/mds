@@ -1,8 +1,4 @@
-package actor
-
-// This file is the runtime side of the package, used by dst/sim and
-// dst/live. Product code never calls it. It is also the only place
-// where message types are erased to Payload and asserted back.
+package core
 
 import "github.com/manifesterio/mds/dst/trace"
 
@@ -106,81 +102,4 @@ func (e Effect) Fold(h *trace.Hash) {
 	if e.Msg != nil {
 		e.Msg.Fold(h)
 	}
-}
-
-// Binding is what a runtime tells an Outbox about the incarnation that is
-// receiving.
-type Binding struct {
-	Self  EntityID
-	Asker Asker
-	// Next returns the next ask/pending number of the incarnation (from 1).
-	Next func() uint64
-	// Misuse reports a protocol failure: an effect recorded after the
-	// Receive, or through a Sub where it is not allowed.
-	Misuse func(what string)
-}
-
-// recording is the effect list shared by an Outbox and its Subs.
-type recording struct {
-	binding Binding
-	effects []Effect
-	closed  bool
-}
-
-func (r *recording) add(e Effect) {
-	if r.closed {
-		r.misuse("an Outbox was used after its Receive")
-		return
-	}
-	r.effects = append(r.effects, e)
-}
-
-func (r *recording) next() uint64 { return r.binding.Next() }
-
-func (r *recording) misuse(what string) {
-	if r.binding.Misuse != nil {
-		r.binding.Misuse(what)
-	}
-}
-
-// NewOutbox makes the Outbox of one Receive.
-func NewOutbox[In, IO Payload](b Binding) *Outbox[In, IO] {
-	return &Outbox[In, IO]{rec: &recording{binding: b}, up: identity}
-}
-
-// Close ends the Outbox's Receive and returns its effects in record order.
-// Every later use of it, or of its Subs, is reported as misuse.
-func Close[In, IO Payload](o *Outbox[In, IO]) []Effect {
-	o.rec.closed = true
-	effects := o.rec.effects
-	o.rec.effects = nil
-	return effects
-}
-
-func identity(msg Payload) Payload { return msg }
-
-// lift erases f, a function into the outbox's protocol (an answer's adapt,
-// or a Sub's wrap), and puts its result through the outbox's own wraps. The
-// assertion cannot fail: the runtime matched the answer to its request, and
-// only a Sub's own methods pass its message type.
-func lift[In, IO, X Payload](o *Outbox[In, IO], f func(X) In) func(Payload) Payload {
-	return func(v Payload) Payload { return o.up(f(v.(X))) } //nolint:forcetypeassert // see above
-}
-
-// NewEntityRef makes the handle of an actor. Runtimes only.
-func NewEntityRef[P Payload](id EntityID) EntityRef[P] { return EntityRef[P]{id: id} }
-
-// NewReplyTo makes the handle of one ask. Runtimes only (sim.Ask, live.Ask).
-func NewReplyTo[R Payload](id ReplyID) ReplyTo[R] { return ReplyTo[R]{id: id} }
-
-// NewServiceRef makes the handle of a service. Runtimes only.
-func NewServiceRef[Req, Rep Payload](id ServiceID) ServiceRef[Req, Rep] {
-	return ServiceRef[Req, Rep]{id: id}
-}
-
-// As asserts an erased message back to its type; ok is false on a mismatch
-// (a runtime routing bug, or a foreign ref). Runtimes only.
-func As[P Payload](msg Payload) (P, bool) {
-	p, ok := msg.(P)
-	return p, ok
 }

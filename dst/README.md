@@ -20,7 +20,7 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 
 | Package | Role |
 |---|---|
-| `actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Also the typed assertion handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable, `Pair`, `AssertKind`) and the declared buggify sites (`Site`, `NewSite`, `NewFaultSite`). Product actor code imports this package. |
+| `actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Also the typed assertion handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable, `Pair`, `AssertKind`) and the declared buggify sites (`Site`, `NewSite`, `NewFaultSite`). Product actor code imports this package. Its types are aliases of `internal/core`, which holds the runtime seam for `sim` and `live`. |
 | `actor/actortest` | A fake `Env` and step helpers for unit tests of actors |
 | `trace` | Running FNV-1a `Hash` |
 | `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. Its `Result` carries `Coverage` and `SiteCount`. |

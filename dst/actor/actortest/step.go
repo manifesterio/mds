@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // TB is the testing.TB (or rapid.T) surface the harness needs.
@@ -13,19 +14,33 @@ type TB interface {
 	Fatalf(format string, args ...any)
 }
 
-// Run builds an outbox, calls recv, and returns the closed effects.
-// bind.Next and bind.Misuse are set from next and t when unset.
-func Run[In, IO actor.Payload](t TB, next *uint64, bind actor.Binding, recv func(*actor.Outbox[In, IO])) []actor.Effect {
+// Run builds the outbox of one Receive of the actor called name, calls recv,
+// and returns the closed effects. Ask and Call numbers count up from *next.
+// The outbox is the actor's own: Self is named but not wired, and the
+// asks it makes come from an actor asker of that name. Misuse fails t.
+func Run[In, IO actor.Payload](t TB, next *uint64, name string, recv func(*actor.Outbox[In, IO])) []actor.Effect {
 	t.Helper()
-	if bind.Next == nil {
-		bind.Next = func() uint64 { *next++; return *next }
-	}
-	if bind.Misuse == nil {
-		bind.Misuse = func(what string) { t.Fatalf("outbox misuse: %s", what) }
-	}
-	o := actor.NewOutbox[In, IO](bind)
+	o := core.NewOutbox[In, IO](core.Binding{
+		Self:   core.EntityID{Name: name},
+		Asker:  core.Asker{Kind: core.ActorAsker, Name: name},
+		Next:   func() uint64 { *next++; return *next },
+		Misuse: func(what string) { t.Fatalf("outbox misuse: %s", what) },
+	})
 	recv(o)
-	return actor.Close(o)
+	return core.Close(o)
+}
+
+// Ref is a handle for the actor called name, for tests that wire an actor to
+// a peer that is not running. Each call makes a handle of its own runtime, so
+// two handles of one name are not equal.
+func Ref[P actor.Payload](name string) actor.EntityRef[P] {
+	return core.NewEntityRef[P](core.EntityID{Runtime: core.NewOwner(), Slot: 1, Name: name})
+}
+
+// ReplyTo is the handle of ask number n made by the outside caller called
+// name. Two handles with the same name and n are equal.
+func ReplyTo[R actor.Payload](name string, n uint64) actor.ReplyTo[R] {
+	return core.NewReplyTo[R](core.ReplyID{Asker: core.Asker{Kind: core.SimOutsideAsker, Name: name}, Number: n})
 }
 
 // Record is one kept effect with the tick it was recorded at.

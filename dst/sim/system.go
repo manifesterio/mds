@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 	"github.com/manifesterio/mds/dst/internal/rng"
 	"github.com/manifesterio/mds/dst/trace"
 )
@@ -107,7 +108,7 @@ type System struct {
 	hash    trace.Hash
 	tl      *Timeline
 
-	owner    *actor.Owner
+	owner    *core.Owner
 	actors   []slot
 	names    map[string]bool
 	services []serviceSlot
@@ -147,7 +148,7 @@ func NewSystem(cfg Config) *System {
 		rand:      rng.New(cfg.Seed),
 		hash:      trace.New(),
 		tl:        NewTimeline(),
-		owner:     actor.NewOwner(),
+		owner:     core.NewOwner(),
 		names:     map[string]bool{},
 		svcNames:  map[string]bool{},
 		pairLanes: map[laneKey2]laneID{},

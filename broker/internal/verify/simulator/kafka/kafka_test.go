@@ -16,6 +16,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/actor/actortest"
 	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/spectest"
 )
@@ -321,7 +322,7 @@ func TestFatalProduceErrorGivesUp(t *testing.T) {
 		for _, b := range c.p.cur {
 			b.ambiguous, b.idem = ambiguous, false
 		}
-		record(func(o *outbox) { c.onProduce(produceResp(c, 45), o) })
+		record(t, func(o *outbox) { c.onProduce(produceResp(c, 45), o) })
 		want := history.GivenUp
 		if ambiguous {
 			want = history.ResultUnknown
@@ -345,11 +346,10 @@ func newTestClient(env actor.Env, h *History) *client {
 }
 
 // record runs fn with a fresh session outbox and returns its effects.
-func record(fn func(o *outbox)) []actor.Effect {
+func record(t *testing.T, fn func(o *outbox)) []actor.Effect {
+	t.Helper()
 	n := uint64(0)
-	o := actor.NewOutbox[session.Msg, core.IO](actor.Binding{Next: func() uint64 { n++; return n }})
-	fn(o)
-	return actor.Close(o)
+	return actortest.Run(t, &n, "client", fn)
 }
 
 func produceResp(c *client, code int16) *kmsg.ProduceResponse {
@@ -372,7 +372,7 @@ func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 		for _, b := range c.p.cur {
 			b.ambiguous, b.idem = ambiguous, true
 		}
-		acts := record(func(o *outbox) { c.onProduce(produceResp(c, codeInvalidRequest), o) })
+		acts := record(t, func(o *outbox) { c.onProduce(produceResp(c, codeInvalidRequest), o) })
 		for i, operation := range h.Ops() {
 			res, _ := operation.Result.(ProduceRes)
 			if operation.Outcome != history.GivenUp || res.Why != "rejected" || res.Base != -1 {
@@ -587,7 +587,7 @@ func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
 	for _, b := range c.p.cur {
 		b.idem, b.corrupt = false, true
 	}
-	record(func(o *outbox) { c.onProduce(produceResp(c, codeCorruptMessage), o) })
+	record(t, func(o *outbox) { c.onProduce(produceResp(c, codeCorruptMessage), o) })
 	for i, operation := range h.Ops() {
 		res, _ := operation.Result.(ProduceRes)
 		if operation.Outcome != history.GivenUp || res.Why != "rejected" {

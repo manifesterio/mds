@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // slot is one actor of the System, whatever its types. It is the one seam
@@ -100,7 +101,7 @@ func (h *host[In, IO]) arrive(msg actor.Payload, inc actor.ID, toInc bool, n uin
 		sys.logMsg("drop stale "+h.name, msg)
 		return
 	}
-	m, ok := actor.As[In](msg)
+	m, ok := core.As[In](msg)
 	if !ok {
 		sys.Fail(FailProtocol, "wrong_message_type", fmt.Sprintf("%s: got %T, which is not its message type", h.name, msg))
 		return
@@ -215,7 +216,7 @@ func (h *host[In, IO]) receive(msg In) bool {
 	sys := h.sys
 	h.invalidateHash()
 	inc := h.inc
-	o := actor.NewOutbox[In, IO](actor.Binding{
+	o := core.NewOutbox[In, IO](core.Binding{
 		Self:   h.entityID(),
 		Asker:  h.asker(),
 		Next:   h.nextNumber,
@@ -223,7 +224,7 @@ func (h *host[In, IO]) receive(msg In) bool {
 	})
 	now := actor.Now{Mono: h.local(), Wall: sys.wall()}
 	if !sys.guard("Receive "+h.name, func() { h.a.Receive(now, msg, o) }) {
-		actor.Close(o)
+		core.Close(o)
 		if h.workload {
 			sys.halted = true
 		} else {
@@ -231,7 +232,7 @@ func (h *host[In, IO]) receive(msg In) bool {
 		}
 		return false
 	}
-	effects := actor.Close(o)
+	effects := core.Close(o)
 	h.apply(effects)
 	if h.afterRcv != nil && h.alive(inc) && !sys.halted {
 		if !sys.guard("AfterReceive "+h.name, func() { h.afterRcv(h.self(), msg, effects) }) {

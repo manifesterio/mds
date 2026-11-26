@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -69,9 +70,9 @@ type rig struct {
 }
 
 func (r *rig) outbox() *actor.Outbox[msg, io] {
-	return actor.NewOutbox[msg, io](actor.Binding{
+	return core.NewOutbox[msg, io](core.Binding{
 		Self:   actor.EntityID{Runtime: owner, Slot: 2, Name: "me"},
-		Asker:  actor.Asker{Kind: actor.ActorAsker, Runtime: owner, Slot: 2, Name: "me"},
+		Asker:  core.Asker{Kind: core.ActorAsker, Runtime: owner, Slot: 2, Name: "me"},
 		Next:   func() uint64 { r.n++; return r.n },
 		Misuse: func(what string) { r.misuse = append(r.misuse, what) },
 	})
@@ -85,11 +86,11 @@ func kinds(effects []actor.Effect) []actor.EffectKind {
 	return out
 }
 
-var owner = actor.NewOwner()
+var owner = core.NewOwner()
 
 var (
-	other   = actor.NewEntityRef[request](actor.EntityID{Runtime: owner, Slot: 3, Name: "other"})
-	service = actor.NewServiceRef[write, readDone](actor.ServiceID{Runtime: owner, Slot: 1, Name: "store"})
+	other   = core.NewEntityRef[request](actor.EntityID{Runtime: owner, Slot: 3, Name: "other"})
+	service = core.NewServiceRef[write, readDone](core.ServiceID{Runtime: owner, Slot: 1, Name: "store"})
 )
 
 // ---- tests ----
@@ -108,9 +109,9 @@ func TestOutboxRecordsInOrder(t *testing.T) {
 	service.Tell(o, write{"b"})
 	actor.Call(o, service.Request(write{"c"}), func(d readDone) msg { return answered{d.Value} })
 	actor.Perform(o, read{"d"}, func(d readDone) msg { return answered{d.Value} })
-	actor.Reply(o, actor.NewReplyTo[answered](actor.ReplyID{Asker: actor.Asker{Kind: actor.ActorAsker, Name: "x"}, Number: 9}), answered{"r"})
+	actor.Reply(o, core.NewReplyTo[answered](actor.ReplyID{Asker: core.Asker{Kind: core.ActorAsker, Name: "x"}, Number: 9}), answered{"r"})
 	o.Stop(actor.Trip, "bad")
-	effects := actor.Close(o)
+	effects := core.Close(o)
 
 	want := []actor.EffectKind{
 		actor.EffectTellSelf, actor.EffectAfter, actor.EffectStartTimer, actor.EffectCancelTimer,
@@ -144,14 +145,14 @@ func TestAskMintsReplyTo(t *testing.T) {
 	actor.Ask(o, other,
 		func(to actor.ReplyTo[answered]) request { seen = to; return request{Q: "q", ReplyTo: to} },
 		func(a answered) msg { return a })
-	e := actor.Close(o)[0]
+	e := core.Close(o)[0]
 	if e.Number != 42 || e.Reply.Number != 42 || seen.ID() != e.Reply {
 		t.Fatalf("ask number/reply: %+v, seen %+v", e, seen.ID())
 	}
-	if e.Reply.Asker.Name != "me" || e.Reply.Asker.Kind != actor.ActorAsker {
+	if e.Reply.Asker.Name != "me" || e.Reply.Asker.Kind != core.ActorAsker {
 		t.Errorf("asker: %+v", e.Reply.Asker)
 	}
-	if req, ok := actor.As[request](e.Msg); !ok || req.ReplyTo != seen {
+	if req, ok := core.As[request](e.Msg); !ok || req.ReplyTo != seen {
 		t.Errorf("request carries the ReplyTo: %+v", e.Msg)
 	}
 	if e.To != other.EntityID() {
@@ -175,7 +176,7 @@ func TestSubWrapsAndScopes(t *testing.T) {
 	if !comp.Self().IsZero() {
 		t.Error("a component has no Self")
 	}
-	effects := actor.Close(o)
+	effects := core.Close(o)
 
 	if got := effects[0].Msg; got != (fromComp{compMsg{"a"}}) {
 		t.Errorf("TellSelf through Sub: %v", got)
@@ -203,12 +204,12 @@ func TestSubWrapsAndScopes(t *testing.T) {
 func TestUseAfterCloseIsMisuse(t *testing.T) {
 	r := &rig{}
 	o := r.outbox()
-	actor.Close(o)
+	core.Close(o)
 	o.TellSelf(ping{1})
 	if len(r.misuse) != 1 {
 		t.Fatalf("misuse: %v", r.misuse)
 	}
-	if got := actor.Close(o); len(got) != 0 {
+	if got := core.Close(o); len(got) != 0 {
 		t.Errorf("effects after close: %v", got)
 	}
 }
@@ -227,13 +228,13 @@ func sum(fold func(h *trace.Hash)) uint64 {
 }
 
 func TestRefFolds(t *testing.T) {
-	ref := actor.NewEntityRef[ping](actor.EntityID{Runtime: owner, Slot: 1, Name: "a"})
+	ref := core.NewEntityRef[ping](actor.EntityID{Runtime: owner, Slot: 1, Name: "a"})
 	want := sum(func(h *trace.Hash) { h.Uint64(2101); h.String("a") })
 	if got := sum(ref.Fold); got != want {
 		t.Errorf("EntityRef fold: %x want %x", got, want)
 	}
 	boot := actor.ID{1, 2, 3}
-	reply := actor.NewReplyTo[ping](actor.ReplyID{Asker: actor.Asker{Kind: actor.ActorAsker, Name: "b", Boot: boot}, Number: 5})
+	reply := core.NewReplyTo[ping](actor.ReplyID{Asker: core.Asker{Kind: core.ActorAsker, Name: "b", Boot: boot}, Number: 5})
 	want = sum(func(h *trace.Hash) {
 		h.Uint64(2102)
 		h.Uint64(1)
@@ -244,7 +245,7 @@ func TestRefFolds(t *testing.T) {
 	if got := sum(reply.Fold); got != want {
 		t.Errorf("ReplyTo fold: %x want %x", got, want)
 	}
-	svc := actor.NewServiceRef[ping, ping](actor.ServiceID{Runtime: owner, Name: "s"})
+	svc := core.NewServiceRef[ping, ping](core.ServiceID{Runtime: owner, Name: "s"})
 	want = sum(func(h *trace.Hash) { h.Uint64(2103); h.String("s") })
 	if got := sum(svc.Fold); got != want {
 		t.Errorf("ServiceRef fold: %x want %x", got, want)
@@ -262,7 +263,7 @@ func TestEffectFoldsDiffer(t *testing.T) {
 	sub := actor.Sub(o, "s", func(c compMsg) msg { return fromComp{c} })
 	sub.CancelTimer("k")
 	o.CancelTimer("k")
-	e := actor.Close(o)
+	e := core.Close(o)
 	seen := map[uint64]bool{}
 	for _, x := range e {
 		seen[sum(x.Fold)] = true

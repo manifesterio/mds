@@ -11,11 +11,12 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/actor/actortest"
 )
 
 // to is the ReplyTo of the n-th ask of an outside asker.
 func to(n uint64) actor.ReplyTo[rebalance.Reply] {
-	return actor.NewReplyTo[rebalance.Reply](actor.ReplyID{Asker: actor.Asker{Kind: actor.LiveOutsideAsker, Name: "test"}, Number: n})
+	return actortest.ReplyTo[rebalance.Reply]("test", n)
 }
 
 // Every field of a group request reaches the machine input, with the ReplyTo.

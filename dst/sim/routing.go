@@ -2,6 +2,7 @@ package sim
 
 import (
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // actorOf resolves an EntityID of this System. A zero or foreign one is a
@@ -34,9 +35,9 @@ func (sys *System) tell(source string, to actor.EntityID, d actor.Duration, msg 
 // reply delivers answer to the asker behind r, now, if it is still waiting.
 func (sys *System) reply(source string, r actor.ReplyID, answer actor.Payload) {
 	switch r.Asker.Kind {
-	case actor.ActorAsker:
+	case core.ActorAsker:
 		sys.replyToActor(source, r, answer)
-	case actor.SimOutsideAsker:
+	case core.SimOutsideAsker:
 		sys.replyOutside(r, answer)
 	default:
 		sys.Fail(FailProtocol, "zero reply", "Reply to a zero or foreign ReplyTo")
@@ -84,10 +85,10 @@ func (sys *System) watch(idx int, inc actor.ID, r actor.ReplyID, gone actor.Payl
 // askerAlive reports whether the asker behind r can still get an answer.
 func (sys *System) askerAlive(r actor.ReplyID) bool {
 	switch r.Asker.Kind {
-	case actor.ActorAsker:
+	case core.ActorAsker:
 		return r.Asker.Runtime == sys.owner && int(r.Asker.Slot) < len(sys.actors) &&
 			sys.actors[r.Asker.Slot].base().alive(r.Asker.Boot)
-	case actor.SimOutsideAsker:
+	case core.SimOutsideAsker:
 		_, ok := sys.outside[r.Number]
 		return ok
 	}

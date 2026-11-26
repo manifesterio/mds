@@ -109,7 +109,7 @@ func startedHarness(t *testing.T, config Config) *harness {
 // out the recorded effects and returns them.
 func (h *harness) step(msg core.EventData) []actor.Effect {
 	h.now += actor.Mono(actor.Millisecond)
-	effects := actortest.Run(h.t, &h.number, actor.Binding{}, func(o *actor.Outbox[core.EventData, core.IO]) {
+	effects := actortest.Run(h.t, &h.number, "broker", func(o *actor.Outbox[core.EventData, core.IO]) {
 		h.b.Receive(actor.Now{Mono: h.now, Wall: actor.Wall(h.now)}, msg, o)
 	})
 	h.all = append(h.all, effects...)

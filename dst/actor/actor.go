@@ -1,5 +1,7 @@
 package actor
 
+import "github.com/manifesterio/mds/dst/internal/core"
+
 // Mono is node-local monotonic time in nanoseconds. In a simulation it
 // includes the fixed clock skew of the node.
 type Mono int64
@@ -8,7 +10,7 @@ type Mono int64
 type Wall int64
 
 // Duration is a length of time in nanoseconds.
-type Duration int64
+type Duration = core.Duration
 
 // Units of Duration.
 const (
@@ -25,7 +27,7 @@ type Now struct {
 }
 
 // ID is a 16-byte id drawn from the seeded random stream (Rand.NewID).
-type ID [16]byte
+type ID = core.ID
 
 // Incarnation names one boot of one actor: its Props.Name and a boot number
 // that is new for every boot. It is an identity label for logs, facts and
@@ -79,27 +81,14 @@ const (
 )
 
 // End says how an incarnation ended.
-type End uint8
+type End = core.End
 
 // The ways an incarnation can end.
 const (
-	Crash End = iota // killed from outside (nemesis, attrition, stop deadline, panic)
-	Trip             // the actor asked for a restart: its memory is not trusted
-	Exit             // the actor finished a graceful stop
+	Crash = core.Crash // killed from outside (nemesis, attrition, stop deadline, panic)
+	Trip  = core.Trip  // the actor asked for a restart: its memory is not trusted
+	Exit  = core.Exit  // the actor finished a graceful stop
 )
-
-// String returns the plain name of the end.
-func (e End) String() string {
-	switch e {
-	case Crash:
-		return "crash"
-	case Trip:
-		return "trip"
-	case Exit:
-		return "exit"
-	}
-	return "unknown"
-}
 
 // RestartPolicy returns how long after an End the next boot starts, or
 // ok=false for no restart. It draws only from r.

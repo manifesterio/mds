@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // apply carries out the effects of one Receive in record order. It
@@ -96,7 +97,7 @@ func (r *actorRunner[In, IO]) execute(io actor.Payload, n uint64) error {
 	if r.exec == nil {
 		return fmt.Errorf("%w: %s: Do or Perform without an exec function", ErrProtocol, r.name())
 	}
-	v, ok := actor.As[IO](io)
+	v, ok := core.As[IO](io)
 	if !ok {
 		return fmt.Errorf("%w: %s: the IO value is not of the actor's IO type", ErrProtocol, r.name())
 	}
@@ -153,7 +154,7 @@ func (h *Host) reply(idx int, boot actor.ID, r actor.ReplyID, answer actor.Paylo
 	h.mu.Lock()
 	h.watches = removeWatches(h.watches, func(w watch) bool { return w.idx == idx && w.boot == boot && w.reply == r })
 	switch r.Asker.Kind {
-	case actor.LiveOutsideAsker:
+	case core.LiveOutsideAsker:
 		c, ok := h.outside[r.Number]
 		if ok {
 			delete(h.outside, r.Number)
@@ -161,7 +162,7 @@ func (h *Host) reply(idx int, boot actor.ID, r actor.ReplyID, answer actor.Paylo
 		}
 		h.mu.Unlock()
 		return nil
-	case actor.ActorAsker:
+	case core.ActorAsker:
 		h.mu.Unlock()
 		return h.replyToActor(r, answer)
 	}
@@ -194,12 +195,12 @@ func (h *Host) watch(idx int, boot actor.ID, r actor.ReplyID, gone actor.Payload
 
 func (h *Host) askerAlive(r actor.ReplyID) bool {
 	switch r.Asker.Kind {
-	case actor.LiveOutsideAsker:
+	case core.LiveOutsideAsker:
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		_, ok := h.outside[r.Number]
 		return ok
-	case actor.ActorAsker:
+	case core.ActorAsker:
 		a, err := h.actorOf(actor.EntityID{Runtime: r.Asker.Runtime, Slot: r.Asker.Slot})
 		return err == nil && a.alive(r.Asker.Boot)
 	}
@@ -239,7 +240,7 @@ func (h *Host) incarnationEnded(idx int, boot actor.ID) {
 	h.watches = removeWatches(h.watches, func(w watch) bool { return w.idx == idx && w.boot == boot })
 	h.mu.Unlock()
 	h.askerEnded(func(r actor.ReplyID) bool {
-		return r.Asker.Kind == actor.ActorAsker && int(r.Asker.Slot) == idx && r.Asker.Boot == boot
+		return r.Asker.Kind == core.ActorAsker && int(r.Asker.Slot) == idx && r.Asker.Boot == boot
 	})
 }
 
@@ -269,14 +270,14 @@ func Ask[Req, Rep actor.Payload](ctx context.Context, h *Host, to actor.EntityRe
 	n := h.outsideAsks
 	h.outside[n] = c
 	h.mu.Unlock()
-	id := actor.ReplyID{Asker: actor.Asker{Kind: actor.LiveOutsideAsker, Runtime: h.owner}, Number: n}
-	if err := h.tell(to.EntityID(), makeReq(actor.NewReplyTo[Rep](id))); err != nil {
+	id := actor.ReplyID{Asker: core.Asker{Kind: core.LiveOutsideAsker, Runtime: h.owner}, Number: n}
+	if err := h.tell(to.EntityID(), makeReq(core.NewReplyTo[Rep](id))); err != nil {
 		h.forgetOutside(n)
 		return zero, err
 	}
 	select {
 	case a := <-c.answer:
-		rep, ok := actor.As[Rep](a)
+		rep, ok := core.As[Rep](a)
 		if !ok {
 			return zero, fmt.Errorf("%w: the answer is a %T", ErrProtocol, a)
 		}
@@ -286,7 +287,7 @@ func Ask[Req, Rep actor.Payload](ctx context.Context, h *Host, to actor.EntityRe
 	case <-ctx.Done():
 		if !h.forgetOutside(n) {
 			// The answer won the race: it is already in the channel.
-			if a, ok := actor.As[Rep](<-c.answer); ok {
+			if a, ok := core.As[Rep](<-c.answer); ok {
 				return a, nil
 			}
 		}

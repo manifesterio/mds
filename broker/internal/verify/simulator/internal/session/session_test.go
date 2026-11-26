@@ -5,18 +5,14 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/actor/actortest"
 )
 
 // record runs fn with a fresh outbox and returns the effects it recorded.
 func record(t *testing.T, fn func(o *Outbox)) []actor.Effect {
 	t.Helper()
 	n := uint64(0)
-	o := actor.NewOutbox[Msg, core.IO](actor.Binding{
-		Next:   func() uint64 { n++; return n },
-		Misuse: func(what string) { t.Fatalf("misuse: %s", what) },
-	})
-	fn(o)
-	return actor.Close(o)
+	return actortest.Run(t, &n, "session", fn)
 }
 
 // kinds lists the kinds of effects.

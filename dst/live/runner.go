@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // owned is one timer or awaited answer of the actor. It is checked when the
@@ -69,8 +70,8 @@ func (r *actorRunner[In, IO]) entityID() actor.EntityID {
 	return actor.EntityID{Runtime: r.h.owner, Slot: uint32(r.idx), Name: r.props.Name}
 }
 
-func (r *actorRunner[In, IO]) asker() actor.Asker {
-	return actor.Asker{Kind: actor.ActorAsker, Runtime: r.h.owner, Slot: uint32(r.idx), Name: r.props.Name, Boot: r.boot}
+func (r *actorRunner[In, IO]) asker() core.Asker {
+	return core.Asker{Kind: core.ActorAsker, Runtime: r.h.owner, Slot: uint32(r.idx), Name: r.props.Name, Boot: r.boot}
 }
 
 // alive reports whether the actor's incarnation boot is running.
@@ -85,7 +86,7 @@ func (r *actorRunner[In, IO]) alive(boot actor.ID) bool {
 func (r *actorRunner[In, IO]) push(it item) {
 	prio := actor.Data
 	if it.fn == nil && r.props.Priority != nil {
-		if m, ok := actor.As[In](it.msg); ok && !it.answer {
+		if m, ok := core.As[In](it.msg); ok && !it.answer {
 			prio = r.props.Priority(m)
 		}
 	}
@@ -214,7 +215,7 @@ func (r *actorRunner[In, IO]) handle(it item) bool {
 		msg = r.own[it.n].adaptOr(msg)
 		delete(r.own, it.n)
 	}
-	m, ok := actor.As[In](msg)
+	m, ok := core.As[In](msg)
 	if !ok {
 		r.h.fail(fmt.Errorf("%w: %s got %T, which is not its message type", ErrProtocol, r.name(), msg))
 		return false
@@ -251,7 +252,7 @@ func (o *owned) adaptOr(msg actor.Payload) actor.Payload {
 // receive runs one Receive and carries out its effects. It reports false
 // when the incarnation ended (Stop, panic, executor error).
 func (r *actorRunner[In, IO]) receive(msg In) bool {
-	o := actor.NewOutbox[In, IO](actor.Binding{
+	o := core.NewOutbox[In, IO](core.Binding{
 		Self:  r.entityID(),
 		Asker: r.asker(),
 		Next:  func() uint64 { r.numbers++; return r.numbers },
@@ -261,11 +262,11 @@ func (r *actorRunner[In, IO]) receive(msg In) bool {
 	})
 	now := actor.Now{Mono: r.h.cfg.Clock.Mono(), Wall: r.h.cfg.Clock.Wall()}
 	if err := guard(func() { r.a.Receive(now, msg, o) }); err != nil {
-		actor.Close(o)
+		core.Close(o)
 		r.h.actorEnded(fmt.Errorf("live: %s crashed: %w", r.name(), err))
 		return false
 	}
-	alive := r.apply(actor.Close(o))
+	alive := r.apply(core.Close(o))
 	if r.after != nil {
 		r.after()
 	}

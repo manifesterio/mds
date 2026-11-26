@@ -2,6 +2,7 @@ package sim
 
 import (
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // ExecCtx is lent to one executor call: one Do or Perform of one actor.
@@ -84,12 +85,12 @@ func Ask[Req, Rep actor.Payload](sys *System, to actor.EntityRef[Req], makeReq f
 	within actor.Duration, done func(answer Rep, ok bool)) {
 	sys.outsideAsks++
 	n := sys.outsideAsks
-	id := actor.ReplyID{Asker: actor.Asker{Kind: actor.SimOutsideAsker, Runtime: sys.owner}, Number: n}
-	req := makeReq(actor.NewReplyTo[Rep](id))
+	id := actor.ReplyID{Asker: core.Asker{Kind: core.SimOutsideAsker, Runtime: sys.owner}, Number: n}
+	req := makeReq(core.NewReplyTo[Rep](id))
 	ask := &outsideAsk{done: func(answer actor.Payload, ok bool) {
 		var rep Rep
 		if ok {
-			rep, ok = actor.As[Rep](answer)
+			rep, ok = core.As[Rep](answer)
 		}
 		done(rep, ok)
 	}}

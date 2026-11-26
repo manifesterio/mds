@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -64,8 +65,8 @@ func (b *actorBase) entityID() actor.EntityID {
 	return actor.EntityID{Runtime: b.sys.owner, Slot: uint32(b.idx), Name: b.name}
 }
 
-func (b *actorBase) asker() actor.Asker {
-	return actor.Asker{Kind: actor.ActorAsker, Runtime: b.sys.owner, Slot: uint32(b.idx), Name: b.name, Boot: b.inc}
+func (b *actorBase) asker() core.Asker {
+	return core.Asker{Kind: core.ActorAsker, Runtime: b.sys.owner, Slot: uint32(b.idx), Name: b.name, Boot: b.inc}
 }
 
 // alive reports whether incarnation inc of this actor is up.

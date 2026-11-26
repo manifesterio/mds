@@ -32,7 +32,7 @@ const (
 
 // rt is the ReplyTo of call n, as an outside caller's.
 func rt(n uint64) actor.ReplyTo[Reply] {
-	return actor.NewReplyTo[Reply](actor.ReplyID{Asker: actor.Asker{Kind: actor.SimOutsideAsker, Name: "caller"}, Number: n})
+	return actortest.ReplyTo[Reply]("caller", n)
 }
 
 // gone is the message the machine gets when the caller of call n leaves.
@@ -116,7 +116,7 @@ func newBareHarness(t *testing.T, cfg Config, faults actor.Faults) *harness {
 	env := actortest.NewEnv(actortest.Config{
 		Self: actor.Incarnation{Name: "rebalance"}, Seed: seed, Stream: true, Faults: faults,
 	})
-	replica := actor.NewEntityRef[runtime.EventData](actor.EntityID{Runtime: actor.NewOwner(), Slot: 1, Name: "replica"})
+	replica := actortest.Ref[runtime.EventData]("replica")
 	h := &harness{t: t, m: New(cfg, env, replica), replica: replica, env: env, log: spec.New(), watched: map[actor.ReplyID]Input{}}
 	shadow := actortest.NewEnv(actortest.Config{Seed: seed, Stream: true})
 	for range 64 {
@@ -158,13 +158,7 @@ func (h *harness) step(in Input) []string {
 
 // receive runs one Receive and carries out its effects in order.
 func (h *harness) receive(in Input) {
-	effects := actortest.Run(h.t, &h.asks, actor.Binding{
-		Self:  actor.EntityID{Name: "rebalance"},
-		Asker: actor.Asker{Kind: actor.ActorAsker, Name: "rebalance"},
-		Misuse: func(what string) {
-			h.t.Fatalf("misuse: %s", what)
-		},
-	}, func(o *actor.Outbox[Input, actor.NoIO]) {
+	effects := actortest.Run(h.t, &h.asks, "rebalance", func(o *actor.Outbox[Input, actor.NoIO]) {
 		h.m.Receive(h.at(), in, o)
 	})
 	for _, e := range effects {
@@ -176,7 +170,7 @@ func (h *harness) effect(e actor.Effect) {
 	h.effects = append(h.effects, e)
 	switch e.Kind {
 	case actor.EffectReply:
-		r, ok := actor.As[Reply](e.Msg)
+		r, ok := e.Msg.(Reply)
 		if !ok {
 			h.t.Fatalf("a reply that is not a Reply: %T", e.Msg)
 		}
@@ -208,7 +202,7 @@ func (h *harness) effect(e actor.Effect) {
 }
 
 func (h *harness) input(p actor.Payload) Input {
-	in, ok := actor.As[Input](p)
+	in, ok := p.(Input)
 	if !ok {
 		h.t.Fatalf("not an Input: %T", p)
 	}
@@ -403,7 +397,7 @@ func (h *harness) short(s string) string {
 func (h *harness) replies() []Reply {
 	var out []Reply
 	for _, e := range h.effects {
-		if r, ok := actor.As[Reply](e.Msg); ok && e.Kind == actor.EffectReply {
+		if r, ok := e.Msg.(Reply); ok && e.Kind == actor.EffectReply {
 			out = append(out, r)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // AttritionPlan makes the System kill actors spawned with the Attrition option
@@ -116,7 +117,7 @@ func (sys *System) end(s slot, how actor.End, cause string) {
 		actor.Field{Key: "cause", Value: actor.StringValue(cause)})
 	sys.watcherEnded(idx, inc)
 	sys.askerEnded(func(r actor.ReplyID) bool {
-		return r.Asker.Kind == actor.ActorAsker && int(r.Asker.Slot) == idx && r.Asker.Boot == inc
+		return r.Asker.Kind == core.ActorAsker && int(r.Asker.Slot) == idx && r.Asker.Boot == inc
 	})
 	for _, sv := range sys.services {
 		sv.onCrash(who)

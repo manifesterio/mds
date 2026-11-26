@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // executor simulates product IO. One executor per IO sum, shared by every
@@ -93,7 +94,7 @@ func Spawn[In, IO actor.Payload](sys *System, p actor.Props[In, IO], opts ...Spa
 	}
 	sys.names[p.Name] = true
 	sys.actors = append(sys.actors, h)
-	return actor.NewEntityRef[In](h.entityID())
+	return core.NewEntityRef[In](h.entityID())
 }
 
 // typedOptions checks the typed options against the actor's types.

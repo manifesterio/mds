@@ -40,7 +40,7 @@ func newHarness(t *testing.T, config replica.Config) *harness {
 // recorded effects after keeping track of timers and Performs.
 func (h *harness) run(f func(o *actor.Outbox[runtime.EventData, runtime.IO])) []actor.Effect {
 	h.t.Helper()
-	effects := actortest.Run(h.t, &h.number, actor.Binding{}, f)
+	effects := actortest.Run(h.t, &h.number, "replica", f)
 	actortest.Drain(h.t, effects, h.book, actortest.Handler{})
 	return effects
 }
@@ -117,9 +117,7 @@ func deliver(t *testing.T, e actor.Effect, done actor.Payload) runtime.EventData
 
 // caller is the reply handle of ask number n of the test.
 func caller(n uint64) actor.ReplyTo[runtime.ControlPlaneDone] {
-	return actor.NewReplyTo[runtime.ControlPlaneDone](actor.ReplyID{
-		Asker: actor.Asker{Kind: actor.SimOutsideAsker, Name: "test"}, Number: n,
-	})
+	return actortest.ReplyTo[runtime.ControlPlaneDone]("test", n)
 }
 
 // reply is one Reply effect: the ask it answers and the answer.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/core"
 )
 
 // Service simulates one outside system (an object store, a log, the control
@@ -69,7 +70,7 @@ func AddService[Req, Rep actor.Payload](sys *System, name string, svc Service[Re
 	h.ctx = &ServiceCtx{env: env{sys: sys}, sys: sys, name: name, invalidate: h.invalidateHash}
 	sys.svcNames[name] = true
 	sys.services = append(sys.services, h)
-	return actor.NewServiceRef[Req, Rep](actor.ServiceID{Runtime: sys.owner, Slot: uint32(h.idx), Name: name})
+	return core.NewServiceRef[Req, Rep](core.ServiceID{Runtime: sys.owner, Slot: uint32(h.idx), Name: name})
 }
 
 func (h *serviceHost[Req, Rep]) base() *serviceBase { return &h.serviceBase }
@@ -78,7 +79,7 @@ func (h *serviceHost[Req, Rep]) stateHash() uint64 { return h.svc.StateHash() }
 
 func (h *serviceHost[Req, Rep]) handle(req actor.Payload, to responderTarget) {
 	sys := h.sys
-	r, ok := actor.As[Req](req)
+	r, ok := core.As[Req](req)
 	if !ok {
 		sys.Fail(FailProtocol, "wrong_request_type", fmt.Sprintf("service %s: got %T", h.name, req))
 		return
@@ -106,7 +107,7 @@ func (h *serviceHost[Req, Rep]) enterRecovery() {
 }
 
 // callService hands req to service id; its answer goes to `to`.
-func (sys *System) callService(id actor.ServiceID, req actor.Payload, to responderTarget) {
+func (sys *System) callService(id core.ServiceID, req actor.Payload, to responderTarget) {
 	switch {
 	case id.Runtime == nil:
 		sys.Fail(FailProtocol, "zero address", "a zero ServiceRef was used")
