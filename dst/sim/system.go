@@ -94,6 +94,25 @@ type Result struct {
 // OK reports a run without failures.
 func (r Result) OK() bool { return len(r.Failures) == 0 }
 
+// slot is one actor of the System, whatever its types. It is the one seam
+// between the untyped System and a typed host, so it is wide on purpose.
+type slot interface { //nolint:interfacebloat // see above
+	base() *actorBase
+	boot(sys *System)
+	pump(sys *System)
+	stateHash() uint64
+	inboxLens() (int, int)
+	drop()
+	// ended runs the OnEnd hook of the incarnation that just ended.
+	ended(sys *System, who actor.Incarnation, how actor.End, cause string)
+	stopRequest(sys *System, deadline actor.Mono) bool
+	// arrive puts a message that reached the actor in its inbox. n is the
+	// owned number it carries (a timer or an answer), 0 for none.
+	arrive(sys *System, msg actor.Payload, inc actor.ID, toInc bool, n uint64)
+	// answerArrives handles the answer for awaited number n of incarnation inc.
+	answerArrives(sys *System, answer actor.Payload, inc actor.ID, n uint64)
+}
+
 // System is one simulation run: one seed, one random stream, one event queue,
 // the actors, the tracked outside state and the rules.
 // It is not safe for concurrent use. Use one System per run.
@@ -272,12 +291,12 @@ func (sys *System) Start() {
 	sys.started = true
 	for _, s := range sys.actors {
 		if !s.base().workload {
-			s.boot()
+			s.boot(sys)
 		}
 	}
 	for _, s := range sys.actors {
 		if s.base().workload {
-			s.boot()
+			s.boot(sys)
 		}
 	}
 }
@@ -468,6 +487,14 @@ func (sys *System) cachedHash(what string, c *hashCache, full func() uint64) boo
 	c.sum, c.hashValid = sum, true
 	return true
 }
+
+// view is the View of a System.
+type view struct{ sys *System }
+
+func (v view) Step() uint64             { return v.sys.steps }
+func (v view) Now() Time                { return v.sys.q.now }
+func (v view) Timeline() *Timeline      { return v.sys.tl }
+func (v view) Assert() actor.Assertions { return simAsserts{v.sys.asserts} }
 
 // observe gives every rule the view after one queue pop.
 func (sys *System) observe() {

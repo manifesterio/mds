@@ -7,25 +7,6 @@ import (
 	"github.com/manifesterio/mds/dst/internal/core"
 )
 
-// slot is one actor of the System, whatever its types. It is the one seam
-// between the untyped System and a typed host, so it is wide on purpose.
-type slot interface { //nolint:interfacebloat // see above
-	base() *actorBase
-	boot()
-	pump()
-	stateHash() uint64
-	inboxLens() (int, int)
-	drop()
-	// ended runs the OnEnd hook of the incarnation that just ended.
-	ended(who actor.Incarnation, how actor.End, cause string)
-	stopRequest(deadline actor.Mono) bool
-	// arrive puts a message that reached the actor in its inbox. n is the
-	// owned number it carries (a timer or an answer), 0 for none.
-	arrive(msg actor.Payload, inc actor.ID, toInc bool, n uint64)
-	// answerArrives handles the answer for awaited number n of incarnation inc.
-	answerArrives(answer actor.Payload, inc actor.ID, n uint64)
-}
-
 // item is one waiting message. n is its owned number (0: none).
 type item[In actor.Payload] struct {
 	msg  In
@@ -64,10 +45,10 @@ func (h *host[In, IO]) drop() {
 
 // push puts msg in its inbox. It reports false when Priority panicked (the
 // run halts).
-func (h *host[In, IO]) push(it item[In]) bool {
+func (h *host[In, IO]) push(sys *System, it item[In]) bool {
 	p := actor.Data
-	if h.props.Priority != nil && !h.sys.guard("Priority "+h.name, func() { p = h.props.Priority(it.msg) }) {
-		h.sys.halted = true
+	if h.props.Priority != nil && !sys.guard("Priority "+h.name, func() { p = h.props.Priority(it.msg) }) {
+		sys.halted = true
 		return false
 	}
 	if p == actor.Control {
@@ -92,8 +73,7 @@ func (h *host[In, IO]) next() (item[In], bool) {
 	return zero, false
 }
 
-func (h *host[In, IO]) arrive(msg actor.Payload, inc actor.ID, toInc bool, n uint64) {
-	sys := h.sys
+func (h *host[In, IO]) arrive(sys *System, msg actor.Payload, inc actor.ID, toInc bool, n uint64) {
 	if !h.up || (toInc && h.inc != inc) {
 		sys.dropped(dropDeadTarget, h.name)
 		sys.logMsg("drop stale "+h.name, msg)
@@ -105,18 +85,18 @@ func (h *host[In, IO]) arrive(msg actor.Payload, inc actor.ID, toInc bool, n uin
 		return
 	}
 	sys.logMsg("deliver "+h.name+" <-", msg)
-	if h.push(item[In]{msg: m, n: n}) {
-		h.pump()
+	if h.push(sys, item[In]{msg: m, n: n}) {
+		h.pump(sys)
 	}
 }
 
-func (h *host[In, IO]) stopRequest(deadline actor.Mono) bool {
+func (h *host[In, IO]) stopRequest(sys *System, deadline actor.Mono) bool {
 	if h.props.StopMsg == nil {
 		return false
 	}
 	var msg In
-	if !h.sys.guard("StopMsg "+h.name, func() { msg = h.props.StopMsg(deadline) }) {
-		h.sys.halted = true
+	if !sys.guard("StopMsg "+h.name, func() { msg = h.props.StopMsg(deadline) }) {
+		sys.halted = true
 		return true
 	}
 	h.control = append(h.control, item[In]{msg: msg})
@@ -125,8 +105,7 @@ func (h *host[In, IO]) stopRequest(deadline actor.Mono) bool {
 
 // boot starts a new incarnation: a new boot number from the run stream, a
 // fresh actor from Props.New, the boot message first, and a wake-up.
-func (h *host[In, IO]) boot() {
-	sys := h.sys
+func (h *host[In, IO]) boot(sys *System) {
 	if h.up || h.broken {
 		return
 	}
@@ -168,8 +147,7 @@ func (h *host[In, IO]) boot() {
 // pump gives the actor one Receive if it is up, not paused, not busy, and
 // has a message waiting. A busy actor gets a wake-up at the end of its busy
 // time.
-func (h *host[In, IO]) pump() {
-	sys := h.sys
+func (h *host[In, IO]) pump(sys *System) {
 	if !h.up || h.paused || sys.halted {
 		return
 	}
@@ -181,7 +159,7 @@ func (h *host[In, IO]) pump() {
 		return
 	}
 	it, ok := h.next()
-	for ok && !h.take(it.n) {
+	for ok && !h.take(it.n, sys.plantKeepFiredTimers) {
 		sys.dropped(dropStaleTimer, h.name)
 		sys.logMsg("drop stale "+h.name, it.msg)
 		it, ok = h.next()
@@ -196,7 +174,7 @@ func (h *host[In, IO]) pump() {
 	sys.hash.String(h.name)
 	it.msg.Fold(&sys.hash)
 	sys.logMsg("receive "+h.name, it.msg)
-	if !h.receive(it.msg) || !h.up {
+	if !h.receive(sys, it.msg) || !h.up {
 		return
 	}
 	var cost actor.Duration
@@ -212,17 +190,16 @@ func (h *host[In, IO]) pump() {
 // receive runs one Receive with msg and carries out its effects. It reports
 // false when Receive panicked: then a workload halts the run and any other
 // actor crashes: no effect of the panicking Receive is applied.
-func (h *host[In, IO]) receive(msg In) bool {
-	sys := h.sys
+func (h *host[In, IO]) receive(sys *System, msg In) bool {
 	h.invalidateHash()
 	inc := h.inc
 	o := core.NewOutbox[In, IO](core.Binding{
-		Self:   h.entityID(),
-		Asker:  h.asker(),
+		Self:   h.entityID(sys.owner),
+		Asker:  h.asker(sys.owner),
 		Next:   h.nextNumber,
 		Misuse: func(what string) { sys.Fail(FailProtocol, "outbox_misuse", h.name+": "+what) },
 	})
-	now := actor.Now{Mono: h.local(), Wall: sys.wall()}
+	now := actor.Now{Mono: h.local(sys.q.now), Wall: sys.wall()}
 	if !sys.guard("Receive "+h.name, func() { h.a.Receive(now, msg, o) }) {
 		core.Close(o)
 		if h.workload {
@@ -233,7 +210,7 @@ func (h *host[In, IO]) receive(msg In) bool {
 		return false
 	}
 	effects := core.Close(o)
-	h.apply(effects)
+	h.apply(sys, effects)
 	if h.afterRcv != nil && h.alive(inc) && !sys.halted {
 		if !sys.guard("AfterReceive "+h.name, func() { h.afterRcv(h.self(), msg, effects) }) {
 			sys.halted = true
@@ -242,8 +219,8 @@ func (h *host[In, IO]) receive(msg In) bool {
 	return true
 }
 
-func (h *host[In, IO]) ended(who actor.Incarnation, how actor.End, cause string) {
-	if h.onEnd != nil && !h.sys.guard("OnEnd "+h.name, func() { h.onEnd(who, how, cause) }) {
-		h.sys.halted = true
+func (h *host[In, IO]) ended(sys *System, who actor.Incarnation, how actor.End, cause string) {
+	if h.onEnd != nil && !sys.guard("OnEnd "+h.name, func() { h.onEnd(who, how, cause) }) {
+		sys.halted = true
 	}
 }

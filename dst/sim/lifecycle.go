@@ -44,7 +44,7 @@ func (sys *System) Current(e actor.Entity) (actor.Incarnation, bool) {
 // Boot starts a new incarnation of an actor that is down.
 func (sys *System) Boot(e actor.Entity) {
 	if s, ok := sys.lookup(e); ok {
-		s.boot()
+		s.boot(sys)
 	}
 }
 
@@ -110,7 +110,7 @@ func (sys *System) end(s slot, how actor.End, cause string) {
 		return r.Asker.Kind == core.ActorAsker && int(r.Asker.Slot) == idx && r.Asker.Boot == inc
 	})
 	s.drop()
-	s.ended(who, how, cause)
+	s.ended(sys, who, how, cause)
 	if b.restart == nil {
 		return
 	}
@@ -143,7 +143,7 @@ func (sys *System) queueBoot(s slot, at Time) {
 	b := s.base()
 	e := &entry{at: at, lane: hostLane, kind: kindRestart, node: b.idx}
 	e.run = func() {
-		s.boot()
+		s.boot(sys)
 	}
 	sys.q.add(e)
 }
@@ -159,7 +159,7 @@ func (sys *System) Stop(e actor.Entity, grace actor.Duration) {
 	}
 	b := s.base()
 	deadline := sys.q.now + Time(max(grace, 0))
-	if !s.stopRequest(actor.Mono(deadline) + actor.Mono(b.skew)) {
+	if !s.stopRequest(sys, actor.Mono(deadline)+actor.Mono(b.skew)) {
 		sys.Fail(FailProtocol, "stop_not_allowed", b.name+": the actor has no StopMsg")
 		return
 	}
@@ -174,7 +174,7 @@ func (sys *System) Stop(e actor.Entity, grace actor.Duration) {
 	}
 	sys.q.add(ent)
 	sys.systemFact("sim_stop_requested", actor.Field{Key: "node", Value: actor.StringValue(b.name)})
-	s.pump()
+	s.pump(sys)
 }
 
 // Stopping reports whether an incarnation of the actor is up and was asked to

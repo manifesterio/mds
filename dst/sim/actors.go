@@ -30,7 +30,6 @@ type owned struct {
 // The struct outlives incarnations; the fields marked "per incarnation" are
 // reset at each boot.
 type actorBase struct {
-	sys      *System
 	idx      int
 	name     string
 	skew     actor.Duration
@@ -59,20 +58,20 @@ type actorBase struct {
 
 func (b *actorBase) self() actor.Incarnation { return actor.Incarnation{Name: b.name, Boot: b.inc} }
 
-func (b *actorBase) entityID() actor.EntityID {
-	return actor.EntityID{Runtime: b.sys.owner, Slot: uint32(b.idx), Name: b.name}
+func (b *actorBase) entityID(owner *core.Owner) actor.EntityID {
+	return actor.EntityID{Runtime: owner, Slot: uint32(b.idx), Name: b.name}
 }
 
-func (b *actorBase) asker() core.Asker {
-	return core.Asker{Kind: core.ActorAsker, Runtime: b.sys.owner, Slot: uint32(b.idx), Name: b.name, Boot: b.inc}
+func (b *actorBase) asker(owner *core.Owner) core.Asker {
+	return core.Asker{Kind: core.ActorAsker, Runtime: owner, Slot: uint32(b.idx), Name: b.name, Boot: b.inc}
 }
 
 // alive reports whether incarnation inc of this actor is up.
 func (b *actorBase) alive(inc actor.ID) bool { return b.up && b.inc == inc }
 
 // local is the node clock: virtual time plus the actor's skew.
-func (b *actorBase) local() actor.Mono {
-	return actor.Mono(b.sys.q.now) + actor.Mono(b.skew)
+func (b *actorBase) local(now Time) actor.Mono {
+	return actor.Mono(now) + actor.Mono(b.skew)
 }
 
 func (b *actorBase) nextNumber() uint64 {
@@ -102,13 +101,13 @@ func (b *actorBase) counts() (int, int) {
 
 // take reports whether an inbox item that carries owned number n may be
 // received, and forgets n when it may.
-func (b *actorBase) take(n uint64) bool {
+func (b *actorBase) take(n uint64, keepFired bool) bool {
 	if n == 0 {
 		return true
 	}
 	o, ok := b.owned[n]
 	if !ok {
-		return b.sys.plantKeepFiredTimers
+		return keepFired
 	}
 	delete(b.owned, n)
 	if o.key != "" && b.keyed[o.key] == n {
@@ -186,7 +185,7 @@ func (sys *System) ensureWake(b *actorBase, at Time) {
 		}
 		b.wakePending = false
 		sys.logMsg("wake "+b.name, nil)
-		sys.actors[b.idx].pump()
+		sys.actors[b.idx].pump(sys)
 	}
 	sys.q.add(e)
 }

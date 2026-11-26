@@ -75,7 +75,7 @@ func Spawn[In, IO actor.Payload](sys *System, p actor.Props[In, IO], opts ...Spa
 		return actor.EntityRef[In]{}
 	}
 	h := &host[In, IO]{
-		actorBase: actorBase{sys: sys, idx: len(sys.actors), name: p.Name,
+		actorBase: actorBase{idx: len(sys.actors), name: p.Name,
 			workload: o.workload, restart: p.Restart},
 		props: p, cost: o.cost, onEnd: o.onEnd,
 	}
@@ -87,7 +87,7 @@ func Spawn[In, IO actor.Payload](sys *System, p actor.Props[In, IO], opts ...Spa
 	}
 	sys.names[p.Name] = true
 	sys.actors = append(sys.actors, h)
-	return core.NewEntityRef[In](h.entityID())
+	return core.NewEntityRef[In](h.entityID(sys.owner))
 }
 
 // typedOptions checks the typed options against the actor's types.

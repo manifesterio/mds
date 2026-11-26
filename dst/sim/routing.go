@@ -28,7 +28,7 @@ func (sys *System) tell(source string, to actor.EntityID, d actor.Duration, msg 
 	}
 	b := s.base()
 	e := &entry{at: sys.q.now + Time(max(d, 0)), lane: sys.actorLane(source, b.idx), kind: kindDeliver, node: b.idx, body: msg}
-	e.run = func() { s.arrive(msg, actor.ID{}, false, 0) }
+	e.run = func() { s.arrive(sys, msg, actor.ID{}, false, 0) }
 	sys.q.add(e)
 }
 
@@ -57,7 +57,7 @@ func (sys *System) replyToActor(source string, r actor.ReplyID, answer actor.Pay
 	}
 	inc, n := r.Asker.Boot, r.Number
 	e := &entry{at: sys.q.now, lane: sys.actorLane(source, b.idx), kind: kindDeliver, node: b.idx, inc: inc, body: answer}
-	e.run = func() { s.answerArrives(answer, inc, n) }
+	e.run = func() { s.answerArrives(sys, answer, inc, n) }
 	sys.q.add(e)
 }
 
@@ -127,7 +127,7 @@ func (sys *System) fireWatch(w watch) {
 	s := sys.actors[w.idx]
 	inc, gone := w.inc, w.gone
 	e := &entry{at: sys.q.now, lane: sys.actorLane("watch", w.idx), kind: kindDeliver, node: w.idx, inc: inc, body: gone}
-	e.run = func() { s.arrive(gone, inc, true, 0) }
+	e.run = func() { s.arrive(sys, gone, inc, true, 0) }
 	sys.q.add(e)
 }
 

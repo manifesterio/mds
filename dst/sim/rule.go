@@ -21,11 +21,3 @@ type View interface {
 	Timeline() *Timeline
 	Assert() actor.Assertions
 }
-
-// view is the View of a System.
-type view struct{ sys *System }
-
-func (v view) Step() uint64             { return v.sys.steps }
-func (v view) Now() Time                { return v.sys.q.now }
-func (v view) Timeline() *Timeline      { return v.sys.tl }
-func (v view) Assert() actor.Assertions { return simAsserts{v.sys.asserts} }

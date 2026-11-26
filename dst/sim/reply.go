@@ -53,7 +53,7 @@ func (sys *System) answerAt(source string, to responderTarget, d Time, answer ac
 	s := sys.actors[to.idx]
 	inc, n := to.inc, to.number
 	e := &entry{at: sys.q.now + d, lane: sys.actorLane(source, to.idx), kind: kindDeliver, node: to.idx, inc: inc, body: answer}
-	e.run = func() { s.answerArrives(answer, inc, n) }
+	e.run = func() { s.answerArrives(sys, answer, inc, n) }
 	sys.q.add(e)
 }
 
