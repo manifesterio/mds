@@ -66,16 +66,6 @@ func (sys *System) Crash(e actor.Entity, cause string) {
 	sys.end(s, actor.Crash, cause)
 }
 
-// Stop asks the incarnation that is up to stop gracefully (Props.StopMsg),
-// and kills it after grace.
-func (sys *System) Stop(e actor.Entity, grace actor.Duration) {
-	s, ok := sys.live(e)
-	if !ok || s.base().stopping || sys.refuseWorkload(s, "stop") {
-		return
-	}
-	sys.stop(s, grace)
-}
-
 // Pause holds the actor's inbox: it receives nothing until Resume.
 func (sys *System) Pause(e actor.Entity) {
 	if s, ok := sys.live(e); ok {

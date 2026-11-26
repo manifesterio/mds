@@ -70,7 +70,6 @@ const (
 // Failure is the first failure of one property in a run. Later failures of
 // the same property only raise Repeats.
 type Failure struct {
-	Seed     uint64
 	Kind     FailKind
 	Property string
 	Detail   string
@@ -81,8 +80,8 @@ type Failure struct {
 
 // counter is one run statistic.
 type counter struct {
-	Name string
-	N    uint64
+	name string
+	n    uint64
 }
 
 // LogEntry is one step line. Its text is never hashed.
@@ -92,11 +91,11 @@ type LogEntry struct {
 	Text string
 }
 
-// Result is one run. (Steps, RandCalls, Hash, Stats) is what a golden pin holds.
+// Result is one run. (Steps, RandCalls, Hash) is what a golden pin holds.
 type Result struct {
 	Seed, Steps, RandCalls, Hash uint64
 	Crashes, Trips, Exits        int
-	Stats                        []counter
+	stats                        []counter
 	Failures                     []Failure
 	Coverage                     map[string]assert.Coverage
 	Sites                        map[string]fault.SiteCount
@@ -215,8 +214,8 @@ func NewSystem(cfg Config) *System {
 // Now is the current virtual time.
 func (sys *System) Now() Time { return sys.q.now }
 
-// Wall is the UTC time now: Config.WallStart plus Now.
-func (sys *System) Wall() actor.Wall { return sys.cfg.WallStart + actor.Wall(sys.q.now) }
+// wall is the UTC time now: Config.WallStart plus Now.
+func (sys *System) wall() actor.Wall { return sys.cfg.WallStart + actor.Wall(sys.q.now) }
 
 // Steps is the number of queue entries taken so far.
 func (sys *System) Steps() uint64 { return sys.steps }
@@ -281,7 +280,7 @@ func (sys *System) Fail(kind FailKind, property, detail string) {
 		}
 	}
 	sys.failures = append(sys.failures, Failure{
-		Seed: sys.cfg.Seed, Kind: kind, Property: property, Detail: detail, Step: sys.steps, At: sys.q.now,
+		Kind: kind, Property: property, Detail: detail, Step: sys.steps, At: sys.q.now,
 	})
 	sys.logMsg("fail "+property+": "+detail, nil)
 	if sys.cfg.HaltOnFirst {
@@ -429,13 +428,13 @@ func (sys *System) Finish() Result {
 		Sites:    sys.faults.Sites(),
 	}
 	for i, name := range counterNames() {
-		res.Stats = append(res.Stats, counter{Name: name, N: sys.counters[i]})
+		res.stats = append(res.stats, counter{name: name, n: sys.counters[i]})
 	}
 	for _, l := range sys.lines {
 		res.Log = append(res.Log, l.entry())
 	}
 	if len(sys.failures) > 0 && sys.tail != nil {
-		for _, l := range sys.tail.Tail() {
+		for _, l := range sys.tail.tail() {
 			res.Tail = append(res.Tail, l.entry())
 		}
 	}

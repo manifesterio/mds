@@ -203,7 +203,7 @@ func (h *host[In, IO]) pump() {
 	if !h.receive(it.msg) || !h.up {
 		return
 	}
-	cost := max(h.cost.Sample(sys.Env()), 0)
+	cost := max(h.cost.sample(sys.Env()), 0)
 	h.busy = now + Time(cost)
 	if !h.empty() {
 		sys.ensureWake(&h.actorBase, h.busy)
@@ -224,7 +224,7 @@ func (h *host[In, IO]) receive(msg In) bool {
 		Next:   h.nextNumber,
 		Misuse: func(what string) { sys.Fail(FailProtocol, "outbox_misuse", h.name+": "+what) },
 	})
-	now := actor.Now{Mono: h.local(), Wall: sys.Wall()}
+	now := actor.Now{Mono: h.local(), Wall: sys.wall()}
 	if !sys.guard("Receive "+h.name, func() { h.a.Receive(now, msg, o) }) {
 		actor.Close(o)
 		if h.workload {

@@ -13,9 +13,6 @@ type ExecCtx struct {
 	answered bool
 }
 
-// System is the run, for executors that Tell actors or use services.
-func (c *ExecCtx) System() *System { return c.sys }
-
 // Issuer is the incarnation that recorded the IO.
 func (c *ExecCtx) Issuer() actor.Incarnation { return c.self }
 

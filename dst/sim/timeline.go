@@ -20,7 +20,6 @@ const (
 // others. In a run only the System appends.
 type Timeline struct {
 	seq    uint64
-	n      int
 	byName map[string][]TimedFact
 }
 
@@ -44,13 +43,9 @@ func NewTimeline() *Timeline { return &Timeline{byName: map[string][]TimedFact{}
 // hand.
 func (t *Timeline) Append(source actor.Incarnation, at Time, f actor.Fact) uint64 {
 	t.seq++
-	t.n++
 	t.byName[f.Name] = append(t.byName[f.Name], TimedFact{Seq: t.seq, At: at, Source: source, Fact: f})
 	return t.seq
 }
-
-// Len is the number of facts of every name.
-func (t *Timeline) Len() int { return t.n }
 
 // Since returns the facts named name that were appended after c, and moves c
 // to the end.

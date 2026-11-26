@@ -13,9 +13,9 @@ type CostParams struct {
 	Pause     FastWithRareSlow // the extra cost of a pause
 }
 
-// Sample draws the cost of one Step: PerEvent, plus a Pause sample with
+// sample draws the cost of one Step: PerEvent, plus a Pause sample with
 // probability PauseProb.
-func (p CostParams) Sample(r actor.Rand) actor.Duration {
+func (p CostParams) sample(r actor.Rand) actor.Duration {
 	d := p.PerEvent
 	if r.Chance(p.PauseProb) {
 		d += p.Pause.Sample(r)

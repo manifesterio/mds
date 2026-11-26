@@ -92,7 +92,7 @@ func (sys *System) logMsg(text string, msg actor.Payload) {
 		sys.lines = append(sys.lines, l)
 	}
 	if sys.tail != nil {
-		sys.tail.Add(l)
+		sys.tail.add(l)
 	}
 }
 
