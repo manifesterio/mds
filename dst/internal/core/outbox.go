@@ -155,11 +155,11 @@ func Close[In, IO Payload](o *Outbox[In, IO]) []Effect {
 
 func identity(msg Payload) Payload { return msg }
 
-// Lift erases f, a function into the outbox's protocol (an answer's adapt,
+// lift erases f, a function into the outbox's protocol (an answer's adapt,
 // or a Sub's wrap), and puts its result through the outbox's own wraps. The
 // assertion cannot fail: the runtime matched the answer to its request, and
 // only a Sub's own methods pass its message type.
-func Lift[In, IO, X Payload](o *Outbox[In, IO], f func(X) In) func(Payload) Payload {
+func lift[In, IO, X Payload](o *Outbox[In, IO], f func(X) In) func(Payload) Payload {
 	return func(v Payload) Payload { return o.up(f(v.(X))) } //nolint:forcetypeassert // see above
 }
 
@@ -176,15 +176,28 @@ func As[P Payload](msg Payload) (P, bool) {
 	return p, ok
 }
 
-// Record adds e to the effects of o, scoped by o's Sub path. It is how the
-// generic functions of package actor (Ask, Reply, Perform) record.
-func Record[In, IO Payload](o *Outbox[In, IO], e Effect) { o.record(e) }
+// Ask records an Ask of the actor to: a fresh ReplyTo goes into the request
+// makeReq builds, and adapt turns the answer into o's own message. It is how
+// actor.Ask records.
+func Ask[In, IO, Req, Rep Payload](o *Outbox[In, IO], to EntityID,
+	makeReq func(ReplyTo[Rep]) Req, adapt func(Rep) In) {
+	n := o.rec.next()
+	replyTo := ReplyTo[Rep]{id: ReplyID{Asker: o.rec.binding.Asker, Number: n}}
+	o.record(Effect{Kind: EffectAsk, To: to, Reply: replyTo.id, Number: n,
+		Msg: makeReq(replyTo), Adapt: lift(o, adapt)})
+}
 
-// Next returns the next ask/pending number of o's incarnation.
-func Next[In, IO Payload](o *Outbox[In, IO]) uint64 { return o.rec.next() }
+// Reply records the answer to the ask behind to. It is how actor.Reply
+// records.
+func Reply[In, IO, R Payload](o *Outbox[In, IO], to ReplyTo[R], answer R) {
+	o.record(Effect{Kind: EffectReply, Reply: to.id, Msg: answer})
+}
 
-// AskerOf returns who asks through o: its incarnation.
-func AskerOf[In, IO Payload](o *Outbox[In, IO]) Asker { return o.rec.binding.Asker }
+// Perform records req for the executor; adapt turns its one answer into o's
+// own message. It is how actor.Perform records.
+func Perform[In, IO, Rep Payload](o *Outbox[In, IO], req IO, adapt func(Rep) In) {
+	o.record(Effect{Kind: EffectPerform, Number: o.rec.next(), Msg: req, Adapt: lift(o, adapt)})
+}
 
 // Sub makes the Outbox of a component with protocol C, scoped by name under
 // o's own scope. What it schedules for itself comes back wrapped by wrap.
@@ -193,5 +206,5 @@ func Sub[In, IO, C Payload](o *Outbox[In, IO], name string, wrap func(C) In) *Ou
 	if o.scope != "" {
 		scope = o.scope + "/" + name
 	}
-	return &Outbox[C, IO]{rec: o.rec, scope: scope, up: Lift(o, wrap)}
+	return &Outbox[C, IO]{rec: o.rec, scope: scope, up: lift(o, wrap)}
 }

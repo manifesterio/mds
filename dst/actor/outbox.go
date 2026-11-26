@@ -7,17 +7,14 @@ import "github.com/manifesterio/mds/dst/internal/core"
 // adapt, so I keep no table of pending asks. There is no timeout: use After.
 func Ask[In, IO, Req, Rep Payload](o *Outbox[In, IO], to EntityRef[Req],
 	makeReq func(ReplyTo[Rep]) Req, adapt func(Rep) In) {
-	n := core.Next(o)
-	replyTo := core.NewReplyTo[Rep](ReplyID{Asker: core.AskerOf(o), Number: n})
-	core.Record(o, core.Effect{Kind: core.EffectAsk, To: to.EntityID(), Reply: replyTo.ID(), Number: n,
-		Msg: makeReq(replyTo), Adapt: core.Lift(o, adapt)})
+	core.Ask(o, to.EntityID(), makeReq, adapt)
 }
 
 // Reply answers an Ask I received. A second Reply to the same ReplyTo, or a
 // Reply to an asker that is gone, is dropped. It removes any Watch on
 // that ReplyTo.
 func Reply[In, IO, R Payload](o *Outbox[In, IO], to ReplyTo[R], answer R) {
-	core.Record(o, core.Effect{Kind: core.EffectReply, Reply: to.ID(), Msg: answer})
+	core.Reply(o, to, answer)
 }
 
 // Perform hands req to the executor and turns its one answer into my message
@@ -26,7 +23,7 @@ func Reply[In, IO, R Payload](o *Outbox[In, IO], to ReplyTo[R], answer R) {
 // this incarnation and only if not forgotten.
 func Perform[In, IO, Rep Payload, Req Request[IO, Rep]](o *Outbox[In, IO], req Req, adapt func(Rep) In) {
 	io, _ := req.AsRequest()
-	core.Record(o, core.Effect{Kind: core.EffectPerform, Number: core.Next(o), Msg: io, Adapt: core.Lift(o, adapt)})
+	core.Perform(o, io, adapt)
 }
 
 // Sub lends a component its own Outbox with protocol C. What the component

@@ -53,9 +53,12 @@ func (r EntityRef[P]) Name() string { return r.id.Name }
 func (r EntityRef[P]) IsZero() bool { return r.id.Runtime == nil }
 
 // Fold writes tag 2101 and the actor's name.
-func (r EntityRef[P]) Fold(h *trace.Hash) {
+func (r EntityRef[P]) Fold(h *trace.Hash) { r.id.Fold(h) }
+
+// Fold writes tag 2101 and the actor's name.
+func (id EntityID) Fold(h *trace.Hash) {
 	h.Uint64(tagEntityRef)
-	h.String(r.id.Name)
+	h.String(id.Name)
 }
 
 // AskerKind says what kind of asker a ReplyTo belongs to.

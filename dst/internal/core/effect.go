@@ -82,9 +82,9 @@ func (e Effect) Fold(h *trace.Hash) {
 	case EffectForgetPending:
 		h.String(e.Scope)
 	case EffectTell:
-		EntityRef[Payload]{id: e.To}.Fold(h)
+		e.To.Fold(h)
 	case EffectAsk:
-		EntityRef[Payload]{id: e.To}.Fold(h)
+		e.To.Fold(h)
 		e.Reply.Fold(h)
 	case EffectReply, EffectWatch:
 		e.Reply.Fold(h)

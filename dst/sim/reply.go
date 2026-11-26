@@ -61,7 +61,6 @@ func (sys *System) answerAt(source string, to responderTarget, d Time, answer ac
 // folded into the trace hash after every step. The hash is cached until
 // Touch.
 type Tracked struct {
-	sys  *System
 	name string
 	hash func() uint64
 	hashCache
@@ -73,7 +72,7 @@ type Tracked struct {
 // seed). A panic in hash halts the run. A nil hash or a name that is empty or
 // used twice is a protocol failure, and the returned Tracked does nothing.
 func (sys *System) Track(name string, hash func() uint64) *Tracked {
-	t := &Tracked{sys: sys, name: name, hash: hash}
+	t := &Tracked{name: name, hash: hash}
 	switch {
 	case hash == nil:
 		sys.Fail(FailProtocol, "track", "a nil hash was tracked")

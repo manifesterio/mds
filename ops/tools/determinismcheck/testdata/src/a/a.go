@@ -1,14 +1,14 @@
 package a
 
 import (
-	"errors"
-	"sort"
+	"fmt"
+	"slices"
 	"time" // want `import "time" is not on the deterministic allow-list`
 )
 
-var ErrBad = errors.New("bad")
+var ErrBad = fmt.Errorf("bad")
 
-var _ = sort.Ints
+var _ = slices.Max[[]int]
 
 var counter int // want `package-level variable counter`
 
@@ -31,6 +31,6 @@ func Good(m map[string]int) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
