@@ -7,7 +7,7 @@ import (
 )
 
 func TestEnvIntnAndBetweenStayInRange(t *testing.T) {
-	var e actor.Env = NewEnv(actor.Incarnation{Name: "broker"}, nil)
+	e := NewEnv(actor.Incarnation{Name: "broker"}, nil)
 	if e.Intn(0) != 0 || e.Intn(-3) != 0 {
 		t.Fatal("Intn with n <= 0 must give 0")
 	}
@@ -40,7 +40,7 @@ func TestEnvIntnAndBetweenStayInRange(t *testing.T) {
 }
 
 func TestEnvChance(t *testing.T) {
-	var e actor.Env = NewEnv(actor.Incarnation{Name: "broker"}, nil)
+	e := NewEnv(actor.Incarnation{Name: "broker"}, nil)
 	if e.Chance(0) || e.Chance(-1) {
 		t.Fatal("Chance(p <= 0) must be false")
 	}
