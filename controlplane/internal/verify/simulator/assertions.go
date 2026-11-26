@@ -50,6 +50,6 @@ var (
 )
 
 var (
-	logHasNoHole     = assert.NewAlways("sim: log has no hole")     //determinismcheck:ok catalog handle, set once at start
+	logHasNoHole     = assert.NewAlways("sim: log has no hole")    //determinismcheck:ok catalog handle, set once at start
 	logEntriesDecode = assert.NewAlways("sim: log entries decode") //determinismcheck:ok catalog handle, set once at start
 )
