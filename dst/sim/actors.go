@@ -9,11 +9,10 @@ import (
 	"github.com/manifesterio/mds/dst/trace"
 )
 
-// Tag numbers of the trace hash for system bodies. They are frozen.
+// Tag numbers of the trace hash for system bodies. They are frozen (902 and
+// 903 are retired: never reuse them).
 const (
 	tagWake    = 901
-	tagPhase   = 902
-	tagOnPhase = 903
 	tagDropped = 2018
 )
 
@@ -31,13 +30,12 @@ type owned struct {
 // The struct outlives incarnations; the fields marked "per incarnation" are
 // reset at each boot.
 type actorBase struct {
-	sys       *System
-	idx       int
-	name      string
-	skew      actor.Duration
-	workload  bool
-	attrition bool
-	restart   actor.RestartPolicy
+	sys      *System
+	idx      int
+	name     string
+	skew     actor.Duration
+	workload bool
+	restart  actor.RestartPolicy
 
 	up      bool
 	broken  bool // the factory failed: never booted again
@@ -207,11 +205,11 @@ func (sys *System) dropped(reason uint64, target string) {
 
 // Reasons a delivery is dropped, folded with tag 2018.
 const (
-	dropDeadTarget  = 1 // the incarnation it was for has ended
-	dropNotAwaited  = 2 // an answer nobody waits for (forgotten, answered twice)
-	dropStaleTimer  = 3 // a cancelled, replaced or forgotten timer
-	dropDeadAsker   = 4 // a Reply to an asker that is gone
-	dropUnwanted    = 5 // a service answer to a TellService
+	dropDeadTarget = 1 // the incarnation it was for has ended
+	dropNotAwaited = 2 // an answer nobody waits for (forgotten, answered twice)
+	dropStaleTimer = 3 // a cancelled, replaced or forgotten timer
+	dropDeadAsker  = 4 // a Reply to an asker that is gone
+	// 5 is retired (a retired service answer): never reuse it.
 	dropAnsweredDo  = 6 // an executor answer to a Do
 	dropOutsideGone = 7 // an answer to a sim.Ask whose deadline passed
 )

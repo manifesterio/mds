@@ -71,9 +71,9 @@ func TestCatchesLostWrites(t *testing.T) {
 // goldenHashes pin the trace hash of seeds 1 to 3. A change here means the
 // runtime or the example changed behavior.
 var goldenHashes = map[string]uint64{
-	"kv/1": 0x7870bc2eabec2780,
-	"kv/2": 0x2d73a4b4ab803953,
-	"kv/3": 0x18f596f0dc051a0d,
+	"kv/1": 0xabd0ae97d5f65fe0,
+	"kv/2": 0x9a6527a227e880a5,
+	"kv/3": 0xf17b7e8dd3d6b86d,
 }
 
 func TestGoldenHashes(t *testing.T) {

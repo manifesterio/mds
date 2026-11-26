@@ -4,7 +4,6 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/actor"
-	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
 const (
@@ -136,7 +135,7 @@ func (c *client) attempt() {
 	current := func() bool { return c.cur == op && op.attempts == try }
 	there := s.store.netDelay(s.rand)
 	var prefix runtime.LogPosition
-	dstsim.AskDelayed(s.w, node.ref, there, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+	askDelayed(s.w, node.ref, there, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
 		return runtime.ControlPlaneDeliver{ReplyTo: to, Op: op.op}
 	}, clientTimeout-there, func(d runtime.ControlPlaneDone) actor.Duration {
 		prefix = node.m.Applied()

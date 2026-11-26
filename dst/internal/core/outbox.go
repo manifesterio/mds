@@ -70,7 +70,7 @@ func (o *Outbox[In, IO]) Fact(f Fact) {
 	o.record(Effect{Kind: EffectFact, Fact: f})
 }
 
-// ForgetPending drops every timer and every Ask, Call and Perform answer
+// ForgetPending drops every timer and every Ask and Perform answer
 // this actor (or, through a Sub, this component) is still waiting for,
 // without ending the incarnation. Watches stay.
 func (o *Outbox[In, IO]) ForgetPending() {
@@ -93,23 +93,6 @@ func (o *Outbox[In, IO]) send(e Effect) { o.record(e) }
 // handle's type instead of inferring P from it.
 func (r EntityRef[P]) Tell(o Sender, msg P) {
 	o.send(Effect{Kind: EffectTell, To: r.id, Msg: msg})
-}
-
-// Tell sends req to the service. Any answer the service gives is dropped.
-func (r ServiceRef[Req, Rep]) Tell(o Sender, req Req) {
-	o.send(Effect{Kind: EffectTellService, Service: r.id, Msg: req})
-}
-
-// ServiceRequest is a request bound to the service that takes it, ready for
-// Call. Make one with ServiceRef.Request.
-type ServiceRequest[Rep Payload] struct {
-	service ServiceID
-	req     Payload
-}
-
-// Request binds req to the service, for Call.
-func (r ServiceRef[Req, Rep]) Request(req Req) ServiceRequest[Rep] {
-	return ServiceRequest[Rep]{service: r.id, req: req}
 }
 
 // Asked is anything that names one ask: a ReplyTo of any answer type.
@@ -186,11 +169,6 @@ func NewEntityRef[P Payload](id EntityID) EntityRef[P] { return EntityRef[P]{id:
 // NewReplyTo makes the handle of one ask. Runtimes only (sim.Ask, live.Ask).
 func NewReplyTo[R Payload](id ReplyID) ReplyTo[R] { return ReplyTo[R]{id: id} }
 
-// NewServiceRef makes the handle of a service. Runtimes only.
-func NewServiceRef[Req, Rep Payload](id ServiceID) ServiceRef[Req, Rep] {
-	return ServiceRef[Req, Rep]{id: id}
-}
-
 // As asserts an erased message back to its type; ok is false on a mismatch
 // (a runtime routing bug, or a foreign ref). Runtimes only.
 func As[P Payload](msg Payload) (P, bool) {
@@ -199,7 +177,7 @@ func As[P Payload](msg Payload) (P, bool) {
 }
 
 // Record adds e to the effects of o, scoped by o's Sub path. It is how the
-// generic functions of package actor (Ask, Reply, Perform, Call) record.
+// generic functions of package actor (Ask, Reply, Perform) record.
 func Record[In, IO Payload](o *Outbox[In, IO], e Effect) { o.record(e) }
 
 // Next returns the next ask/pending number of o's incarnation.
@@ -216,9 +194,4 @@ func Sub[In, IO, C Payload](o *Outbox[In, IO], name string, wrap func(C) In) *Ou
 		scope = o.scope + "/" + name
 	}
 	return &Outbox[C, IO]{rec: o.rec, scope: scope, up: Lift(o, wrap)}
-}
-
-// ServiceCall returns the service and the erased request of a bound request.
-func ServiceCall[Rep Payload](r ServiceRequest[Rep]) (ServiceID, Payload) {
-	return r.service, r.req
 }

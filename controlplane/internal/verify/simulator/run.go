@@ -7,7 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/actor"
-	dstsim "github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 const (
@@ -72,7 +72,7 @@ func (s *sim) faultPhase() {
 func (s *sim) quietPhase() {
 	s.tracef("quiet tail begins")
 	s.quiet, s.faults = true, Faults{}
-	s.w.SetPhase(dstsim.PhaseHeal) // buggify Fault sites go quiet
+	kit.SetPhase(s.w, kit.PhaseHeal) // buggify Fault sites go quiet
 	for _, n := range s.nodes {
 		n.cut = false
 		n.resume()
@@ -85,7 +85,7 @@ func (s *sim) quietPhase() {
 	s.runUntil(func() bool {
 		waited := actor.Duration(s.now() - start)
 		ready := !s.clients.busy() && s.converged() && s.groupsSettled()
-		return dstsim.QuietElapsed(waited, minQuiet, maxQuiet, ready)
+		return quietElapsed(waited, minQuiet, maxQuiet, ready)
 	})
 	s.stats.QuietMs = (s.now() - start) / int64(actor.Millisecond)
 	check.Verdict(s.env, s.converged(), liveReplicasConverge, "after %dms of quiet the replicas did not reach the end of the log together: %s", s.stats.QuietMs, s.describeNodes())
@@ -143,7 +143,7 @@ func (s *sim) finalPhase() {
 		start := s.now()
 		s.runUntil(func() bool {
 			waited := actor.Duration(s.now() - start)
-			return dstsim.QuietElapsed(waited, 0, maxQuiet, !s.groupsWriting() && s.converged())
+			return quietElapsed(waited, 0, maxQuiet, !s.groupsWriting() && s.converged())
 		})
 	}
 	s.clients.startFinal()

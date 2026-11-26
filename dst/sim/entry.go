@@ -15,9 +15,8 @@ type entry struct {
 	// The target, for the trace hash and for dropping the entries of an
 	// incarnation that ended. node is -1 when the target is not a node. inc
 	// is zero when the entry goes to whatever incarnation is up.
-	node    int
-	inc     actor.ID
-	service string
+	node int
+	inc  actor.ID
 
 	body actor.Payload
 	run  func()

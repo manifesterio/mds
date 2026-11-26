@@ -25,7 +25,7 @@ type entryID uint64
 const (
 	// noLane is no FIFO group: every entry gets a fresh random tie.
 	noLane laneID = 0
-	// hostLane is the lane of the System itself (restarts, kills, phases).
+	// hostLane is the lane of the System itself (restarts and kills).
 	// Lanes at or above it belong to the System: it keeps one wake-up lane
 	// per actor there. Pair lanes (one per sender and receiver) are just
 	// below it; host code may use the lanes below those.
@@ -33,8 +33,7 @@ const (
 )
 
 const (
-	defaultMaxSteps  uint64 = 10_000_000
-	defaultStopGrace        = 5 * actor.Second
+	defaultMaxSteps uint64 = 10_000_000
 )
 
 // Config configures one run.
@@ -44,11 +43,10 @@ type Config struct {
 	End          Time           // stop before the first entry after End; 0: no end
 	MaxSteps     uint64         // 0 means 10_000_000; more steps is FailMaxSteps
 	ClockSkewMax actor.Duration // per-node clock skew in [0, ClockSkewMax], drawn once at Spawn
-	Attrition    AttritionPlan
-	Log          bool // keep every step line in Result.Log
-	Tail         int  // keep the last Tail step lines for Result.Tail of a failed run
-	HaltOnFirst  bool // stop the run at the first failure
-	VerifyHashes bool // recompute cached state hashes every step; a mismatch fails the seed
+	Log          bool           // keep every step line in Result.Log
+	Tail         int            // keep the last Tail step lines for Result.Tail of a failed run
+	HaltOnFirst  bool           // stop the run at the first failure
+	VerifyHashes bool           // recompute cached state hashes every step; a mismatch fails the seed
 }
 
 // FailKind says what kind of failure a seed had. It is not folded into the
@@ -59,7 +57,7 @@ type FailKind uint8
 const (
 	FailViolation     FailKind = iota // an Always, AlwaysOrUnreachable or Unreachable broke
 	FailProtocol                      // the API was used the wrong way (effect after Stop, zero address, ...)
-	FailPanic                         // a panic in a Receive, New, an executor, a service, a host task or a rule
+	FailPanic                         // a panic in a Receive, New, an executor, a tracked hash, a host task or a rule
 	FailMaxSteps                      // the run took more than Config.MaxSteps steps
 	FailNotRepeatable                 // the same seed gave another run (set by the campaign canary)
 )
@@ -97,7 +95,7 @@ type Result struct {
 func (r Result) OK() bool { return len(r.Failures) == 0 }
 
 // System is one simulation run: one seed, one random stream, one event queue,
-// the actors, the services and the rules.
+// the actors, the tracked outside state and the rules.
 // It is not safe for concurrent use. Use one System per run.
 type System struct {
 	cfg     Config
@@ -109,12 +107,13 @@ type System struct {
 	hash    trace.Hash
 	tl      *Timeline
 
-	owner    *core.Owner
-	actors   []slot
-	names    map[string]bool
-	services []serviceSlot
-	svcNames map[string]bool
-	rules    []Rule
+	owner      *core.Owner
+	actors     []slot
+	names      map[string]bool
+	trackNames map[string]bool
+	tracked    []*Tracked
+	rules      []Rule
+	onStep     []func()
 
 	pairLanes    map[laneKey2]laneID
 	nextPairLane laneID
@@ -125,9 +124,7 @@ type System struct {
 	// plantKeepFiredTimers is a planted bug, set only by tests.
 	plantKeepFiredTimers bool
 
-	phase    Phase
 	steps    uint64
-	attr     int // attrition rolls to make after this queue pop
 	halted   bool
 	started  bool
 	finished bool
@@ -146,16 +143,16 @@ func NewSystem(cfg Config) *System {
 	}
 	src := rng.New(cfg.Seed)
 	sys := &System{
-		cfg:       cfg,
-		src:       src,
-		rand:      actor.NewRand(src),
-		hash:      trace.New(),
-		tl:        NewTimeline(),
-		owner:     core.NewOwner(),
-		names:     map[string]bool{},
-		svcNames:  map[string]bool{},
-		pairLanes: map[laneKey2]laneID{},
-		outside:   map[uint64]*outsideAsk{},
+		cfg:        cfg,
+		src:        src,
+		rand:       actor.NewRand(src),
+		hash:       trace.New(),
+		tl:         NewTimeline(),
+		owner:      core.NewOwner(),
+		names:      map[string]bool{},
+		trackNames: map[string]bool{},
+		pairLanes:  map[laneKey2]laneID{},
+		outside:    map[uint64]*outsideAsk{},
 	}
 	sys.q = newQueue(sys.src)
 	sys.faults = newInjector(sys.rand)
@@ -189,34 +186,32 @@ func (sys *System) Coverage() map[string]Coverage { return sys.asserts.Coverage(
 // Timeline is the fact timeline of the run.
 func (sys *System) Timeline() *Timeline { return sys.tl }
 
-// Phase is the current phase.
-func (sys *System) Phase() Phase { return sys.phase }
-
 // Note adds a log line. It is never hashed.
 func (sys *System) Note(text string) { sys.logMsg(text, nil) }
 
 // Fact appends a host fact (source zero) to the timeline.
 func (sys *System) Fact(f actor.Fact) { sys.appendFact(actor.Incarnation{}, f) }
 
-// RecordFault records an injected host-side fault: a "sim_fault" fact with
-// kind, then the extra fields (service name is optional; pass a "service"
-// field when the fault has one). ServiceCtx.RecordFault adds the service name.
-func (sys *System) RecordFault(kind string, fields ...actor.Field) {
-	all := append([]actor.Field{
-		{Key: "kind", Value: actor.StringValue(kind)},
-	}, fields...)
-	sys.systemFact(factFault, all...)
+// SetEnd sets the end of the run: the run stops before the first entry after
+// t (see Config.End). Host code that learns its schedule after NewSystem
+// (kit.SchedulePhases) uses it.
+func (sys *System) SetEnd(t Time) { sys.cfg.End = t }
+
+// SetFaults turns buggify Fault sites on or off (Maybe sites still draw) and
+// appends the "sim_faults" fact with field on. A System starts with faults on.
+func (sys *System) SetFaults(on bool) {
+	sys.faults.SetQuiet(!on)
+	sys.systemFact("sim_faults", actor.Field{Key: "on", Value: actor.Bool(on)})
 }
 
-// Bootstrap makes a System for cfg, calls Start, and returns the host Env.
-// Use it when host code needs Env immediately and will Spawn after Start
-// (Start only boots actors already spawned). Prefer NewSystem alone when
-// Spawn/AddService must run before Start.
-func Bootstrap(cfg Config) (*System, actor.Env) {
-	sys := NewSystem(cfg)
-	sys.Start()
-	return sys, sys.Env()
-}
+// FaultsOn reports whether buggify Fault sites may fire.
+func (sys *System) FaultsOn() bool { return !sys.faults.Quiet() }
+
+// OnStep runs fn after every queue pop: after the entry ran and before the
+// state fold and the rules. fn may draw from the run stream and act on the
+// System (Crash, Stop). Steps of a halted run do not call it. Add every
+// OnStep before the run starts; they run in the order added.
+func (sys *System) OnStep(fn func()) { sys.onStep = append(sys.onStep, fn) }
 
 // cancel retires a pending queue entry. An entry that already ran, or an
 // unknown id, is ignored.
@@ -264,41 +259,6 @@ func (sys *System) at(t Time, lane laneID, fn func()) entryID {
 // after queues fn as a host task after d, with no lane.
 func (sys *System) after(d actor.Duration, fn func()) entryID {
 	return sys.at(sys.q.now+Time(max(d, 0)), noLane, fn)
-}
-
-// QuiesceEvery schedules a repeating host task every d that appends a
-// "sim_quiesce" fact with field quiescent from pred. The first fact is after
-// d; zero or negative d does nothing.
-func (sys *System) QuiesceEvery(d actor.Duration, pred func() bool) {
-	if d <= 0 {
-		return
-	}
-	var tick func()
-	tick = func() {
-		sys.systemFact(factQuiesce, actor.Field{Key: "quiescent", Value: actor.Bool(pred())})
-		sys.After(d, tick)
-	}
-	sys.After(d, tick)
-}
-
-// EveryWhile schedules fn about every mean (jittered in [mean/2, mean*3/2]
-// via sys.Env) until still returns false. The first call is after one gap;
-// mean <= 0 does nothing. Use for periodic host faults that stop when a
-// quiet/heal predicate flips; which fault fn applies stays product-side.
-func EveryWhile(sys *System, mean actor.Duration, still func() bool, fn func()) {
-	if mean <= 0 {
-		return
-	}
-	gap := func() actor.Duration { return DrawBetween(sys.rand, mean/2, mean*3/2) }
-	var tick func()
-	tick = func() {
-		if still != nil && !still() {
-			return
-		}
-		fn()
-		sys.After(gap(), tick)
-	}
-	sys.After(gap(), tick)
 }
 
 // Start boots every spawned actor: first the actors that are not workloads,
@@ -350,9 +310,13 @@ func (sys *System) RunUntil(stop func() bool) {
 		sys.steps++
 		sys.foldEntry(e)
 		e.run()
-		for sys.attr > 0 && !sys.halted {
-			sys.attr--
-			sys.attrition()
+		for _, fn := range sys.onStep {
+			if sys.halted {
+				break
+			}
+			if !sys.guard("OnStep", fn) {
+				sys.halted = true
+			}
 		}
 		sys.foldState()
 		sys.observe()
@@ -436,7 +400,6 @@ func (sys *System) foldEntry(e *entry) {
 	}
 	h.String(name)
 	h.Bytes(e.inc[:])
-	h.String(e.service)
 	if e.body != nil {
 		e.body.Fold(h)
 	}
@@ -444,7 +407,7 @@ func (sys *System) foldEntry(e *entry) {
 
 // foldState folds, for every actor, up or down and (if up) its state hash,
 // inbox lengths, busy-until time and the number of its timers, awaited
-// answers and watches; then the state hash of every service. A cached
+// answers and watches; then the state hash of every Tracked. A cached
 // hash is recomputed only when the System called into its owner.
 func (sys *System) foldState() {
 	h := &sys.hash
@@ -467,12 +430,11 @@ func (sys *System) foldState() {
 		h.Uint64(uint64(answers))
 		h.Uint64(uint64(sys.watchCount(b.idx, b.inc)))
 	}
-	for _, s := range sys.services {
-		b := s.base()
-		if !sys.cachedHash("service "+b.name, &b.hashCache, s.stateHash) {
+	for _, t := range sys.tracked {
+		if !sys.cachedHash("tracked "+t.name, &t.hashCache, t.hash) {
 			return
 		}
-		h.Uint64(b.sum)
+		h.Uint64(t.sum)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 type progressCheck struct{ hist history.Reader[Op, Res] }
@@ -13,7 +14,7 @@ func (*progressCheck) Name() string     { return "Liveness" }
 func (*progressCheck) Observe(sim.View) {}
 
 func (p *progressCheck) AtEnd(v sim.View) {
-	heal, ok := v.Timeline().PhaseStart(sim.PhaseHeal)
+	heal, ok := kit.PhaseStart(v.Timeline(), kit.PhaseHeal)
 	v.Assert().Always(ok, kernelAnnouncedHeal)
 	after := heal + sim.Time(preset.ProgressGraceTime)
 	var produced, reads int

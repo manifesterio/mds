@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 // brokerConfig is the sim-friendly broker. A short flush window keeps commits
@@ -70,7 +71,7 @@ func Run(cfg Config) sim.Result {
 	p := preset.New()
 	p.Settings.ControlPlane.MaxCommitItems = fakeservices.DynamoMaxCommitItems
 	set := Settings{Settings: p.Settings, Broker: brokerConfig(cfg.Bug)}
-	swarm(sim.DeriveRand(cfg.Seed, "swarm"), &set)
+	swarm(kit.DeriveRand(cfg.Seed, "swarm"), &set)
 	if cfg.Tune != nil {
 		cfg.Tune(&set)
 	}
@@ -89,7 +90,7 @@ func Run(cfg Config) sim.Result {
 	}
 	w.AddRule(newOracle(opts, h, c.Objects, c.ControlPlane))
 	w.AddRule(&progressCheck{hist: h})
-	w.AddRule(sim.FaultCoverageRule(preset.KafkaFaultCoverage))
+	w.AddRule(kit.FaultCoverageRule(preset.KafkaFaultCoverage))
 	w.AddRule(newSegmentCaps(set.Broker, set.ControlPlane.MaxCommitItems, opts.topicPartitions(), c.ControlPlane))
 	w.AddRule(&segmentTiming{})
 	if cfg.ExtraRules != nil {

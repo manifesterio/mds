@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
@@ -20,7 +21,7 @@ var objectAnswered = actor.NewReachable("servicetest object answered")
 // "obj", and records a "slow" fault for each call.
 type objects struct{ calls int }
 
-func (s *objects) Handle(ctx *sim.ServiceCtx, _ core.ObjectCall, reply sim.Responder[core.ObjectDone]) {
+func (s *objects) Handle(ctx *service.Ctx, _ core.ObjectCall, reply sim.Reply[core.ObjectDone]) {
 	s.calls++
 	ctx.RecordFault("slow")
 	ctx.Env().Reachable(objectAnswered)
@@ -33,7 +34,7 @@ func (s *objects) StateHash() uint64 { return uint64(s.calls) }
 // topics.
 type plane struct{ calls int }
 
-func (s *plane) Handle(_ *sim.ServiceCtx, _ core.ControlPlaneCall, reply sim.Responder[core.ControlPlaneDone]) {
+func (s *plane) Handle(_ *service.Ctx, _ core.ControlPlaneCall, reply sim.Reply[core.ControlPlaneDone]) {
 	s.calls++
 	reply.After(2*ms, core.ControlPlaneDone{Resp: contract.DescribeTopicsResp{}})
 }
@@ -44,8 +45,8 @@ func (s *plane) StateHash() uint64 { return uint64(s.calls) }
 func setup(t TB, seed uint64) (*Harness, *objects, *plane) {
 	h := New(t, seed, "a", "b")
 	o, p := &objects{}, &plane{}
-	h.Objects = sim.AddService[core.ObjectCall, core.ObjectDone](h.Sys, "objects", o)
-	h.ControlPlane = sim.AddService[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, "plane", p)
+	h.Objects = service.Add[core.ObjectCall, core.ObjectDone](h.Sys, "objects", o)
+	h.ControlPlane = service.Add[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, "plane", p)
 	return h, o, p
 }
 

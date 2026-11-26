@@ -103,6 +103,19 @@ linters:
               desc: "sim is the simulator: it must not import spectest (layer rule, plan section 6)"
             - pkg: "github.com/manifesterio/mds/dst/examples"
               desc: "sim is the simulator: it must not import examples (layer rule, plan section 6)"
+        kit:
+          list-mode: lax
+          files:
+            - "**/dst/sim/kit/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/live"
+              desc: "kit is simulation policy over sim: it must not import live (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "kit is simulation policy over sim: it must not import campaign (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "kit is simulation policy over sim: it must not import spectest (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "kit is simulation policy over sim: it must not import examples (layer rule, plan section 6)"
         live:
           list-mode: lax
           files:

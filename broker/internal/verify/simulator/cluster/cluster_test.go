@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -45,7 +46,7 @@ func (s *stub) Quiescent() bool { return !s.busy }
 func quickPlan(seed uint64) Plan {
 	return Plan{
 		Seed:         seed,
-		Phases:       sim.Phases{Faults: 2 * actor.Second, Heal: actor.Second, Drain: actor.Second},
+		Phases:       kit.Phases{Faults: 2 * actor.Second, Heal: actor.Second, Drain: actor.Second},
 		QuiesceEvery: 500 * actor.Millisecond,
 		Settings: Settings{
 			RecoveryDelay: [2]actor.Duration{100 * actor.Millisecond, 200 * actor.Millisecond},
@@ -71,7 +72,7 @@ func brokerProps(c *Cluster, log *[]seen, script func(self string, msg core.Even
 }
 
 // phaseKey is the ClientDue key that carries a phase change to a stub client.
-func phaseKey(p sim.Phase) string { return fmt.Sprintf("phase/%d", p) }
+func phaseKey(p kit.Phase) string { return fmt.Sprintf("phase/%d", p) }
 
 // addStubClient adds a client whose messages are core.EventData.
 func addStubClient(c *Cluster, log *[]seen, busy bool, script func(msg core.EventData, o *outbox)) {
@@ -80,7 +81,7 @@ func addStubClient(c *Cluster, log *[]seen, busy bool, script func(msg core.Even
 			return &stub{name: env.Self().Name, log: log, now: c.System.Now, script: script, busy: busy}
 		},
 		Boot:    func(self actor.Incarnation) core.EventData { return core.NodeStarted{Self: self} },
-		OnPhase: func(p sim.Phase) (core.EventData, bool) { return core.ClientDue{Key: phaseKey(p)}, true },
+		OnPhase: func(p kit.Phase) (core.EventData, bool) { return core.ClientDue{Key: phaseKey(p)}, true },
 		FromNet: func(ev core.EventData) core.EventData { return ev },
 	})
 }
@@ -118,7 +119,7 @@ func TestRunBootsBrokersThenClientsAndTellsPhases(t *testing.T) {
 	if len(order) != 3 || order[2] != "client-0" {
 		t.Errorf("boot order %v", order)
 	}
-	if want := []string{phaseKey(sim.PhaseHeal), phaseKey(sim.PhaseDrain)}; !slices.Equal(phases, want) {
+	if want := []string{phaseKey(kit.PhaseHeal), phaseKey(kit.PhaseDrain)}; !slices.Equal(phases, want) {
 		t.Errorf("client heard %v, want %v", phases, want)
 	}
 	quiet := c.System.Timeline().Snapshot("sim_quiesce")

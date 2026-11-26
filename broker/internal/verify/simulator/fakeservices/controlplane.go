@@ -5,9 +5,9 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/sim"
 )
 
 // DynamoMaxCommitItems is DynamoDB's TransactWriteItems limit, the value the
@@ -34,7 +34,7 @@ type ControlPlaneFaults struct {
 // applied before the spec. A retry of a committed segment returns the original
 // offsets whatever the faults did.
 //
-// It is a sim.Service. A broker performs a core.ControlPlaneCall, its executor
+// It is a service.Service. A broker performs a core.ControlPlaneCall, its executor
 // forwards the call here, and the service answers with core.ControlPlaneDone.
 type ControlPlane struct {
 	*faulty.Service[core.ControlPlaneCall, core.ControlPlaneDone, contract.Operation, contract.Done]
@@ -42,10 +42,10 @@ type ControlPlane struct {
 	maxItems int // ControlPlaneFaults.MaxCommitItems; 0 = unlimited
 }
 
-var _ sim.Service[core.ControlPlaneCall, core.ControlPlaneDone] = (*ControlPlane)(nil)
+var _ service.Service[core.ControlPlaneCall, core.ControlPlaneDone] = (*ControlPlane)(nil)
 
 // NewControlPlane returns an empty control plane with the given faults. Add it
-// to a System with sim.AddService.
+// to a System with service.Add.
 func NewControlPlane(f ControlPlaneFaults) *ControlPlane {
 	s := &ControlPlane{spec: specbridge.New(), maxItems: f.MaxCommitItems}
 	shape := faulty.ShapeOf[core.ControlPlaneCall, core.ControlPlaneDone, contract.Operation, contract.Done](

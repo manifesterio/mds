@@ -9,15 +9,17 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const ms = actor.Duration(1_000_000)
 
 func objectBase() fakeservices.ObjectStoreFaults {
-	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := kit.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return fakeservices.ObjectStoreFaults{Faults: faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}}
 }
 
@@ -26,7 +28,7 @@ func objectSetup(t *testing.T, f fakeservices.ObjectStoreFaults, seed uint64) (*
 	t.Helper()
 	h := servicetest.New(t, seed, "a")
 	e := fakeservices.NewObjectStore(f)
-	h.Objects = sim.AddService[core.ObjectCall, core.ObjectDone](h.Sys, e.Name(), e)
+	h.Objects = service.Add[core.ObjectCall, core.ObjectDone](h.Sys, e.Name(), e)
 	return e, h
 }
 

@@ -11,11 +11,11 @@ type Request[IO, Rep Payload] interface {
 	AsRequest() (IO, Rep)
 }
 
-// Trace-hash tags of refs. They are frozen.
+// Trace-hash tags of refs. They are frozen. 2103 (the retired service handle) is
+// reserved: never reuse it.
 const (
-	tagEntityRef  = 2101
-	tagReplyTo    = 2102
-	tagServiceRef = 2103
+	tagEntityRef = 2101
+	tagReplyTo   = 2102
 )
 
 // Owner marks the runtime that made a handle, so a handle of another System
@@ -106,30 +106,4 @@ func (r ReplyID) Fold(h *trace.Hash) {
 	h.String(r.Asker.Name)
 	h.Bytes(r.Asker.Boot[:])
 	h.Uint64(r.Number)
-}
-
-// ServiceID is the identity behind a ServiceRef. Only runtimes make one.
-type ServiceID struct {
-	Runtime *Owner
-	Slot    uint32
-	Name    string
-}
-
-// ServiceRef is the handle of a simulated outside service that takes Req
-// and answers Rep. The type lives here so that actors can hold it.
-type ServiceRef[Req, Rep Payload] struct{ id ServiceID }
-
-// ID returns the identity of the service.
-func (r ServiceRef[Req, Rep]) ID() ServiceID { return r.id }
-
-// Name returns the service's name.
-func (r ServiceRef[Req, Rep]) Name() string { return r.id.Name }
-
-// IsZero reports whether r is the zero ServiceRef.
-func (r ServiceRef[Req, Rep]) IsZero() bool { return r.id.Runtime == nil }
-
-// Fold writes tag 2103 and the service's name.
-func (r ServiceRef[Req, Rep]) Fold(h *trace.Hash) {
-	h.Uint64(tagServiceRef)
-	h.String(r.id.Name)
 }

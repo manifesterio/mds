@@ -7,16 +7,6 @@ import (
 	"github.com/manifesterio/mds/dst/internal/core"
 )
 
-// AttritionPlan makes the System kill actors spawned with the Attrition option
-// during PhaseFaults, at random, within a budget.
-type AttritionPlan struct {
-	MaxDead        int            // actors down or stopping; 0 means attrition is off
-	CrashProb      float64        // rolled after each Receive and each service step
-	CrashWeight    float64        // hard crash ...
-	GracefulWeight float64        // ... or graceful Stop, by weight
-	StopGrace      actor.Duration // 0 means 5 s
-}
-
 // lookup resolves an entity handle of this System. A nil, zero or foreign
 // one is a protocol failure.
 func (sys *System) lookup(e actor.Entity) (slot, bool) {
@@ -119,9 +109,6 @@ func (sys *System) end(s slot, how actor.End, cause string) {
 	sys.askerEnded(func(r actor.ReplyID) bool {
 		return r.Asker.Kind == core.ActorAsker && int(r.Asker.Slot) == idx && r.Asker.Boot == inc
 	})
-	for _, sv := range sys.services {
-		sv.onCrash(who)
-	}
 	s.drop()
 	s.ended(who, how, cause)
 	if b.restart == nil {
@@ -161,7 +148,15 @@ func (sys *System) queueBoot(s slot, at Time) {
 	sys.q.add(e)
 }
 
-func (sys *System) stop(s slot, grace actor.Duration) {
+// Stop asks the actor to stop: its StopMsg (Control priority) arrives now, and
+// the System crashes it (cause "stop deadline") at the deadline, grace from
+// now, if it is still up. A workload may not stop. An actor without StopMsg is
+// a protocol failure.
+func (sys *System) Stop(e actor.Entity, grace actor.Duration) {
+	s, ok := sys.live(e)
+	if !ok || sys.refuseWorkload(s, "stop") {
+		return
+	}
 	b := s.base()
 	deadline := sys.q.now + Time(max(grace, 0))
 	if !s.stopRequest(actor.Mono(deadline) + actor.Mono(b.skew)) {
@@ -170,46 +165,21 @@ func (sys *System) stop(s slot, grace actor.Duration) {
 	}
 	b.stopping = true
 	inc := b.inc
-	e := &entry{at: deadline, lane: hostLane, kind: kindCrash, node: b.idx, inc: inc}
-	e.run = func() {
+	ent := &entry{at: deadline, lane: hostLane, kind: kindCrash, node: b.idx, inc: inc}
+	ent.run = func() {
 		if !b.alive(inc) {
 			return
 		}
 		sys.end(s, actor.Crash, "stop deadline")
 	}
-	sys.q.add(e)
+	sys.q.add(ent)
 	sys.systemFact("sim_stop_requested", actor.Field{Key: "node", Value: actor.StringValue(b.name)})
 	s.pump()
 }
 
-func (sys *System) attrition() {
-	a := sys.cfg.Attrition
-	if sys.phase != PhaseFaults || !sys.rand.Chance(a.CrashProb) {
-		return
-	}
-	var live []slot
-	down := 0
-	for _, s := range sys.actors {
-		b := s.base()
-		switch {
-		case b.workload || !b.attrition:
-		case !b.up || b.stopping:
-			down++
-		default:
-			live = append(live, s)
-		}
-	}
-	if down >= a.MaxDead || len(live) == 0 {
-		return
-	}
-	s := live[sys.rand.Intn(len(live))]
-	if total := a.CrashWeight + a.GracefulWeight; total > 0 && sys.rand.Float64()*total < a.GracefulWeight {
-		grace := a.StopGrace
-		if grace <= 0 {
-			grace = defaultStopGrace
-		}
-		sys.stop(s, grace)
-		return
-	}
-	sys.end(s, actor.Crash, "attrition")
+// Stopping reports whether an incarnation of the actor is up and was asked to
+// stop.
+func (sys *System) Stopping(e actor.Entity) bool {
+	s, ok := sys.live(e)
+	return ok && s.base().stopping
 }

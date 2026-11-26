@@ -13,8 +13,10 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 // TB is the part of testing.TB that the harness needs.
@@ -60,13 +62,13 @@ type (
 // Harness is a System with caller actors.
 type Harness struct {
 	t TB
-	// Sys is the System. Add services to it with sim.AddService, and set
-	// Objects and ControlPlane to the services the callers use.
+	// Sys is the System. Add services to it with service.Add, and set
+	// Objects and ControlPlane to the endpoints the callers use.
 	Sys *sim.System
 	// Objects takes the object store calls of the callers.
-	Objects actor.ServiceRef[core.ObjectCall, core.ObjectDone]
+	Objects *service.Endpoint[core.ObjectCall, core.ObjectDone]
 	// ControlPlane takes the control-plane calls of the callers.
-	ControlPlane actor.ServiceRef[core.ControlPlaneCall, core.ControlPlaneDone]
+	ControlPlane *service.Endpoint[core.ControlPlaneCall, core.ControlPlaneDone]
 	// Delivered lists every answer that reached a caller, in order.
 	Delivered []Delivery
 	// Seed is the seed of the System.
@@ -102,9 +104,9 @@ func New(t TB, seed uint64, names ...string) *Harness {
 func (h *Harness) exec(ctx *sim.ExecCtx, io core.IO) {
 	switch x := io.(type) {
 	case core.ObjectCall:
-		sim.Forward(ctx, x, h.Objects)
+		service.Forward(ctx, x, h.Objects)
 	case core.ControlPlaneCall:
-		sim.Forward(ctx, x, h.ControlPlane)
+		service.Forward(ctx, x, h.ControlPlane)
 	case core.Connect, core.Send, core.CloseConn, core.PauseReads, core.ResumeReads:
 		h.t.Fatalf("servicetest: no service for %T", io)
 	}
@@ -189,15 +191,23 @@ func (h *Harness) Step() bool {
 	return h.Sys.Steps() > start
 }
 
-// Crash ends the live incarnation of a caller. The services are told.
+// Crash ends the live incarnation of a caller.
 func (h *Harness) Crash(name string) { h.Sys.Crash(h.refs[name], "test") }
 
 // Boot starts a new incarnation of a caller that is down.
 func (h *Harness) Boot(name string) { h.Sys.Boot(h.refs[name]) }
 
-// Recover moves the System to PhaseHeal. The System then calls EnterRecovery
-// on every service: no new faults for requests issued after it.
-func (h *Harness) Recover() { h.Sys.SetPhase(sim.PhaseHeal) }
+// Recover moves the System to PhaseHeal and calls EnterRecovery on every
+// service: no new faults for requests issued after it.
+func (h *Harness) Recover() {
+	kit.SetPhase(h.Sys, kit.PhaseHeal)
+	if h.Objects != nil {
+		h.Objects.EnterRecovery()
+	}
+	if h.ControlPlane != nil {
+		h.ControlPlane.EnterRecovery()
+	}
+}
 
 // Faults lists the kinds of the faults that services injected, in order.
 func (h *Harness) Faults() []string {

@@ -6,16 +6,14 @@ import (
 )
 
 // entryKind says what a queue entry is. The number is folded into the trace
-// hash, so the values are frozen (4 and 6 are not used).
+// hash, so the values are frozen (1, 4, 5 and 6 are retired: never reuse them).
 type entryKind uint8
 
 const (
-	kindDeliver     entryKind = 0 // an input for a node, or a wake-up of a node
-	kindServiceStep entryKind = 1 // a ServiceContext.Later step
-	kindCrash       entryKind = 2 // the kill at the end of a graceful stop
-	kindRestart     entryKind = 3 // the next boot of a node
-	kindPhase       entryKind = 5 // a phase change from SchedulePhases
-	kindHost        entryKind = 7 // a host task (System.At, System.After)
+	kindDeliver entryKind = 0 // an input for a node, or a wake-up of a node
+	kindCrash   entryKind = 2 // the kill at the end of a graceful stop
+	kindRestart entryKind = 3 // the next boot of a node
+	kindHost    entryKind = 7 // a host task (System.At, System.After)
 )
 
 // laneKey names one (lane, time) FIFO group.
@@ -140,7 +138,7 @@ func (q *queue) cancel(id entryID) {
 
 // dropIncarnation retires every pending entry addressed to incarnation inc of
 // node idx, and returns how many. Entries for whatever incarnation is up (inc
-// zero) and entries for services are kept.
+// zero) and entries that are not for a node are kept.
 func (q *queue) dropIncarnation(idx int, inc actor.ID) int {
 	if inc == (actor.ID{}) {
 		return 0

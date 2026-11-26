@@ -1,6 +1,6 @@
 // Package cluster is the host of one broker simulation run on dst/sim. It
 // builds the System of a seed: the two fake outside systems (object store and
-// control plane, as sim services), the connection table (network.go), the
+// control plane, as services), the connection table (network.go), the
 // broker actors, the client actors (test workloads), the phases, the broker
 // attrition and the quiesce task. A scenario (kafka) gives it the broker
 // Props, the clients and the rules.
@@ -16,8 +16,10 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 // wallStart is the virtual UTC time at the start of every run (2023-11-14).
@@ -40,19 +42,19 @@ type Settings struct {
 	// once for each actor when it is spawned.
 	ClockSkewMax actor.Duration
 	// Attrition kills and restarts brokers during the fault phase.
-	Attrition sim.AttritionPlan
+	Attrition kit.AttritionPlan
 	// RecoveryDelay is the time from the end of a broker incarnation to its
 	// next boot.
 	RecoveryDelay [2]actor.Duration
 	// Cost is the CPU model of every actor: how long it is busy after a Receive.
-	Cost sim.CostParams
+	Cost kit.CostParams
 }
 
 // Plan says how to build one run.
 type Plan struct {
 	Seed     uint64
 	Settings Settings
-	Phases   sim.Phases
+	Phases   kit.Phases
 	// QuiesceEvery is the time between two quiesce points. Zero: no quiesce point.
 	QuiesceEvery actor.Duration
 	// MaxSteps is the step limit of the run. Zero: the System default.
@@ -77,9 +79,10 @@ type ClientSpec[In actor.Payload] struct {
 	New func(env actor.Env, brokers []string) Client[In]
 	// Boot makes the first message of the client.
 	Boot func(self actor.Incarnation) In
-	// OnPhase makes the message the client gets when the phase changes.
+	// OnPhase makes the message the client gets when the phase changes (it is
+	// sent to the client at once, so it queues behind the client's inbox).
 	// Nil: none.
-	OnPhase func(p sim.Phase) (In, bool)
+	OnPhase func(p kit.Phase) (In, bool)
 	// FromNet turns a connection event (core.ConnOpened is never sent to a
 	// client; core.BytesReceived and core.ConnClosed are) into a message.
 	FromNet func(ev core.EventData) In
@@ -94,10 +97,18 @@ type Cluster struct {
 	Objects      *fakeservices.ObjectStore
 	ControlPlane *fakeservices.ControlPlane
 
+	// objects and controlPlane are the services added to the System.
+	objects      *service.Endpoint[core.ObjectCall, core.ObjectDone]
+	controlPlane *service.Endpoint[core.ControlPlaneCall, core.ControlPlaneDone]
+
 	plan    Plan
 	net     *network
 	brokers []string
-	clients []*clientSlot
+	// brokerRefs are the broker actors, for attrition.
+	brokerRefs []actor.Entity
+	clients    []*clientSlot
+	// onPhase tells each client its OnPhase message.
+	onPhase []func(p kit.Phase)
 }
 
 // clientSlot holds the client built by the last boot of one client actor.
@@ -110,15 +121,16 @@ type clientSlot struct {
 func New(p Plan) *Cluster {
 	sys := sim.NewSystem(sim.Config{
 		Seed: p.Seed, WallStart: wallStart, MaxSteps: p.MaxSteps,
-		ClockSkewMax: p.Settings.ClockSkewMax, Attrition: p.Settings.Attrition,
-		Log: p.Log, Tail: tailLines, HaltOnFirst: p.HaltOnFirst, VerifyHashes: p.VerifyHashes,
+		ClockSkewMax: p.Settings.ClockSkewMax,
+		Log:          p.Log, Tail: tailLines, HaltOnFirst: p.HaltOnFirst, VerifyHashes: p.VerifyHashes,
 	})
 	c := &Cluster{System: sys, plan: p}
 	c.Objects = fakeservices.NewObjectStore(p.Settings.ObjectStore)
 	c.ControlPlane = fakeservices.NewControlPlane(p.Settings.ControlPlane)
+	c.objects = service.Add[core.ObjectCall, core.ObjectDone](sys, c.Objects.Name(), c.Objects)
+	c.controlPlane = service.Add[core.ControlPlaneCall, core.ControlPlaneDone](sys, c.ControlPlane.Name(), c.ControlPlane)
 	c.net = newNetwork(sys, p.Settings.NetDelay, p.Settings.ConnResetProb,
-		sim.AddService[core.ObjectCall, core.ObjectDone](sys, c.Objects.Name(), c.Objects),
-		sim.AddService[core.ControlPlaneCall, core.ControlPlaneDone](sys, c.ControlPlane.Name(), c.ControlPlane))
+		c.objects, c.controlPlane)
 	return c
 }
 
@@ -139,11 +151,11 @@ func (c *Cluster) AddBrokers(n int, props actor.Props[core.EventData, core.IO]) 
 		p.Restart = c.restart
 		ref := sim.Spawn(c.System, p,
 			sim.WithExecutor(c.net.exec),
-			sim.Cost(c.plan.Settings.Cost),
-			sim.Attrition(),
+			sim.Cost(c.plan.Settings.Cost.Sample),
 			sim.OnEnd(c.net.ended))
 		c.net.add(p.Name, ref, func(ev core.EventData) { sim.Tell(c.System, ref, 0, ev) })
 		c.brokers = append(c.brokers, p.Name)
+		c.brokerRefs = append(c.brokerRefs, ref)
 	}
 }
 
@@ -155,10 +167,7 @@ func AddClient[In actor.Payload](c *Cluster, s ClientSpec[In]) actor.EntityRef[I
 	name := fmt.Sprintf("client-%d", len(c.clients))
 	c.clients = append(c.clients, slot)
 	brokers := slices.Clone(c.brokers)
-	opts := []sim.SpawnOption{sim.WithExecutor(c.net.exec), sim.Workload(), sim.Cost(c.plan.Settings.Cost)}
-	if s.OnPhase != nil {
-		opts = append(opts, sim.OnPhase(s.OnPhase))
-	}
+	opts := []sim.SpawnOption{sim.WithExecutor(c.net.exec), sim.Workload(), sim.Cost(c.plan.Settings.Cost.Sample)}
 	ref := sim.Spawn(c.System, actor.Props[In, core.IO]{
 		Name: name,
 		New: func(env actor.Env) actor.Actor[In, core.IO] {
@@ -168,21 +177,54 @@ func AddClient[In actor.Payload](c *Cluster, s ClientSpec[In]) actor.EntityRef[I
 		},
 		Boot: s.Boot,
 	}, opts...)
+	if s.OnPhase != nil {
+		c.onPhase = append(c.onPhase, func(p kit.Phase) {
+			if msg, ok := s.OnPhase(p); ok {
+				sim.Tell(c.System, ref, 0, msg)
+			}
+		})
+	}
 	c.net.add(name, ref, func(ev core.EventData) { sim.Tell(c.System, ref, 0, s.FromNet(ev)) })
 	return ref
 }
 
-// Run schedules the phases and the quiesce points, boots the actors, runs the
-// System to the end and returns the result.
+// Run schedules the phases, the broker attrition and the quiesce points, boots
+// the actors, runs the System to the end and returns the result. At each phase
+// change the clients get their OnPhase message; at PhaseHeal the services stop
+// their faults (no new faults once the heal phase starts).
 func (c *Cluster) Run() sim.Result {
-	sim.SchedulePhases(c.System, c.plan.Phases)
-	c.System.QuiesceEvery(c.plan.QuiesceEvery, func() bool {
+	kit.Attrition(c.System, c.plan.Settings.Attrition, c.brokerRefs...)
+	kit.SchedulePhases(c.System, c.plan.Phases, func(p kit.Phase) {
+		for _, tell := range c.onPhase {
+			tell(p)
+		}
+		if p == kit.PhaseHeal {
+			c.objects.EnterRecovery()
+			c.controlPlane.EnterRecovery()
+		}
+	})
+	c.quiesceEvery(c.plan.QuiesceEvery)
+	return c.System.Run()
+}
+
+// quiesceEvery appends a "sim_quiesce" fact with field quiescent every d: no
+// client has an operation in flight. The first fact is after d; zero or
+// negative d does nothing.
+func (c *Cluster) quiesceEvery(d actor.Duration) {
+	if d <= 0 {
+		return
+	}
+	var tick func()
+	tick = func() {
+		quiet := true
 		for _, s := range c.clients {
 			if s.live != nil && !s.live.Quiescent() {
-				return false
+				quiet = false
+				break
 			}
 		}
-		return true
-	})
-	return c.System.Run()
+		c.System.Fact(actor.Fact{Name: "sim_quiesce", Fields: []actor.Field{{Key: "quiescent", Value: actor.Bool(quiet)}}})
+		c.System.After(d, tick)
+	}
+	c.System.After(d, tick)
 }

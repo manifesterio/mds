@@ -34,6 +34,7 @@ github.com/manifesterio/mds/dst/trace
 # The dst v2 kernel and the seeded random stream. The new simulation tree
 # (internal/verify/simulator) runs on the kernel. Both are first-party and have their own determinism gate in dst.
 github.com/manifesterio/mds/dst/sim
+github.com/manifesterio/mds/dst/sim/kit
 github.com/manifesterio/mds/dst/internal/rng
 github.com/manifesterio/mds/dst/internal/catalog
 

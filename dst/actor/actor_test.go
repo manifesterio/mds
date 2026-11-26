@@ -89,8 +89,7 @@ func kinds(effects []actor.Effect) []actor.EffectKind {
 var owner = core.NewOwner()
 
 var (
-	other   = core.NewEntityRef[request](actor.EntityID{Runtime: owner, Slot: 3, Name: "other"})
-	service = core.NewServiceRef[write, readDone](core.ServiceID{Runtime: owner, Slot: 1, Name: "store"})
+	other = core.NewEntityRef[request](actor.EntityID{Runtime: owner, Slot: 3, Name: "other"})
 )
 
 // ---- tests ----
@@ -106,8 +105,6 @@ func TestOutboxRecordsInOrder(t *testing.T) {
 	o.Fact(actor.Fact{Name: "f"})
 	o.ForgetPending()
 	other.Tell(o, request{Q: "q"})
-	service.Tell(o, write{"b"})
-	actor.Call(o, service.Request(write{"c"}), func(d readDone) msg { return answered{d.Value} })
 	actor.Perform(o, read{"d"}, func(d readDone) msg { return answered{d.Value} })
 	actor.Reply(o, core.NewReplyTo[answered](actor.ReplyID{Asker: core.Asker{Kind: core.ActorAsker, Name: "x"}, Number: 9}), answered{"r"})
 	o.Stop(actor.Trip, "bad")
@@ -116,7 +113,7 @@ func TestOutboxRecordsInOrder(t *testing.T) {
 	want := []actor.EffectKind{
 		actor.EffectTellSelf, actor.EffectAfter, actor.EffectStartTimer, actor.EffectCancelTimer,
 		actor.EffectDo, actor.EffectFact, actor.EffectForgetPending, actor.EffectTell,
-		actor.EffectTellService, actor.EffectCall, actor.EffectPerform, actor.EffectReply, actor.EffectStop,
+		actor.EffectPerform, actor.EffectReply, actor.EffectStop,
 	}
 	if got := kinds(effects); !slices.Equal(got, want) {
 		t.Fatalf("kinds: got %v want %v", got, want)
@@ -124,13 +121,13 @@ func TestOutboxRecordsInOrder(t *testing.T) {
 	if effects[1].D != 0 {
 		t.Errorf("After(-5): D = %d, want 0", effects[1].D)
 	}
-	if effects[9].Number != 1 || effects[10].Number != 2 {
-		t.Errorf("pending numbers: Call %d, Perform %d; want 1, 2", effects[9].Number, effects[10].Number)
+	if effects[8].Number != 1 {
+		t.Errorf("pending number: Perform %d; want 1", effects[8].Number)
 	}
-	if got := effects[10].Msg; got != (read{"d"}) {
+	if got := effects[8].Msg; got != (read{"d"}) {
 		t.Errorf("Perform records the request as IO: got %v", got)
 	}
-	if got := effects[10].Adapt(readDone{"v"}); got != (answered{"v"}) {
+	if got := effects[8].Adapt(readDone{"v"}); got != (answered{"v"}) {
 		t.Errorf("Perform adapt: got %v", got)
 	}
 	if len(r.misuse) != 0 {
@@ -244,11 +241,6 @@ func TestRefFolds(t *testing.T) {
 	})
 	if got := sum(reply.Fold); got != want {
 		t.Errorf("ReplyTo fold: %x want %x", got, want)
-	}
-	svc := core.NewServiceRef[ping, ping](core.ServiceID{Runtime: owner, Name: "s"})
-	want = sum(func(h *trace.Hash) { h.Uint64(2103); h.String("s") })
-	if got := sum(svc.Fold); got != want {
-		t.Errorf("ServiceRef fold: %x want %x", got, want)
 	}
 	var zero actor.ReplyTo[ping]
 	if !zero.IsZero() || !(actor.EntityRef[ping]{}).IsZero() {

@@ -8,13 +8,15 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 func planeBase() fakeservices.ControlPlaneFaults {
-	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := kit.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return fakeservices.ControlPlaneFaults{Faults: faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}}
 }
 
@@ -25,7 +27,7 @@ func planeSetup(t *testing.T, f fakeservices.ControlPlaneFaults, seed uint64) (*
 	t.Helper()
 	h := servicetest.New(t, seed, "a")
 	e := fakeservices.NewControlPlane(f)
-	h.ControlPlane = sim.AddService[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, e.Name(), e)
+	h.ControlPlane = service.Add[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, e.Name(), e)
 	return e, h
 }
 

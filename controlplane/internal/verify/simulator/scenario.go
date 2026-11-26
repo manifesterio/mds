@@ -3,7 +3,6 @@ package simulator
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/dst/actor"
-	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
 // Faults are the probabilities and rates of one scenario. A zero value means no
@@ -105,9 +104,9 @@ func replicaConfig(idx int, f Faults, bug Bug) replica.Config {
 func (s *sim) startNemesis() {
 	f := s.faults
 	still := func() bool { return !s.quiet }
-	dstsim.EveryWhile(s.w, f.CrashEvery, still, s.crashOne)
-	dstsim.EveryWhile(s.w, f.PauseEvery, still, s.pauseOne)
-	dstsim.EveryWhile(s.w, f.PartitionEvery, still, s.partitionOne)
+	everyWhile(s.w, f.CrashEvery, still, s.crashOne)
+	everyWhile(s.w, f.PauseEvery, still, s.pauseOne)
+	everyWhile(s.w, f.PartitionEvery, still, s.partitionOne)
 }
 
 // victim picks the node for a fault: the writer if the scenario aims at it and

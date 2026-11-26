@@ -7,28 +7,28 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
 	"github.com/manifesterio/mds/dst/actor"
-	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 // Preset is the fault defaults and the phase schedule shared by the scenarios.
 type Preset struct {
 	Settings     cluster.Settings
-	Phases       sim.Phases
+	Phases       kit.Phases
 	QuiesceEvery actor.Duration
 }
 
 func ms(n int64) actor.Duration { return actor.Duration(n) * actor.Millisecond }
 
-func slowTail(fmin, fmax, smin, smax int64, p float64) sim.FastWithRareSlow {
-	return sim.FastWithRareSlow{
+func slowTail(fmin, fmax, smin, smax int64, p float64) kit.FastWithRareSlow {
+	return kit.FastWithRareSlow{
 		FastMin: ms(fmin), FastMax: ms(fmax),
 		SlowMin: ms(smin), SlowMax: ms(smax), SlowProb: p,
 	}
 }
 
 // Phases is Faults 30s, Heal 10s, Drain 5s.
-func Phases() sim.Phases {
-	return sim.Phases{Faults: 30 * actor.Second, Heal: 10 * actor.Second, Drain: 5 * actor.Second}
+func Phases() kit.Phases {
+	return kit.Phases{Faults: 30 * actor.Second, Heal: 10 * actor.Second, Drain: 5 * actor.Second}
 }
 
 // New returns a Preset. MaxCommitItems stays zero.
@@ -57,9 +57,9 @@ func New() Preset {
 			NetDelay:      [2]actor.Duration{200 * actor.Microsecond, 2 * actor.Millisecond},
 			ConnResetProb: 0.002,
 			ClockSkewMax:  ms(100),
-			Attrition:     sim.AttritionPlan{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1, StopGrace: 5 * actor.Second},
+			Attrition:     kit.AttritionPlan{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1, StopGrace: 5 * actor.Second},
 			RecoveryDelay: [2]actor.Duration{ms(200), ms(1500)},
-			Cost:          sim.CostParams{PerEvent: 50 * actor.Microsecond, PauseProb: 0.001, Pause: slowTail(1, 5, 20, 100, 0.1)},
+			Cost:          kit.CostParams{PerEvent: 50 * actor.Microsecond, PauseProb: 0.001, Pause: slowTail(1, 5, 20, 100, 0.1)},
 		},
 		Phases:       Phases(),
 		QuiesceEvery: actor.Second,
@@ -71,7 +71,7 @@ const ProgressGraceTime = 6 * actor.Second
 
 // The fault coverage assertions of the scenario.
 var (
-	KafkaFaultCoverage = sim.FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
+	KafkaFaultCoverage = kit.FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
 		HardCrash:    actor.NewSometimes("kafka: fault fired: hard crash"),
 		GracefulStop: actor.NewSometimes("kafka: fault fired: graceful stop"),
 	}

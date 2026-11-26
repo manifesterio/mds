@@ -43,14 +43,9 @@ func (h *host[In, IO]) applyOne(e actor.Effect) {
 		h.sys.appendFact(h.self(), e.Fact)
 	case actor.EffectTell:
 		h.sys.tell(actorSource(h.idx), e.To, 0, e.Msg)
-	case actor.EffectTellService:
-		h.sys.callService(e.Service, e.Msg, responderTarget{})
 	case actor.EffectAsk:
 		h.await(e)
 		h.sys.tell(actorSource(h.idx), e.To, 0, e.Msg)
-	case actor.EffectCall:
-		h.await(e)
-		h.sys.callService(e.Service, e.Msg, h.target(e.Number))
 	case actor.EffectReply:
 		h.sys.reply(actorSource(h.idx), e.Reply, e.Msg)
 		h.sys.watchAnswered(h.idx, h.inc, e.Reply)
@@ -86,7 +81,7 @@ func (h *host[In, IO]) await(e actor.Effect) {
 	h.owned[e.Number] = owned{scope: e.Scope, adapt: e.Adapt}
 }
 
-// target is where a service or executor answer for number n goes.
+// target is where an executor answer for number n goes.
 func (h *host[In, IO]) target(n uint64) responderTarget {
 	return responderTarget{set: true, idx: h.idx, inc: h.inc, number: n}
 }
@@ -118,7 +113,7 @@ func (h *host[In, IO]) execute(io actor.Payload, n uint64) {
 	}
 }
 
-// answerArrives handles an answer (from a service, an executor or a Reply)
+// answerArrives handles an answer (from an executor or a Reply)
 // for number n of incarnation inc: it is adapted and queued if still
 // awaited, else dropped.
 func (h *host[In, IO]) answerArrives(answer actor.Payload, inc actor.ID, n uint64) {

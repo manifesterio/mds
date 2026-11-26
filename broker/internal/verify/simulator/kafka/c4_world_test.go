@@ -77,7 +77,6 @@ type world struct {
 
 func (w *world) Step() uint64             { return uint64(len(w.raw)) }
 func (w *world) Now() sim.Time            { return w.now }
-func (w *world) Phase() sim.Phase         { return sim.PhaseHeal }
 func (w *world) Timeline() *sim.Timeline  { return w.tl }
 func (w *world) Assert() actor.Assertions { return w.as }
 func (w *world) touch()                   { w.gen++ }

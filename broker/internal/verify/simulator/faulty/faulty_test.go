@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -25,6 +27,9 @@ type request struct {
 	limit bool // the test limit refuses this request
 	quiet bool // a set that changes the state, but whose answer says "no change"
 }
+
+// AsRequest makes request an IO that answers with an answer.
+func (r request) AsRequest() (request, answer) { return r, answer{} }
 
 func (r request) Fold(h *trace.Hash) {
 	h.Uint64(1)
@@ -149,9 +154,9 @@ type delivery struct {
 // caller is the actor that issues the requests and keeps the answers.
 type caller struct{ t *testWorld }
 
-func (c caller) Receive(_ actor.Now, in input, o *actor.Outbox[input, actor.NoIO]) {
+func (c caller) Receive(_ actor.Now, in input, o *actor.Outbox[input, request]) {
 	if in.issue {
-		actor.Call(o, c.t.call.Request(in.req), func(a answer) input { return input{ans: a} })
+		actor.Perform(o, in.req, func(a answer) input { return input{ans: a} })
 		return
 	}
 	c.t.got = append(c.t.got, delivery{at: c.t.sys.Now(), ans: in.ans})
@@ -165,7 +170,7 @@ type testWorld struct {
 	sys  *sim.System
 	sp   *spec
 	svc  *faulty.Service[request, answer, request, answer]
-	call actor.ServiceRef[request, answer]
+	call *service.Endpoint[request, answer]
 	who  actor.EntityRef[input]
 	got  []delivery
 	next uint64
@@ -175,11 +180,11 @@ func newWorld(tb testing.TB, seed uint64, f faulty.Faults, e extras) *testWorld 
 	tb.Helper()
 	t := &testWorld{tb: tb, sys: sim.NewSystem(sim.Config{Seed: seed}), sp: &spec{m: map[string]int64{}}}
 	t.svc = faulty.New(t.sp, f, shape(e))
-	t.call = sim.AddService[request, answer](t.sys, "testservice", t.svc)
-	t.who = sim.Spawn(t.sys, actor.Props[input, actor.NoIO]{
+	t.call = service.Add[request, answer](t.sys, "testservice", t.svc)
+	t.who = sim.Spawn(t.sys, actor.Props[input, request]{
 		Name: "a",
-		New:  func(actor.Env) actor.Actor[input, actor.NoIO] { return caller{t} },
-	})
+		New:  func(actor.Env) actor.Actor[input, request] { return caller{t} },
+	}, sim.WithExecutor(func(ctx *sim.ExecCtx, r request) { service.Forward(ctx, r, t.call) }))
 	t.sys.Start()
 	tb.Cleanup(func() {
 		for _, f := range t.sys.Finish().Failures {
@@ -191,7 +196,7 @@ func newWorld(tb testing.TB, seed uint64, f faulty.Faults, e extras) *testWorld 
 
 // base is a service with timing and no faults.
 func base() faulty.Faults {
-	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := kit.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
@@ -225,7 +230,10 @@ func (t *testWorld) step() bool {
 	return t.sys.Steps() > start
 }
 
-func (t *testWorld) recover() { t.sys.SetPhase(sim.PhaseHeal) }
+func (t *testWorld) recover() {
+	kit.SetPhase(t.sys, kit.PhaseHeal)
+	t.call.EnterRecovery()
+}
 
 // find returns the answer to request id (false if none came).
 func (t *testWorld) find(id uint64) (delivery, bool) {

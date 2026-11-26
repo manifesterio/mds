@@ -6,10 +6,11 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/actor/actortest"
-	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -18,7 +19,7 @@ const ms = actor.Duration(1_000_000)
 // noisy is a mix of timing and fault chances that gives refusals, timeouts and
 // lost replies often.
 func noisy() faulty.Faults {
-	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := kit.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return faulty.Faults{ApplyLatency: ts, RespondLatency: ts, Unavailable503: 0.1, Timeout: 0.1, LostResponse: 0.1, CallerTimeout: 1000 * ms}
 }
 
@@ -30,7 +31,7 @@ func noisy() faulty.Faults {
 func TestSpecHashCacheObjectStore(t *testing.T) {
 	h := servicetest.New(t, 5, "a", "b", "c")
 	e := NewObjectStore(ObjectStoreFaults{Faults: noisy()})
-	h.Objects = sim.AddService[core.ObjectCall, core.ObjectDone](h.Sys, e.Name(), e)
+	h.Objects = service.Add[core.ObjectCall, core.ObjectDone](h.Sys, e.Name(), e)
 	r := actortest.NewEnv(actortest.Config{Seed: 99, Stream: true})
 	for i := range 400 {
 		h.RunFor(ms)
@@ -60,7 +61,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 func TestSpecHashCacheControlPlane(t *testing.T) {
 	h := servicetest.New(t, 6, "a", "b", "c")
 	e := NewControlPlane(ControlPlaneFaults{Faults: noisy()})
-	h.ControlPlane = sim.AddService[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, e.Name(), e)
+	h.ControlPlane = service.Add[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, e.Name(), e)
 	r := actortest.NewEnv(actortest.Config{Seed: 77, Stream: true})
 	nodes := []string{"a", "b", "c"}
 	tps := []core.TopicPartition{contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1)}

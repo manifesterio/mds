@@ -6,7 +6,8 @@ import "github.com/manifesterio/mds/dst/trace"
 // tags of the effects.
 type EffectKind uint16
 
-// The effects an Outbox records.
+// The effects an Outbox records. 2010 and 2012 (the retired service effects)
+// are reserved: never reuse them.
 const (
 	EffectTellSelf      EffectKind = 2001
 	EffectAfter         EffectKind = 2002
@@ -17,9 +18,7 @@ const (
 	EffectFact          EffectKind = 2007
 	EffectForgetPending EffectKind = 2008
 	EffectTell          EffectKind = 2009
-	EffectTellService   EffectKind = 2010
 	EffectAsk           EffectKind = 2011
-	EffectCall          EffectKind = 2012
 	EffectReply         EffectKind = 2013
 	EffectPerform       EffectKind = 2014
 	EffectWatch         EffectKind = 2015
@@ -34,18 +33,17 @@ type Effect struct {
 	Kind  EffectKind
 	Scope string // the Sub path, "" for the actor itself
 
-	Msg     Payload   // the message, request, answer, IO value or gone message
-	D       Duration  // After, StartTimer
-	Key     TimerKey  // StartTimer, CancelTimer: the key as recorded (see StoredKey)
-	To      EntityID  // Tell, Ask
-	Service ServiceID // TellService, Call
-	Reply   ReplyID   // Ask (the new ReplyTo), Reply, Watch
-	Number  uint64    // Ask, Call, Perform: the pending number
-	How     End       // Stop
-	Cause   string    // Stop
-	Fact    Fact      // Fact
+	Msg    Payload  // the message, request, answer, IO value or gone message
+	D      Duration // After, StartTimer
+	Key    TimerKey // StartTimer, CancelTimer: the key as recorded (see StoredKey)
+	To     EntityID // Tell, Ask
+	Reply  ReplyID  // Ask (the new ReplyTo), Reply, Watch
+	Number uint64   // Ask, Perform: the pending number
+	How    End      // Stop
+	Cause  string   // Stop
+	Fact   Fact     // Fact
 
-	// Adapt turns the answer of an Ask, Call or Perform into a message of
+	// Adapt turns the answer of an Ask or Perform into a message of
 	// the actor's own protocol (already wrapped by every Sub on the way). It
 	// panics if the answer has the wrong type: a runtime bug.
 	Adapt func(answer Payload) Payload
@@ -85,14 +83,9 @@ func (e Effect) Fold(h *trace.Hash) {
 		h.String(e.Scope)
 	case EffectTell:
 		EntityRef[Payload]{id: e.To}.Fold(h)
-	case EffectTellService:
-		ServiceRef[Payload, Payload]{id: e.Service}.Fold(h)
 	case EffectAsk:
 		EntityRef[Payload]{id: e.To}.Fold(h)
 		e.Reply.Fold(h)
-	case EffectCall:
-		ServiceRef[Payload, Payload]{id: e.Service}.Fold(h)
-		h.Uint64(e.Number)
 	case EffectReply, EffectWatch:
 		e.Reply.Fold(h)
 	case EffectPerform:

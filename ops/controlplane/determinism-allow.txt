@@ -44,6 +44,7 @@ github.com/manifesterio/mds/dst/actor
 github.com/manifesterio/mds/dst/campaign
 github.com/manifesterio/mds/dst/spectest
 github.com/manifesterio/mds/dst/sim
+github.com/manifesterio/mds/dst/sim/kit
 github.com/manifesterio/mds/dst/trace
 github.com/manifesterio/mds/dst/internal/rng
 github.com/manifesterio/mds/dst/internal/catalog

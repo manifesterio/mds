@@ -5,8 +5,10 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 // The assertions of the connection table. Each one is declared once here, and
@@ -42,8 +44,8 @@ type network struct {
 	sys          *sim.System
 	delay        [2]actor.Duration
 	resetProb    float64
-	objects      actor.ServiceRef[core.ObjectCall, core.ObjectDone]
-	controlPlane actor.ServiceRef[core.ControlPlaneCall, core.ControlPlaneDone]
+	objects      *service.Endpoint[core.ObjectCall, core.ObjectDone]
+	controlPlane *service.Endpoint[core.ControlPlaneCall, core.ControlPlaneDone]
 
 	ends   map[string]*endpoint // by actor name; looked up by name only
 	conns  []*connection        // open connections, in id order
@@ -88,8 +90,8 @@ type connection struct {
 }
 
 func newNetwork(sys *sim.System, delay [2]actor.Duration, resetProb float64,
-	objects actor.ServiceRef[core.ObjectCall, core.ObjectDone],
-	controlPlane actor.ServiceRef[core.ControlPlaneCall, core.ControlPlaneDone]) *network {
+	objects *service.Endpoint[core.ObjectCall, core.ObjectDone],
+	controlPlane *service.Endpoint[core.ControlPlaneCall, core.ControlPlaneDone]) *network {
 	return &network{sys: sys, delay: delay, resetProb: resetProb, objects: objects, controlPlane: controlPlane,
 		ends: map[string]*endpoint{}}
 }
@@ -105,9 +107,9 @@ func (n *network) exec(ctx *sim.ExecCtx, io core.IO) {
 	from := ctx.Issuer()
 	switch x := io.(type) {
 	case core.ObjectCall:
-		sim.Forward(ctx, x, n.objects)
+		service.Forward(ctx, x, n.objects)
 	case core.ControlPlaneCall:
-		sim.Forward(ctx, x, n.controlPlane)
+		service.Forward(ctx, x, n.controlPlane)
 	case core.Connect:
 		n.connect(ctx, from, x)
 	case core.Send:
@@ -173,7 +175,7 @@ func (n *network) send(from actor.Incarnation, x core.Send) {
 	if c == nil {
 		return // closed: the frame is lost, as on a reset socket
 	}
-	if n.sys.Phase() == sim.PhaseFaults && n.sys.Env().Chance(n.resetProb) {
+	if n.sys.FaultsOn() && n.sys.Env().Chance(n.resetProb) {
 		n.reset(c)
 		return
 	}
@@ -248,7 +250,7 @@ func (n *network) close(c *connection, s int, abort bool) {
 // reset aborts c from the network: both ends get ConnClosed{Abort: true}.
 func (n *network) reset(c *connection) {
 	n.remove(c)
-	n.sys.RecordFault("conn_reset",
+	kit.RecordFault(n.sys, "conn_reset",
 		actor.Field{Key: "service", Value: actor.StringValue("network")},
 		actor.Field{Key: "a", Value: actor.StringValue(c.end[0].ep.name)},
 		actor.Field{Key: "b", Value: actor.StringValue(c.end[1].ep.name)},

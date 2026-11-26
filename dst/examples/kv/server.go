@@ -3,7 +3,7 @@ package kv
 import "github.com/manifesterio/mds/dst/actor"
 
 // The server is the system under test: the state machine that a gRPC server
-// would wrap. It writes values to the store, reads them back for its callers,
+// would wrap. It writes values to the store (Do), reads them back for its callers,
 // and answers each caller once the store has answered.
 
 // ---- what the server accepts, and what it answers ----
@@ -37,20 +37,18 @@ type serverReply struct{ Key, Value string }
 
 // ---- the server ----
 
-type server struct {
-	store actor.ServiceRef[storeReq, storeReply]
-}
+type server struct{}
 
 // StateHash is constant: the server keeps no state of its own; the store
 // holds every value.
 func (*server) StateHash() uint64 { return 0 }
 
-func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, actor.NoIO]) {
+func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, storeReq]) {
 	switch m := msg.(type) {
 	case putValue:
-		s.store.Tell(outbox, storePut(m))
+		outbox.Do(storePut(m))
 	case getValue:
-		actor.Call(outbox, s.store.Request(storeGet{Key: m.Key}), thenAnswer(m.ReplyTo))
+		actor.Perform(outbox, storeGet{Key: m.Key}, thenAnswer(m.ReplyTo))
 	case storeAnswered:
 		actor.Reply(outbox, m.Asker, serverReply(m.Answer))
 	}

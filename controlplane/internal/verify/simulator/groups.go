@@ -225,7 +225,7 @@ func (h *groupHost) fetch(t *callTry, within actor.Duration) {
 	}
 	s, n := h.s, h.n
 	var prefix runtime.LogPosition
-	dstsim.AskDelayed(s.w, n.ref, 0, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+	askDelayed(s.w, n.ref, 0, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
 		return runtime.LocalRead{ReplyTo: to, Op: t.op.fetch}
 	}, within, func(d runtime.ControlPlaneDone) actor.Duration {
 		prefix = n.m.Applied()

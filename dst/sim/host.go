@@ -24,7 +24,6 @@ type slot interface { //nolint:interfacebloat // see above
 	arrive(msg actor.Payload, inc actor.ID, toInc bool, n uint64)
 	// answerArrives handles the answer for awaited number n of incarnation inc.
 	answerArrives(answer actor.Payload, inc actor.ID, n uint64)
-	phaseStep(p Phase)
 }
 
 // item is one waiting message. n is its owned number (0: none).
@@ -39,10 +38,9 @@ type host[In, IO actor.Payload] struct {
 	actorBase
 	props    actor.Props[In, IO]
 	exec     executor[IO]
-	onPhase  func(Phase) (In, bool)
 	afterRcv func(self actor.Incarnation, msg In, effects []actor.Effect)
 	onEnd    func(self actor.Incarnation, how actor.End, cause string)
-	cost     CostParams
+	cost     func(r *actor.Rand) actor.Duration
 	a        actor.Actor[In, IO]
 	control  []item[In]
 	data     []item[In]
@@ -201,12 +199,14 @@ func (h *host[In, IO]) pump() {
 	if !h.receive(it.msg) || !h.up {
 		return
 	}
-	cost := max(h.cost.sample(sys.rand), 0)
+	var cost actor.Duration
+	if h.cost != nil {
+		cost = max(h.cost(sys.rand), 0)
+	}
 	h.busy = now + Time(cost)
 	if !h.empty() {
 		sys.ensureWake(&h.actorBase, h.busy)
 	}
-	sys.attr++
 }
 
 // receive runs one Receive with msg and carries out its effects. It reports
@@ -240,29 +240,6 @@ func (h *host[In, IO]) receive(msg In) bool {
 		}
 	}
 	return true
-}
-
-// phaseStep gives a live workload its OnPhase message as one Receive. It
-// takes no node time and skips the inbox.
-func (h *host[In, IO]) phaseStep(p Phase) {
-	sys := h.sys
-	if h.onPhase == nil || !h.up || sys.halted {
-		return
-	}
-	sys.hash.String(h.name)
-	sys.hash.Uint64(tagOnPhase)
-	sys.hash.Uint64(uint64(p))
-	var msg In
-	var ok bool
-	if !sys.guard("OnPhase "+h.name, func() { msg, ok = h.onPhase(p) }) {
-		sys.halted = true
-		return
-	}
-	if !ok {
-		return
-	}
-	sys.logMsg(fmt.Sprintf("on_phase %s %s", h.name, p), msg)
-	h.receive(msg)
 }
 
 func (h *host[In, IO]) ended(who actor.Incarnation, how actor.End, cause string) {

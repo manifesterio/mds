@@ -1,21 +1,21 @@
-package sim
+package kit
 
 import (
 	"github.com/manifesterio/mds/dst/actor"
 )
 
-// CostParams is the CPU model of a node: how long the node is busy after one
-// Step. While a node is busy, its inputs wait in its inbox. Zero params cost
-// nothing and draw nothing, so every input is one Step at once.
+// CostParams is the CPU model of an actor: how long it is busy after one
+// Receive. Use it as sim.Cost(p.Sample). Zero params cost nothing and draw
+// nothing.
 type CostParams struct {
-	PerEvent  actor.Duration   // the base cost of any Step
+	PerEvent  actor.Duration   // the base cost of any Receive
 	PauseProb float64          // stands in for GC pauses and CPU contention
 	Pause     FastWithRareSlow // the extra cost of a pause
 }
 
-// sample draws the cost of one Step: PerEvent, plus a Pause sample with
+// Sample draws the cost of one Receive: PerEvent, plus a Pause sample with
 // probability PauseProb.
-func (p CostParams) sample(r *actor.Rand) actor.Duration {
+func (p CostParams) Sample(r *actor.Rand) actor.Duration {
 	d := p.PerEvent
 	if r.Chance(p.PauseProb) {
 		d += p.Pause.Sample(r)
@@ -25,7 +25,7 @@ func (p CostParams) sample(r *actor.Rand) actor.Duration {
 
 // FastWithRareSlow is a delay that is mostly fast, with a rare slow tail.
 // Sample picks either the fast range or the slow range (replacement), not a
-// base delay plus an add-on. Host RTT that is "base + rare add-on" uses
+// base delay plus an add-on. A delay that is "base + rare add-on" uses
 // DrawBetween + MaybeAdd instead (different hashes).
 type FastWithRareSlow struct {
 	FastMin, FastMax actor.Duration

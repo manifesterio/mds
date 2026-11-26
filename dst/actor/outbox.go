@@ -13,14 +13,6 @@ func Ask[In, IO, Req, Rep Payload](o *Outbox[In, IO], to EntityRef[Req],
 		Msg: makeReq(replyTo), Adapt: core.Lift(o, adapt)})
 }
 
-// Call is Ask for a service: the service gets its reply handle from Handle,
-// so the request carries no ReplyTo. Bind the request first:
-// actor.Call(o, store.Request(get{Key: k}), adapt).
-func Call[In, IO, Rep Payload](o *Outbox[In, IO], call ServiceRequest[Rep], adapt func(Rep) In) {
-	service, req := core.ServiceCall(call)
-	core.Record(o, core.Effect{Kind: core.EffectCall, Service: service, Number: core.Next(o), Msg: req, Adapt: core.Lift(o, adapt)})
-}
-
 // Reply answers an Ask I received. A second Reply to the same ReplyTo, or a
 // Reply to an asker that is gone, is dropped. It removes any Watch on
 // that ReplyTo.

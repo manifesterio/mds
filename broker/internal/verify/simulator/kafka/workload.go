@@ -17,7 +17,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/actor"
-	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -161,7 +161,7 @@ func clientSpec(id int, h *History, o Opts) cluster.ClientSpec[clientMsg] {
 			return newClient(env, id, brokers, h, o)
 		},
 		Boot:    func(actor.Incarnation) clientMsg { return clientStart{} },
-		OnPhase: func(p sim.Phase) (clientMsg, bool) { return phaseChanged{Phase: uint8(p)}, true },
+		OnPhase: func(p kit.Phase) (clientMsg, bool) { return phaseChanged{Phase: uint8(p)}, true },
 		FromNet: func(ev core.EventData) clientMsg { return fromSession{Msg: session.Net{Event: ev}} },
 	}
 }
@@ -180,12 +180,12 @@ func (c *client) Receive(_ actor.Now, msg clientMsg, o *actor.Outbox[clientMsg, 
 	case clientStart:
 		c.sess.Dial(so)
 	case phaseChanged:
-		switch sim.Phase(m.Phase) {
-		case sim.PhaseHeal:
+		switch kit.Phase(m.Phase) {
+		case kit.PhaseHeal:
 			c.p.noNew = true
-		case sim.PhaseDrain:
+		case kit.PhaseDrain:
 			c.c.drain = true
-		case sim.PhaseFaults:
+		case kit.PhaseFaults:
 		}
 	case fromSession:
 		ev := c.sess.Receive(m.Msg, so)

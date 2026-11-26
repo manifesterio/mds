@@ -3,7 +3,7 @@ package fakeservices
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
-	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -20,14 +20,14 @@ type ObjectStoreFaults struct {
 // with the faults of faulty around it. ErrNotFound and ErrInvalid come only
 // from the spec.
 //
-// It is a sim.Service. A broker performs a core.ObjectCall, its executor
+// It is a service.Service. A broker performs a core.ObjectCall, its executor
 // forwards the call here, and the service answers with core.ObjectDone.
 type ObjectStore struct {
 	*faulty.Service[core.ObjectCall, core.ObjectDone, objectstore.Call, objectstore.Result]
 	spec *objectstore.Spec
 }
 
-var _ sim.Service[core.ObjectCall, core.ObjectDone] = (*ObjectStore)(nil)
+var _ service.Service[core.ObjectCall, core.ObjectDone] = (*ObjectStore)(nil)
 
 // objectSpec gives objectstore.Spec the Apply method of faulty.Spec.
 type objectSpec struct{ *objectstore.Spec }
@@ -36,7 +36,7 @@ type objectSpec struct{ *objectstore.Spec }
 func (s objectSpec) Apply(call objectstore.Call) objectstore.Result { return s.Exec(call) }
 
 // NewObjectStore returns an empty object store with the given faults. Add it to
-// a System with sim.AddService.
+// a System with service.Add.
 func NewObjectStore(f ObjectStoreFaults) *ObjectStore {
 	spec := objectstore.NewSpec()
 	shape := faulty.ShapeOf[core.ObjectCall, core.ObjectDone, objectstore.Call, objectstore.Result](

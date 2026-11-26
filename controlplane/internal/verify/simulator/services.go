@@ -12,6 +12,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/actor"
 	dstsim "github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 )
 
 // Bug names one planted fault. The tests use it to prove that the simulator
@@ -76,7 +77,7 @@ func newStorage(s *sim) *storage {
 }
 
 func (st *storage) netDelay(r *actor.Rand) actor.Duration {
-	return dstsim.DrawBetween(r, netMin, netMax) + dstsim.MaybeAdd(r, st.s.faults.Slow, slowMin, slowMax)
+	return kit.DrawBetween(r, netMin, netMax) + kit.MaybeAdd(r, st.s.faults.Slow, slowMin, slowMax)
 }
 
 // ioKind returns whether call may change data, then whether it goes to the

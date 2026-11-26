@@ -45,14 +45,6 @@ type ReplyID = core.ReplyID
 // Asked is anything that names one ask: a ReplyTo of any answer type.
 type Asked = core.Asked
 
-// ServiceRef is the handle of a simulated outside service that takes Req
-// and answers Rep.
-type ServiceRef[Req, Rep Payload] = core.ServiceRef[Req, Rep]
-
-// ServiceRequest is a request bound to the service that takes it, ready for
-// Call. Make one with ServiceRef.Request.
-type ServiceRequest[Rep Payload] = core.ServiceRequest[Rep]
-
 // Outbox records the effects of one Receive, in order. The runtime carries
 // them out after Receive returns, in that order. An Outbox is lent for
 // one Receive only: using it later is a protocol failure.
@@ -79,9 +71,7 @@ const (
 	EffectFact          = core.EffectFact
 	EffectForgetPending = core.EffectForgetPending
 	EffectTell          = core.EffectTell
-	EffectTellService   = core.EffectTellService
 	EffectAsk           = core.EffectAsk
-	EffectCall          = core.EffectCall
 	EffectReply         = core.EffectReply
 	EffectPerform       = core.EffectPerform
 	EffectWatch         = core.EffectWatch

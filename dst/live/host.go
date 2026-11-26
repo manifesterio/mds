@@ -21,8 +21,8 @@ var (
 	ErrKilled = errors.New("live: killed after the stop grace")
 	// ErrHostStopped: the Host is not running (any more).
 	ErrHostStopped = errors.New("live: the host has stopped")
-	// ErrProtocol: an actor used the API the wrong way (a service in
-	// production, an effect after Stop, a zero handle, ...).
+	// ErrProtocol: an actor used the API the wrong way (an effect after
+	// Stop, a zero handle, ...).
 	ErrProtocol = errors.New("live: protocol failure")
 )
 

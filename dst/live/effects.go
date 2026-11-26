@@ -65,8 +65,6 @@ func (r *actorRunner[In, IO]) applyOne(e actor.Effect) error {
 		return r.execute(e.Msg, e.Number)
 	case actor.EffectDo:
 		return r.execute(e.Msg, 0)
-	case actor.EffectTellService, actor.EffectCall:
-		return fmt.Errorf("%w: %s: services exist only in simulation", ErrProtocol, r.name())
 	case actor.EffectStop:
 	}
 	return nil

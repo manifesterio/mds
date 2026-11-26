@@ -7,8 +7,8 @@ import (
 )
 
 // env is the actor.Env of self: the run stream, buggify and assertions,
-// shared by every actor, service and rule of the run. Self is zero for host
-// code and services.
+// shared by every actor and rule of the run. Self is zero for host
+// code.
 func (sys *System) env(self actor.Incarnation) actor.Env {
 	return actor.NewEnv(self, sys.rand, sys.faults, simAsserts{sys.asserts})
 }

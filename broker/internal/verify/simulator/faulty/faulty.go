@@ -1,5 +1,5 @@
 // Package faulty turns a fault-free spec into a simulated service (a
-// sim.Service).
+// service.Service).
 //
 // A spec is a small program with two methods: Apply runs one op and gives the
 // right answer, and StateHash hashes its whole state. The spec never fails and
@@ -36,8 +36,10 @@ package faulty
 import (
 	"slices"
 
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -68,8 +70,8 @@ type Outage struct {
 
 // Faults are the numbers of the fault kinds. A chance of 0 turns a kind off.
 type Faults struct {
-	ApplyLatency   sim.FastWithRareSlow // from issue to the effect
-	RespondLatency sim.FastWithRareSlow // from the effect to the reply
+	ApplyLatency   kit.FastWithRareSlow // from issue to the effect
+	RespondLatency kit.FastWithRareSlow // from the effect to the reply
 	Unavailable503 float64              // chance that a call is refused, nothing applied
 	Timeout        float64              // chance of a timeout; the op may or may not be applied
 	LostResponse   float64              // chance that the op is applied and the reply is lost
@@ -165,7 +167,7 @@ const (
 // plan is one call in flight.
 type plan[Req, Rep actor.Payload] struct {
 	id     uint64
-	reply  sim.Responder[Rep]
+	reply  sim.Reply[Rep]
 	req    Req
 	kind   kind
 	t1, t2 actor.Mono
@@ -173,7 +175,7 @@ type plan[Req, Rep actor.Payload] struct {
 	bits   uint64 // which bit, before the modulo
 }
 
-// Service is the spec with faults around it. It is a sim.Service.
+// Service is the spec with faults around it. It is a service.Service.
 type Service[Req, Rep actor.Payload, Op, Res any] struct {
 	shape  Shape[Req, Rep, Op, Res]
 	faults Faults
@@ -190,7 +192,7 @@ type Service[Req, Rep actor.Payload, Op, Res any] struct {
 	specOK   bool
 }
 
-// New returns a service around spec. Add it to a System with sim.AddService.
+// New returns a service around spec. Add it to a System with service.Add.
 func New[Req, Rep actor.Payload, Op, Res any](spec Spec[Op, Res], f Faults, s Shape[Req, Rep, Op, Res]) *Service[Req, Rep, Op, Res] {
 	return &Service[Req, Rep, Op, Res]{shape: s, faults: f, spec: spec}
 }
@@ -234,7 +236,7 @@ func between(r *actor.Rand, lo, hi int64) int64 {
 // three coins "503", timeout and lost, always all three and in this order. It
 // records the fault that wins. A refusal beats a timeout, and a timeout beats a
 // lost reply.
-func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Field) kind {
+func (s *Service[Req, Rep, Op, Res]) draw(ctx *service.Ctx, request actor.Field) kind {
 	r, now, f, pre, a := ctx.Env().Rand, ctx.Now(), s.faults, s.shape.Prefix, s.shape.Asserts
 	if now >= s.until && r.Chance(f.Outage.Prob) {
 		d := f.Outage.Dur[0]
@@ -273,7 +275,7 @@ func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Fie
 // the respond delay, and the corruption coin (and the bit). After
 // EnterRecovery, only the two delays are drawn. Fault facts name the call by
 // its number in this service ("req").
-func (s *Service[Req, Rep, Op, Res]) Handle(ctx *sim.ServiceCtx, req Req, reply sim.Responder[Rep]) {
+func (s *Service[Req, Rep, Op, Res]) Handle(ctx *service.Ctx, req Req, reply sim.Reply[Rep]) {
 	r, now, f := ctx.Env(), ctx.Now(), s.faults
 	op := s.shape.Op(req)
 	s.nextID++
@@ -302,12 +304,12 @@ func (s *Service[Req, Rep, Op, Res]) Handle(ctx *sim.ServiceCtx, req Req, reply 
 		}
 	case replyNormal:
 	}
-	ctx.Later(actor.Duration(t1-now), func(ctx *sim.ServiceCtx) { s.land(ctx, id) })
+	ctx.Later(actor.Duration(t1-now), func(ctx *service.Ctx) { s.land(ctx, id) })
 	s.plans = append(s.plans, pl)
 }
 
 // land lands one planned call: it runs the op on the spec and sends the reply.
-func (s *Service[Req, Rep, Op, Res]) land(ctx *sim.ServiceCtx, id uint64) {
+func (s *Service[Req, Rep, Op, Res]) land(ctx *service.Ctx, id uint64) {
 	i := slices.IndexFunc(s.plans, func(p plan[Req, Rep]) bool { return p.id == id })
 	if i < 0 {
 		return
@@ -377,4 +379,4 @@ func (s *Service[Req, Rep, Op, Res]) StateHash() uint64 {
 	return h.Sum()
 }
 
-var _ sim.Service[actor.Payload, actor.Payload] = (*Service[actor.Payload, actor.Payload, int, int])(nil)
+var _ service.Service[actor.Payload, actor.Payload] = (*Service[actor.Payload, actor.Payload, int, int])(nil)

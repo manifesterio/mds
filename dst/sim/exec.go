@@ -17,41 +17,30 @@ type ExecCtx struct {
 // Issuer is the incarnation that recorded the IO.
 func (c *ExecCtx) Issuer() actor.Incarnation { return c.self }
 
-// claim reports whether the IO may be answered now: the answer of a Do is
-// dropped, and a second answer is a protocol failure.
-func (c *ExecCtx) claim() bool {
-	if c.answered {
+// Hold claims the answer of the IO that issued req and returns its Reply, to
+// answer now or later (from another step of host code). It is typed by the
+// same Request constraint as Perform. The answer of a Do is dropped (and
+// counted); a second claim is a protocol failure.
+func Hold[IO, Rep actor.Payload, Req actor.Request[IO, Rep]](c *ExecCtx, _ Req) Reply[Rep] {
+	r := Reply[Rep]{sys: c.sys, source: "exec/" + c.name, to: c.issuer, answered: new(bool)}
+	switch {
+	case c.answered:
 		c.sys.Fail(FailProtocol, "answered_twice", c.name+": the executor answered one IO twice")
-		return false
+		*r.answered = true
+		r.to = responderTarget{}
+	case c.issuer.number == 0:
+		c.sys.dropped(dropAnsweredDo, c.name)
+		r.to = responderTarget{}
 	}
 	c.answered = true
-	if c.issuer.number == 0 {
-		c.sys.dropped(dropAnsweredDo, c.name)
-		return false
-	}
-	return true
+	return r
 }
 
-// Answer answers the Perform that issued req, after d. It is typed by the
-// same Request constraint as Perform. The answer of a Do is dropped; a
-// second answer is a protocol failure.
-func Answer[IO, Rep actor.Payload, Req actor.Request[IO, Rep]](c *ExecCtx, _ Req, d actor.Duration, answer Rep) {
-	if !c.claim() {
-		return
-	}
-	c.sys.foldExecAnswer(c.issuer.number, d, answer)
-	c.sys.answerAt("exec/"+c.name, c.issuer, Time(max(d, 0)), answer)
-}
-
-// Forward hands the Perform that issued req to a service whose protocol is
-// the request and answer types themselves; the service's answer becomes the
-// Perform's answer.
-func Forward[IO, Rep actor.Payload, Req actor.Request[IO, Rep]](c *ExecCtx, req Req, to actor.ServiceRef[Req, Rep]) {
-	target := c.issuer
-	if !c.claim() {
-		target = responderTarget{}
-	}
-	c.sys.callService(to.ID(), req, target)
+// Answer answers the Perform that issued req, after d: Hold(c, req).After(d,
+// answer). The answer of a Do is dropped; a second answer is a protocol
+// failure.
+func Answer[IO, Rep actor.Payload, Req actor.Request[IO, Rep]](c *ExecCtx, req Req, d actor.Duration, answer Rep) {
+	Hold(c, req).After(d, answer)
 }
 
 // foldExecAnswer folds a scheduled executor answer (tag 2017).
@@ -104,45 +93,6 @@ func Ask[Req, Rep actor.Payload](sys *System, to actor.EntityRef[Req], makeReq f
 		ask.done(nil, false)
 	})
 	sys.tell("host", to.EntityID(), 0, req)
-}
-
-// AskDelayed asks to after delayBefore (Ask runs at once when delayBefore <= 0).
-// within is Ask's timeout measured from the Ask. On a timely answer, backhaul
-// runs at Reply time (capture product state there) and returns the delay
-// before done(answer, true); a non-positive delay calls done at once. On Ask
-// timeout, done(zero, false) runs with no backhaul. Leave product-level
-// parallel timeouts to the caller.
-func AskDelayed[Req, Rep actor.Payload](
-	sys *System,
-	to actor.EntityRef[Req],
-	delayBefore actor.Duration,
-	makeReq func(actor.ReplyTo[Rep]) Req,
-	within actor.Duration,
-	backhaul func(answer Rep) actor.Duration,
-	done func(answer Rep, ok bool),
-) {
-	start := func() {
-		Ask(sys, to, makeReq, within, func(rep Rep, ok bool) {
-			if !ok {
-				done(rep, false)
-				return
-			}
-			d := actor.Duration(0)
-			if backhaul != nil {
-				d = backhaul(rep)
-			}
-			if d <= 0 {
-				done(rep, true)
-				return
-			}
-			sys.After(d, func() { done(rep, true) })
-		})
-	}
-	if delayBefore <= 0 {
-		start()
-		return
-	}
-	sys.After(delayBefore, start)
 }
 
 // replyOutside answers a sim.Ask: done runs at once, while the Reply is
