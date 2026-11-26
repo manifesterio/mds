@@ -236,7 +236,7 @@ func between(r actor.Rand, lo, hi int64) int64 {
 // records the fault that wins. A refusal beats a timeout, and a timeout beats a
 // lost reply.
 func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Field) kind {
-	r, now, f, pre, a := ctx, ctx.Now(), s.faults, s.shape.Prefix, s.shape.Asserts
+	r, now, f, pre, a := ctx.Env(), ctx.Now(), s.faults, s.shape.Prefix, s.shape.Asserts
 	if now >= s.until && r.Chance(f.Outage.Prob) {
 		d := f.Outage.Dur[0]
 		if f.Outage.Dur[1] > d {
@@ -244,7 +244,7 @@ func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Fie
 		}
 		s.until = now + actor.Mono(d)
 		ctx.RecordFault(pre+"_outage", actor.Field{Key: "dur", Value: actor.Int64Value(d)})
-		ctx.Reachable(a.Outage)
+		ctx.Env().Reachable(a.Outage)
 	}
 	inOutage := now < s.until
 	is503, isTimeout, isLost := r.Chance(f.Unavailable503), r.Chance(f.Timeout), r.Chance(f.LostResponse)
@@ -255,15 +255,15 @@ func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Fie
 			cause = "outage"
 		}
 		ctx.RecordFault(pre+"_503", request, actor.Field{Key: "cause", Value: actor.StringValue(cause)})
-		ctx.Reachable(a.Unavailable)
+		ctx.Env().Reachable(a.Unavailable)
 		return replyUnavailable
 	case isTimeout:
 		ctx.RecordFault(pre+"_timeout", request)
-		ctx.Reachable(a.Timeout)
+		ctx.Env().Reachable(a.Timeout)
 		return replyTimeout
 	case isLost:
 		ctx.RecordFault(pre+"_lost_response", request)
-		ctx.Reachable(a.Lost)
+		ctx.Env().Reachable(a.Lost)
 		return replyLost
 	}
 	return replyNormal
@@ -275,7 +275,7 @@ func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Fie
 // EnterRecovery, only the two delays are drawn. Fault facts name the call by
 // its number in this service ("req").
 func (s *Service[Req, Rep, Op, Res]) Handle(ctx *sim.ServiceCtx, req Req, reply sim.Responder[Rep]) {
-	r, now, f := ctx, ctx.Now(), s.faults
+	r, now, f := ctx.Env(), ctx.Now(), s.faults
 	op := s.shape.Op(req)
 	s.nextID++
 	id := s.nextID
@@ -317,9 +317,9 @@ func (s *Service[Req, Rep, Op, Res]) land(ctx *sim.ServiceCtx, id uint64) {
 	s.plans = slices.Delete(s.plans, i, i+1)
 	apply := true
 	if pl.kind == replyTimeout {
-		apply = ctx.Chance(0.5)
-		ctx.Sometimes(apply, s.shape.Asserts.Applied)
-		ctx.Sometimes(!apply, s.shape.Asserts.NotApplied)
+		apply = ctx.Env().Chance(0.5)
+		ctx.Env().Sometimes(apply, s.shape.Asserts.Applied)
+		ctx.Env().Sometimes(!apply, s.shape.Asserts.NotApplied)
 	}
 	if !apply {
 		return
@@ -333,7 +333,7 @@ func (s *Service[Req, Rep, Op, Res]) land(ctx *sim.ServiceCtx, id uint64) {
 			res = out
 			ctx.RecordFault(c.Kind, actor.Field{Key: "req", Value: actor.Uint64Value(pl.id)},
 				actor.Field{Key: "bit", Value: actor.Uint64Value(bit)})
-			ctx.Reachable(c.Reached)
+			ctx.Env().Reachable(c.Reached)
 		}
 	}
 	pl.reply.After(actor.Duration(max(pl.t2, ctx.Now())-ctx.Now()), s.shape.Reply(pl.req, res))

@@ -66,7 +66,7 @@ func AddService[Req, Rep actor.Payload](sys *System, name string, svc Service[Re
 		return actor.ServiceRef[Req, Rep]{}
 	}
 	h := &serviceHost[Req, Rep]{serviceBase: serviceBase{sys: sys, idx: len(sys.services), name: name}, svc: svc}
-	h.ctx = &ServiceCtx{env: env{sys: sys}, sys: sys, b: &h.serviceBase}
+	h.ctx = &ServiceCtx{env: env{sys: sys}, sys: sys, name: name, invalidate: h.invalidateHash}
 	sys.svcNames[name] = true
 	sys.services = append(sys.services, h)
 	return actor.NewServiceRef[Req, Rep](actor.ServiceID{Runtime: sys.owner, Slot: uint32(h.idx), Name: name})
@@ -170,13 +170,17 @@ func (sys *System) answerAt(source string, to responderTarget, d Time, answer ac
 	sys.q.add(e)
 }
 
-// ServiceCtx is lent to Handle, OnCrash and Later steps. It is the run's
+// ServiceCtx is lent to Handle, OnCrash and Later steps. Env gives the run's
 // Rand, Faults and Assertions.
 type ServiceCtx struct {
-	env
-	sys *System
-	b   *serviceBase
+	env        env
+	sys        *System
+	name       string
+	invalidate func()
 }
+
+// Env is the run's Rand, Faults and Assertions.
+func (c *ServiceCtx) Env() actor.Env { return c.env }
 
 // Now is the virtual time.
 func (c *ServiceCtx) Now() actor.Mono { return actor.Mono(c.sys.q.now) }
@@ -185,11 +189,11 @@ func (c *ServiceCtx) Now() actor.Mono { return actor.Mono(c.sys.q.now) }
 // dropped when an actor crashes.
 func (c *ServiceCtx) Later(d actor.Duration, fn func(ctx *ServiceCtx)) {
 	sys := c.sys
-	e := &entry{at: sys.q.now + Time(max(d, 0)), lane: noLane, kind: kindServiceStep, node: -1, service: c.b.name}
+	e := &entry{at: sys.q.now + Time(max(d, 0)), lane: noLane, kind: kindServiceStep, node: -1, service: c.name}
 	e.run = func() {
-		sys.logMsg("service "+c.b.name+" later", nil)
-		c.b.invalidateHash()
-		if !sys.guard("Later "+c.b.name, func() { fn(c) }) {
+		sys.logMsg("service "+c.name+" later", nil)
+		c.invalidate()
+		if !sys.guard("Later "+c.name, func() { fn(c) }) {
 			sys.halted = true
 			return
 		}
@@ -199,11 +203,10 @@ func (c *ServiceCtx) Later(d actor.Duration, fn func(ctx *ServiceCtx)) {
 }
 
 // RecordFault records an injected fault: a "sim_fault" fact with the kind
-// and the service name, then the extra fields. (Fault, from the embedded
-// Faults, is the buggify coin.)
+// and the service name, then the extra fields. (Env().Fault is the buggify coin.)
 func (c *ServiceCtx) RecordFault(kind string, fields ...actor.Field) {
 	all := append([]actor.Field{
-		{Key: "service", Value: actor.StringValue(c.b.name)},
+		{Key: "service", Value: actor.StringValue(c.name)},
 	}, fields...)
 	c.sys.RecordFault(kind, all...)
 }

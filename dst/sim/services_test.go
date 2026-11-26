@@ -24,7 +24,7 @@ func (s *store) Handle(ctx *sim.ServiceCtx, req io, reply sim.Responder[readDone
 		s.values[r.Key] = "set"
 		reply.After(ms, readDone{"ignored"}) // nobody waits: dropped
 	case read:
-		d := ctx.Duration(ms, 5*ms)
+		d := ctx.Env().Duration(ms, 5*ms)
 		reply.After(d, readDone{s.values[r.Key]})
 		if s.twice {
 			reply.After(d, readDone{"again"})

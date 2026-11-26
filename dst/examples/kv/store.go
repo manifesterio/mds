@@ -53,9 +53,9 @@ func (s *store) Handle(ctx *sim.ServiceCtx, req storeReq, reply sim.Responder[st
 			return
 		}
 		s.values[r.Key] = r.Value
-		ctx.Always(s.values[r.Key] == r.Value, putIsStored, assert.Pair{Key: "key", Value: r.Key})
+		ctx.Env().Always(s.values[r.Key] == r.Value, putIsStored, assert.Pair{Key: "key", Value: r.Key})
 	case storeGet:
-		delay := ctx.Duration(1*ms, 5*ms)
+		delay := ctx.Env().Duration(1*ms, 5*ms)
 		reply.After(delay, storeReply{Key: r.Key, Value: s.values[r.Key]})
 	}
 }

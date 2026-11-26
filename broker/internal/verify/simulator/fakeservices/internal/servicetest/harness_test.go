@@ -24,7 +24,7 @@ type objects struct{ calls int }
 func (s *objects) Handle(ctx *sim.ServiceCtx, _ core.ObjectCall, reply sim.Responder[core.ObjectDone]) {
 	s.calls++
 	ctx.RecordFault("slow")
-	ctx.Reachable(objectAnswered)
+	ctx.Env().Reachable(objectAnswered)
 	reply.After(ms, core.ObjectDone{Result: objectstore.GetDone{Data: []byte("obj")}})
 }
 
