@@ -11,7 +11,6 @@ import (
 	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/actor/actortest"
-	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/core/trace"
 )
 
@@ -39,13 +38,6 @@ func rt(n uint64) actor.ReplyTo[Reply] {
 // gone is the message the machine gets when the caller of call n leaves.
 // group is the group of the call, "" for a describe or a commit.
 func gone(group string, n uint64) callGone { return callGone{group: group, call: rt(n)} }
-
-// newID draws an id from r the way the simulator does: 16 bytes of the stream.
-func newID(r *rng.Rand) actor.ID {
-	var id actor.ID
-	r.Bytes(id[:])
-	return id
-}
 
 // armed is one keyed timer the machine started.
 type armed struct {
@@ -122,13 +114,13 @@ func newHarnessFaults(t *testing.T, cfg Config, faults actor.Faults) *harness {
 func newBareHarness(t *testing.T, cfg Config, faults actor.Faults) *harness {
 	t.Helper()
 	env := actortest.NewEnv(actortest.Config{
-		Self: actor.Incarnation{Name: "rebalance"}, Rand: rng.New(seed), Faults: faults,
+		Self: actor.Incarnation{Name: "rebalance"}, Seed: seed, Stream: true, Faults: faults,
 	})
 	replica := actor.NewEntityRef[runtime.EventData](actor.EntityID{Runtime: actor.NewOwner(), Slot: 1, Name: "replica"})
 	h := &harness{t: t, m: New(cfg, env, replica), replica: replica, env: env, log: spec.New(), watched: map[actor.ReplyID]Input{}}
-	shadow := rng.New(seed)
+	shadow := actortest.NewEnv(actortest.Config{Seed: seed, Stream: true})
 	for range 64 {
-		h.suffix = append(h.suffix, newMemberID("", newID(shadow)))
+		h.suffix = append(h.suffix, newMemberID("", shadow.NewID()))
 	}
 	return h
 }

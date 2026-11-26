@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/core/actor/actortest"
 )
 
 func TestNewAndPhases(t *testing.T) {
@@ -28,6 +28,6 @@ func TestSwarm(t *testing.T) {
 	t.Parallel()
 	p := New()
 	s := p.Settings
-	Swarm(rng.New(1), &s)
-	Swarm(rng.New(2), &s)
+	Swarm(actortest.NewEnv(actortest.Config{Seed: 1, Stream: true}), &s)
+	Swarm(actortest.NewEnv(actortest.Config{Seed: 2, Stream: true}), &s)
 }

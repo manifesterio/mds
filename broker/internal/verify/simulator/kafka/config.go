@@ -6,7 +6,6 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/history"
 )
@@ -71,7 +70,7 @@ func Run(cfg Config) sim.Result {
 	p := preset.New()
 	p.Settings.ControlPlane.MaxCommitItems = fakeservices.DynamoMaxCommitItems
 	set := Settings{Settings: p.Settings, Broker: brokerConfig(cfg.Bug)}
-	swarm(rng.New(cfg.Seed).Derive("swarm"), &set)
+	swarm(sim.DeriveRand(cfg.Seed, "swarm"), &set)
 	if cfg.Tune != nil {
 		cfg.Tune(&set)
 	}
@@ -102,12 +101,12 @@ func Run(cfg Config) sim.Result {
 }
 
 // swarm draws the knobs of one seed from the swarm stream of the seed.
-func swarm(r *rng.Rand, s *Settings) {
+func swarm(r actor.Rand, s *Settings) {
 	preset.Swarm(r, &s.Settings)
 	swarmBroker(r, s)
 }
 
-func swarmBroker(r *rng.Rand, s *Settings) {
+func swarmBroker(r actor.Rand, s *Settings) {
 	bc := s.Broker
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
 	window := func(menu ...int) actor.Duration { return actor.Duration(pick(menu...)) * actor.Millisecond }

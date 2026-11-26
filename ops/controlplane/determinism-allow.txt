@@ -49,7 +49,7 @@ github.com/manifesterio/mds/dst/core/fault
 github.com/manifesterio/mds/dst/verify/golden
 github.com/manifesterio/mds/dst/sim
 github.com/manifesterio/mds/dst/core/actor
-github.com/manifesterio/mds/dst/core/rng
+github.com/manifesterio/mds/dst/internal/rng
 github.com/manifesterio/mds/dst/core/trace
 
 # Shared code of this repo (github.com/manifesterio/mds/shared). First-party, so no audit record.

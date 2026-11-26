@@ -1,7 +1,7 @@
 // Package fault is cooperative fault injection drawn from one rng stream.
 package fault
 
-import "github.com/manifesterio/mds/dst/core/rng"
+import "github.com/manifesterio/mds/dst/internal/rng"
 
 // Default rates for Maybe activation and fire.
 const (

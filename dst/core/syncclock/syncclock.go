@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/manifesterio/mds/dst/core/clock"
-	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/core/sched"
+	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
 // Sync is a goroutine-safe virtual clock for code under test that starts timers

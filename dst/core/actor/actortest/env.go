@@ -8,17 +8,17 @@ import (
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
-// Config selects the RNG of NewEnv. Exactly one mode applies: Rand if set,
-// else Counter, else SplitMix with Seed (plain modulo Intn, for harnesses
-// that pin the stream).
+// Config selects the RNG of NewEnv. Exactly one mode applies: Stream, else
+// Counter, else SplitMix with Seed (plain modulo Intn, for harnesses that pin
+// the stream).
 type Config struct {
 	Self    actor.Incarnation
-	Seed    uint64 // SplitMix initial state when !Counter && Rand == nil
+	Seed    uint64 // run stream seed when Stream, SplitMix state when !Counter
+	Stream  bool   // draw from the run stream of a System with Seed
 	Counter bool
-	Rand    *rng.Rand
 	Faults  actor.Faults // Maybe/MaybeP; nil means never
 }
 
@@ -43,8 +43,8 @@ type Env struct {
 func NewEnv(c Config) *Env {
 	e := &Env{self: c.Self, faults: c.Faults}
 	switch {
-	case c.Rand != nil:
-		e.rand = c.Rand
+	case c.Stream:
+		e.rand = rng.New(c.Seed)
 	case c.Counter:
 		e.counter = true
 	default:

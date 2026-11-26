@@ -7,7 +7,6 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/faulty"
 )
@@ -80,7 +79,7 @@ var (
 )
 
 // Swarm draws the shared fault knobs from r.
-func Swarm(r *rng.Rand, s *cluster.Settings) {
+func Swarm(r actor.Rand, s *cluster.Settings) {
 	menu := [...]float64{0.5, 1, 2, 4}
 	knob := func(p *float64) {
 		if r.Chance(0.4) {

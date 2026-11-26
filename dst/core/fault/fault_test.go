@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
 var (

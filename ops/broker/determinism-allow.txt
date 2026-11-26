@@ -36,7 +36,7 @@ github.com/manifesterio/mds/dst/core/trace
 # The dst v2 kernel and the seeded random stream. The new simulation tree
 # (internal/verify/simulator) runs on the kernel. Both are first-party and have their own determinism gate in dst.
 github.com/manifesterio/mds/dst/sim
-github.com/manifesterio/mds/dst/core/rng
+github.com/manifesterio/mds/dst/internal/rng
 # Faulty: a fault-free spec with timing and faults around it (the simulated object store and
 # control plane are built on it). Deterministic, and it has its own determinism gate in dst.
 github.com/manifesterio/mds/dst/verify/check/faulty

@@ -23,7 +23,6 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `core/actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Product actor code imports this package. |
 | `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. |
 | `runtime/live` | The production runtime for the same actors: a `Host` with one goroutine per actor, Control before Data inboxes, real keyed timers, an exec function per actor for product IO, and `Ask` / `Tell` / `OnLoop` for callers outside the actors. Real time and goroutines: it is not in the determinism gate. |
-| `core/rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`), and `Derive(label)` for an independent stream that draws nothing |
 | `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap (live/clock adapters; sim keeps its own queue) |
 | `core/clock` | Wall offset over `core/sched`, `AfterFunc` / `Advance` on the same heap |
 | `core/syncclock`, `core/realclock` | Clock adapters for code that needs a real or synchronised clock outside a run |
@@ -36,6 +35,8 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
 | `verify/history` | Append-only client-operation history (`Invoke`/`Return`) for workload/oracle separation |
 | `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
+
+The run stream (SplitMix64) is internal (`internal/rng`): code draws through `actor.Rand` (the Env), and host setup before a `System` exists uses `sim.DeriveRand(seed, label)`.
 
 ## How to write an actor
 

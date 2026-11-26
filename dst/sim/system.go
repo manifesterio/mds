@@ -6,8 +6,8 @@ import (
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
 // Time is global virtual time in nanoseconds since the run started. Actors

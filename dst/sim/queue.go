@@ -2,7 +2,7 @@ package sim
 
 import (
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
 // entryKind says what a queue entry is. The number is folded into the trace

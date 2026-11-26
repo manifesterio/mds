@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/clock"
-	"github.com/manifesterio/mds/dst/core/rng"
 	"github.com/manifesterio/mds/dst/core/sched"
+	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
 func TestAdvanceFiresTimersInOrder(t *testing.T) {

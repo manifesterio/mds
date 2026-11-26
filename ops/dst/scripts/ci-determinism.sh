@@ -2,7 +2,7 @@
 # CI gate for the deterministic packages of dst: no goroutines, channels, map
 # ranges, package-level state, or imports outside ../ops/dst/determinism-allow.txt.
 #
-# Opt-out rule: every package under ./core/... and ./sim/... is in the gate by
+# Opt-out rule: every package under ./core/..., ./internal/... and ./sim/... is in the gate by
 # default, so a new package is checked without editing this script. A package
 # that must stay out (it uses goroutines, wall time or files on purpose) is listed
 # by import path in ../ops/dst/determinism-exclude.txt, with a reason. Packages
@@ -19,7 +19,7 @@ exclude_file="../ops/dst/determinism-exclude.txt"
 excluded="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' -e '/^$/d' "$exclude_file")"
 
 pkgs=()
-imports="$(go list ./core/... ./sim/...)"
+imports="$(go list ./core/... ./internal/... ./sim/...)"
 while IFS= read -r imp; do
   if printf '%s\n' "$excluded" | grep -qxF "$imp"; then
     continue

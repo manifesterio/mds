@@ -7,7 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/rng"
+	"github.com/manifesterio/mds/dst/core/actor/actortest"
 	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/faulty"
 	"github.com/manifesterio/mds/shared/objectstore"
@@ -31,7 +31,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 	h := servicetest.New(t, 5, "a", "b", "c")
 	e := NewObjectStore(ObjectStoreFaults{Faults: noisy()})
 	h.Objects = sim.AddService[core.ObjectCall, core.ObjectDone](h.Sys, e.Name(), e)
-	r := rng.New(99)
+	r := actortest.NewEnv(actortest.Config{Seed: 99, Stream: true})
 	for i := range 400 {
 		h.RunFor(ms)
 		k := string(rune('a' + r.Between(0, 5)))
@@ -61,7 +61,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	h := servicetest.New(t, 6, "a", "b", "c")
 	e := NewControlPlane(ControlPlaneFaults{Faults: noisy()})
 	h.ControlPlane = sim.AddService[core.ControlPlaneCall, core.ControlPlaneDone](h.Sys, e.Name(), e)
-	r := rng.New(77)
+	r := actortest.NewEnv(actortest.Config{Seed: 77, Stream: true})
 	nodes := []string{"a", "b", "c"}
 	tps := []core.TopicPartition{contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1)}
 	if e.CreateTopic(tps[0].Topic, 2) != core.OK {
