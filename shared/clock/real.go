@@ -10,9 +10,9 @@ package clock
 
 import (
 	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/runtime/live"
 	dstreal "github.com/manifesterio/mds/shared/clock/internal/realclock"
 	"github.com/manifesterio/mds/shared/clock/internal/sched"
-	"github.com/manifesterio/mds/dst/runtime/live"
 )
 
 // Real is the process clock.
