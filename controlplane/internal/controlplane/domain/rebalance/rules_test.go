@@ -172,7 +172,7 @@ func TestRebuildKeepsMembersAndExpiresSilent(t *testing.T) {
 	// Failover: the old machine loses the role, a new one takes over from the log.
 	h.check("losing the role", h.step(RoleChanged{Active: false}), []string(nil))
 	h.check("timers left", len(h.timers), 0)
-	h.m = New(Config{}, h.env, h.replica)
+	h.m = New(Config{}, h.env.Env, h.replica)
 	h.step(RoleChanged{Active: true})
 	h.check("rebuilt g", []any{h.phase("g"), h.group("g").generation, h.members("g")}, []any{stateStable, 2, []string{"m1", "m2"}})
 	h.check("rebuilt unsynced", []any{h.phase("unsynced"), h.members("unsynced")}, []any{stateJoining, []string{"m3"}})

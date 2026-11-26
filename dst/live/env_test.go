@@ -17,7 +17,7 @@ var (
 )
 
 func TestNewEnvBetweenAndChance(t *testing.T) {
-	e := live.NewEnv(actor.Incarnation{Name: "a"}, nil)
+	e := live.NewEnv(actor.Incarnation{Name: "a"})
 	if e.Self().Name != "a" {
 		t.Fatalf("Self = %+v", e.Self())
 	}
@@ -38,9 +38,9 @@ func TestNewEnvBetweenAndChance(t *testing.T) {
 	}
 }
 
-func TestNewLoggingEnvWires(t *testing.T) {
+func TestLogViolationsWires(t *testing.T) {
 	var buf bytes.Buffer
-	e := live.NewLoggingEnv(actor.Incarnation{Name: "broker"}, slog.New(slog.NewJSONHandler(&buf, nil)))
+	e := live.NewEnv(actor.Incarnation{Name: "broker"}, live.LogViolations(slog.New(slog.NewJSONHandler(&buf, nil))))
 	e.Always(false, envAlways, actor.Pair{Key: "k", Value: 7})
 	e.Unreachable(envUnreachable)
 	out := buf.String()
@@ -51,20 +51,18 @@ func TestNewLoggingEnvWires(t *testing.T) {
 	}
 }
 
-func TestNewCounterEnv(t *testing.T) {
-	e := live.NewCounterEnv(actor.Incarnation{Name: "replica"})
-	if e.Uint64() != 1 || e.Uint64() != 2 || e.Uint64() != 3 {
-		t.Fatal("Uint64 must count 1, 2, 3, ...")
+func TestOnViolationAndInertEnv(t *testing.T) {
+	var props, details []string
+	e := live.NewEnv(actor.Incarnation{}, live.OnViolation(func(p, d string) {
+		props, details = append(props, p), append(details, d)
+	}))
+	e.Always(true, envAlways)
+	e.Always(false, envAlways, actor.Pair{Key: "k", Value: 7})
+	e.Unreachable(envUnreachable)
+	if len(props) != 2 || props[0] != envAlways.Name() || props[1] != envUnreachable.Name() || details[0] != "[{k 7}]" {
+		t.Fatalf("violations %v %v", props, details)
 	}
-	if e.Intn(3) != 1 { // next draw is 4; 4%3 = 1
-		t.Fatal("Intn must use the counter")
-	}
-	e2 := live.NewCounterEnv(actor.Incarnation{})
-	if v := e2.Between(10, 12); v != 11 { // first draw 1 -> 1%3 = 1 -> 11
-		t.Fatalf("Between(10, 12) = %d, want 11", v)
-	}
-	if e2.Chance(0) || !live.NewCounterEnv(actor.Incarnation{}).Chance(1) {
-		t.Fatal("Chance edges")
-	}
-	e.Always(false, envAlways) // inert
+	quiet := live.NewEnv(actor.Incarnation{}) // no option: ignored
+	quiet.Always(false, envAlways)
+	quiet.Unreachable(envUnreachable)
 }

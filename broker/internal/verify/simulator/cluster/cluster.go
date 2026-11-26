@@ -124,7 +124,7 @@ func New(p Plan) *Cluster {
 
 // restart is the restart policy of a broker: every end (crash, trip or exit)
 // is followed by a boot after a delay in RecoveryDelay.
-func (c *Cluster) restart(_ actor.End, r actor.Rand) (actor.Duration, bool) {
+func (c *Cluster) restart(_ actor.End, r *actor.Rand) (actor.Duration, bool) {
 	d := c.plan.Settings.RecoveryDelay
 	return r.Duration(d[0], d[1]), true
 }

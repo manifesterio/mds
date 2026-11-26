@@ -101,12 +101,12 @@ func Run(cfg Config) sim.Result {
 }
 
 // swarm draws the knobs of one seed from the swarm stream of the seed.
-func swarm(r actor.Rand, s *Settings) {
+func swarm(r *actor.Rand, s *Settings) {
 	preset.Swarm(r, &s.Settings)
 	swarmBroker(r, s)
 }
 
-func swarmBroker(r actor.Rand, s *Settings) {
+func swarmBroker(r *actor.Rand, s *Settings) {
 	bc := s.Broker
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
 	window := func(menu ...int) actor.Duration { return actor.Duration(pick(menu...)) * actor.Millisecond }

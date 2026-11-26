@@ -799,7 +799,7 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 		}
 	}
 	other := startedHarness(t, DefaultConfig())
-	other.env.State = 8
+	other.env.Reseed(8)
 	oc := other.open(1)
 	other.produceOne(oc, e("t", 0, plain(t, "a")))
 	if other.puts[0] == a[0] {

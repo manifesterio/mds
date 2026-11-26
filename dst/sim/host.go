@@ -132,13 +132,13 @@ func (h *host[In, IO]) boot() {
 	if h.up || h.broken {
 		return
 	}
-	h.inc = env{sys: sys}.NewID()
+	h.inc = sys.rand.NewID()
 	h.control, h.data = nil, nil
 	h.resetIncarnation()
 	h.boots++
 	self := h.self()
 	var a actor.Actor[In, IO]
-	ok := sys.guard("New "+h.name, func() { a = h.props.New(env{sys: sys, self: self}) })
+	ok := sys.guard("New "+h.name, func() { a = h.props.New(sys.env(self)) })
 	if ok && a == nil {
 		sys.Fail(FailProtocol, "factory", h.name+": Props.New returned nil")
 	}
@@ -201,7 +201,7 @@ func (h *host[In, IO]) pump() {
 	if !h.receive(it.msg) || !h.up {
 		return
 	}
-	cost := max(h.cost.sample(sys.Env()), 0)
+	cost := max(h.cost.sample(sys.rand), 0)
 	h.busy = now + Time(cost)
 	if !h.empty() {
 		sys.ensureWake(&h.actorBase, h.busy)

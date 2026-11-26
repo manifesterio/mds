@@ -65,7 +65,7 @@ type sim struct {
 	scenario  Scenario
 	w         *dstsim.System // the actors, the queue and the hash
 	env       actor.Env      // the Env of the System: the random stream, buggify and assertions
-	rand      actor.Rand
+	rand      *actor.Rand
 	store     *storage
 	nodes     []*simNode
 	byName    map[string]*simNode // by actor name of the replica (cp-<idx>)
@@ -117,7 +117,7 @@ func newSim(cfg Config) (*sim, error) {
 		Seed: cfg.Seed, WallStart: actor.Wall(wallStart), MaxSteps: maxSteps + 1,
 		Log: cfg.Log, Tail: traceRing, HaltOnFirst: cfg.HaltOnFirst, VerifyHashes: cfg.verifyHashes,
 	})
-	s.rand = s.env
+	s.rand = s.env.Rand
 	s.store = newStorage(s)
 	s.oracle = newOracle(s)
 	s.clients = newClientPool(s, 3)

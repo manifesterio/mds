@@ -92,35 +92,26 @@ const (
 
 // RestartPolicy returns how long after an End the next boot starts, or
 // ok=false for no restart. It draws only from r.
-type RestartPolicy func(how End, r Rand) (after Duration, ok bool)
+type RestartPolicy func(how End, r *Rand) (after Duration, ok bool)
 
 // Env is the only way randomness, buggify and assertions reach an actor.
-// Time is not here: it comes with each Receive.
-type Env interface {
-	Rand
+// Time is not here: it comes with each Receive. Env is a small value: pass
+// it by value. Runtimes build it with NewEnv.
+type Env struct {
+	*Rand
 	Faults
 	Assertions
-	// Self is the incarnation this Env was made for.
-	Self() Incarnation
+	self Incarnation
 }
 
-// Rand is the seeded random stream of the run, as an actor sees it.
-type Rand interface {
-	Uint64() uint64
-	// Intn returns a value in [0, n). It returns 0, and draws nothing, when n <= 0.
-	Intn(n int) int
-	// Between returns a value in [lo, hi], both ends included. It returns lo,
-	// and draws nothing, when hi <= lo.
-	Between(lo, hi int64) int64
-	// Float64 returns a value in [0, 1).
-	Float64() float64
-	// Chance is true with probability p. It draws nothing when p <= 0.
-	Chance(p float64) bool
-	// Duration is Between for durations.
-	Duration(lo, hi Duration) Duration
-	// NewID draws two Uint64 values and puts them in the id, little-endian.
-	NewID() ID
+// NewEnv makes the Env of incarnation self over the run's random stream, fault
+// sites and assertions. The runtime calls it; products only receive an Env.
+func NewEnv(self Incarnation, r *Rand, f Faults, a Assertions) Env {
+	return Env{Rand: r, Faults: f, Assertions: a, self: self}
 }
+
+// Self is the incarnation this Env was made for.
+func (e Env) Self() Incarnation { return e.self }
 
 // Faults is buggify: faults the code injects on purpose at declared sites.
 type Faults interface {

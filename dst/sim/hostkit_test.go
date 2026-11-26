@@ -10,8 +10,8 @@ import (
 func TestBootstrapRecordFaultQuiesce(t *testing.T) {
 	t.Parallel()
 	sys, env := sim.Bootstrap(sim.Config{Seed: 1, End: sim.Time(2*actor.Second + 1)})
-	if env == nil {
-		t.Fatal("Bootstrap nil Env")
+	if env.Rand == nil {
+		t.Fatal("Bootstrap Env without a random stream")
 	}
 	sys.RecordFault("host_fault")
 	if len(sys.Timeline().Snapshot("sim_fault")) != 1 {

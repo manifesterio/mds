@@ -67,7 +67,7 @@ func AddService[Req, Rep actor.Payload](sys *System, name string, svc Service[Re
 		return actor.ServiceRef[Req, Rep]{}
 	}
 	h := &serviceHost[Req, Rep]{serviceBase: serviceBase{sys: sys, idx: len(sys.services), name: name}, svc: svc}
-	h.ctx = &ServiceCtx{env: env{sys: sys}, sys: sys, name: name, invalidate: h.invalidateHash}
+	h.ctx = &ServiceCtx{env: sys.env(actor.Incarnation{}), sys: sys, name: name, invalidate: h.invalidateHash}
 	sys.svcNames[name] = true
 	sys.services = append(sys.services, h)
 	return core.NewServiceRef[Req, Rep](core.ServiceID{Runtime: sys.owner, Slot: uint32(h.idx), Name: name})
@@ -174,7 +174,7 @@ func (sys *System) answerAt(source string, to responderTarget, d Time, answer ac
 // ServiceCtx is lent to Handle, OnCrash and Later steps. Env gives the run's
 // Rand, Faults and Assertions.
 type ServiceCtx struct {
-	env        env
+	env        actor.Env
 	sys        *System
 	name       string
 	invalidate func()

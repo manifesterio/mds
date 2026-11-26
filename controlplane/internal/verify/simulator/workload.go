@@ -23,7 +23,7 @@ func groupName(i int) string { return fmt.Sprintf("g%d", i) }
 // generation and leader that clients have seen, so that most group operations
 // are valid. A wrong guess is fine: the spec says what the right answer is.
 type workload struct {
-	rand    actor.Rand
+	rand    *actor.Rand
 	nextSeg int
 	nextMem int
 	nextOff int64

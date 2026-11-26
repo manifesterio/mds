@@ -6,56 +6,32 @@ import (
 	"github.com/manifesterio/mds/dst/actor"
 )
 
-// env is the actor.Env of a System: the run stream, buggify and assertions,
-// shared by every actor, service and rule of the run, plus the incarnation
-// it was made for (zero for host code and services).
-type env struct {
-	sys  *System
-	self actor.Incarnation
+// env is the actor.Env of self: the run stream, buggify and assertions,
+// shared by every actor, service and rule of the run. Self is zero for host
+// code and services.
+func (sys *System) env(self actor.Incarnation) actor.Env {
+	return actor.NewEnv(self, sys.rand, sys.faults, simAsserts{sys.asserts})
 }
 
-func (e env) Self() actor.Incarnation { return e.self }
+// simAsserts is the assertLog as actor.Assertions.
+type simAsserts struct{ l *assertLog }
 
-func (e env) Duration(lo, hi actor.Duration) actor.Duration {
-	return actor.Duration(e.sys.rand.Between(int64(lo), int64(hi)))
+func (a simAsserts) Always(c bool, p actor.Always, d ...actor.Pair) {
+	a.l.Always(c, assertProp(p.Name()), d...)
 }
 
-func (e env) Uint64() uint64              { return e.sys.rand.Uint64() }
-func (e env) Intn(n int) int              { return e.sys.rand.Intn(n) }
-func (e env) Between(lo, hi int64) int64  { return e.sys.rand.Between(lo, hi) }
-func (e env) Float64() float64            { return e.sys.rand.Float64() }
-func (e env) Chance(p float64) bool       { return e.sys.rand.Chance(p) }
-func (e env) Maybe(s actor.Site) bool     { return e.sys.faults.Maybe(s) }
-func (e env) Reachable(p actor.Reachable) { e.sys.asserts.Reachable(assertProp(p.Name())) }
-func (e env) Sometimes(c bool, p actor.Sometimes) {
-	e.sys.asserts.Sometimes(c, assertProp(p.Name()))
+func (a simAsserts) AlwaysOrUnreachable(c bool, p actor.AlwaysOrUnreachable, d ...actor.Pair) {
+	a.l.AlwaysOrUnreachable(c, assertProp(p.Name()), d...)
 }
 
-// NewID draws two Uint64 values and puts them in the id, little-endian.
-func (e env) NewID() actor.ID {
-	var id actor.ID
-	e.sys.rand.Bytes(id[:])
-	return id
+func (a simAsserts) Sometimes(c bool, p actor.Sometimes) {
+	a.l.Sometimes(c, assertProp(p.Name()))
 }
 
-func (e env) MaybeP(s actor.Site, p float64) bool {
-	return e.sys.faults.MaybeP(s, p)
-}
+func (a simAsserts) Reachable(p actor.Reachable) { a.l.Reachable(assertProp(p.Name())) }
 
-func (e env) Fault(s actor.Site, p float64) bool {
-	return e.sys.faults.Fault(s, p)
-}
-
-func (e env) Always(c bool, p actor.Always, d ...actor.Pair) {
-	e.sys.asserts.Always(c, assertProp(p.Name()), d...)
-}
-
-func (e env) AlwaysOrUnreachable(c bool, p actor.AlwaysOrUnreachable, d ...actor.Pair) {
-	e.sys.asserts.AlwaysOrUnreachable(c, assertProp(p.Name()), d...)
-}
-
-func (e env) Unreachable(p actor.Unreachable, d ...actor.Pair) {
-	e.sys.asserts.Unreachable(assertProp(p.Name()), d...)
+func (a simAsserts) Unreachable(p actor.Unreachable, d ...actor.Pair) {
+	a.l.Unreachable(assertProp(p.Name()), d...)
 }
 
 // logLine is one step line. The message is kept and turned into text only
@@ -92,5 +68,3 @@ func (sys *System) logMsg(text string, msg actor.Payload) {
 		sys.tail.add(l)
 	}
 }
-
-var _ actor.Env = env{}

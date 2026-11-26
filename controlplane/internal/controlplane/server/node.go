@@ -19,17 +19,13 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/live"
-	"github.com/manifesterio/mds/shared/clock"
 )
 
 // Config wires a Node.
 type Config struct {
 	Machine replica.Config
-	// Env is the replica's Env. Nil: a production Env in which no buggify
-	// site fires.
-	Env   runtime.Environment
-	Clock live.Clock
-	Log   executor.Log
+	Clock   live.Clock
+	Log     executor.Log
 	// Objects is the checkpoint store. Nil: in memory.
 	Objects executor.ObjectStore
 	// StopGrace is how long the actors get after Shutdown to exit.
@@ -79,7 +75,7 @@ type Node struct {
 // New builds a Node. Call Start then serve gRPC with Register.
 func New(config Config) *Node {
 	if config.Clock == nil {
-		config.Clock = clock.NewReal()
+		config.Clock = live.RealClock()
 	}
 	if config.Log == nil {
 		config.Log = executor.NewMemoryLog()
@@ -102,27 +98,13 @@ func New(config Config) *Node {
 // Health is the gRPC health server: SERVING once the replica is Ready.
 func (n *Node) Health() *health.Server { return n.health }
 
-// envFor gives the replica the configured Env and every other actor a
-// production Env with a random stream.
-func (n *Node) envFor(self actor.Incarnation) actor.Env {
-	if self.Name == replicaName && n.config.Env != nil {
-		return n.config.Env
-	}
-	if self.Name == replicaName {
-		return live.NewCounterEnv(self)
-	}
-	return live.NewEnv(self, nil)
-}
-
-const replicaName = "replica"
-
 // Start builds the Host, starts it, and waits until the replica is Ready.
 func (n *Node) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	n.cancel = cancel
 	ex := executor.New(runCtx, executor.Config{}, n.config.Log, n.config.Objects)
 	n.host = live.NewHost(live.HostConfig{
-		Clock: n.config.Clock, Env: n.envFor, Shutdown: n.shutdown, StopGrace: n.config.StopGrace,
+		Clock: n.config.Clock, Shutdown: n.shutdown, StopGrace: n.config.StopGrace,
 	})
 	n.replica = live.Spawn(n.host, replica.Props(n.config.Machine, n.m.Store), func(ctx *live.ExecCtx, io runtime.IO) error {
 		return runIO(ex, ctx, io)

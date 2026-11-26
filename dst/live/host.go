@@ -85,7 +85,7 @@ func NewHost(cfg HostConfig) *Host {
 		cfg.StopGrace = defaultStopGrace
 	}
 	if cfg.Env == nil {
-		cfg.Env = func(self actor.Incarnation) actor.Env { return NewEnv(self, nil) }
+		cfg.Env = func(self actor.Incarnation) actor.Env { return NewEnv(self) }
 	}
 	return &Host{
 		cfg: cfg, owner: core.NewOwner(), names: map[string]bool{},

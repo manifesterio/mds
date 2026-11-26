@@ -223,7 +223,7 @@ func (s *Service[Req, Rep, Op, Res]) EnterRecovery() { s.recovery = true }
 
 // between returns a value in [lo, hi). It draws once when hi > lo, even when
 // there is only one value, and never when hi <= lo.
-func between(r actor.Rand, lo, hi int64) int64 {
+func between(r *actor.Rand, lo, hi int64) int64 {
 	if hi <= lo {
 		return lo
 	}
@@ -235,7 +235,7 @@ func between(r actor.Rand, lo, hi int64) int64 {
 // records the fault that wins. A refusal beats a timeout, and a timeout beats a
 // lost reply.
 func (s *Service[Req, Rep, Op, Res]) draw(ctx *sim.ServiceCtx, request actor.Field) kind {
-	r, now, f, pre, a := ctx.Env(), ctx.Now(), s.faults, s.shape.Prefix, s.shape.Asserts
+	r, now, f, pre, a := ctx.Env().Rand, ctx.Now(), s.faults, s.shape.Prefix, s.shape.Asserts
 	if now >= s.until && r.Chance(f.Outage.Prob) {
 		d := f.Outage.Dur[0]
 		if f.Outage.Dur[1] > d {
@@ -283,8 +283,8 @@ func (s *Service[Req, Rep, Op, Res]) Handle(ctx *sim.ServiceCtx, req Req, reply 
 	if !s.recovery {
 		k = s.draw(ctx, request)
 	}
-	t1 := now + actor.Mono(f.ApplyLatency.Sample(r))
-	t2 := t1 + actor.Mono(f.RespondLatency.Sample(r))
+	t1 := now + actor.Mono(f.ApplyLatency.Sample(r.Rand))
+	t2 := t1 + actor.Mono(f.RespondLatency.Sample(r.Rand))
 	var flag bool
 	var bits uint64
 	if c := s.shape.Corrupt; !s.recovery && c != nil && c.Targets(op) && r.Chance(c.Prob) {

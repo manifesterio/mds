@@ -55,7 +55,7 @@ func newNode(s *sim, idx int, cfg replica.Config) *simNode {
 // restartAfterTrip boots a replica that tripped (its memory is not trusted)
 // again after a random time. A replica that crashed or exited stays down
 // until the host boots it.
-func restartAfterTrip(how actor.End, r actor.Rand) (actor.Duration, bool) {
+func restartAfterTrip(how actor.End, r *actor.Rand) (actor.Duration, bool) {
 	if how != actor.Trip {
 		return 0, false
 	}

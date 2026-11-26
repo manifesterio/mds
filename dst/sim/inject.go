@@ -5,7 +5,6 @@ package sim
 
 import (
 	"github.com/manifesterio/mds/dst/actor"
-	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
 // SiteCount is what happened at one site during a run.
@@ -29,14 +28,14 @@ const (
 // Invariant: Maybe and MaybeP latch per-site activation once per injector lifetime (one run).
 // Invariant: Fault sites are always On and never latch. They are counted like the others.
 type injector struct {
-	rand  *rng.Rand
+	rand  *actor.Rand
 	quiet bool
 	sites map[string]*SiteCount
 	order []string // site names in first-seen order, so Sites never ranges over the map
 }
 
 // newInjector returns an injector that draws from r.
-func newInjector(r *rng.Rand) *injector {
+func newInjector(r *actor.Rand) *injector {
 	return &injector{rand: r, sites: map[string]*SiteCount{}}
 }
 

@@ -91,7 +91,7 @@ func newHarness(t testT, config Config) *harness {
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
-	h.b = New(config)(h.env)
+	h.b = New(config)(h.env.Env)
 	return h
 }
 

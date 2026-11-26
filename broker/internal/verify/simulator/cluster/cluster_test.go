@@ -89,7 +89,7 @@ func TestRestartDelayIsInRecoveryDelay(t *testing.T) {
 	c := New(quickPlan(1))
 	r := sim.NewSystem(sim.Config{Seed: 9}).Env()
 	for range 200 {
-		d, ok := c.restart(actor.Crash, r)
+		d, ok := c.restart(actor.Crash, r.Rand)
 		if !ok || d < 100*actor.Millisecond || d > 200*actor.Millisecond {
 			t.Fatalf("restart delay %v ok=%v", d, ok)
 		}

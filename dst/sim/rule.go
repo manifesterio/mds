@@ -30,7 +30,7 @@ func (v view) Step() uint64             { return v.sys.steps }
 func (v view) Now() Time                { return v.sys.q.now }
 func (v view) Phase() Phase             { return v.sys.phase }
 func (v view) Timeline() *Timeline      { return v.sys.tl }
-func (v view) Assert() actor.Assertions { return env{sys: v.sys} }
+func (v view) Assert() actor.Assertions { return simAsserts{v.sys.asserts} }
 
 // FaultCoverage names the Sometimes handles that FaultCoverageRule records.
 type FaultCoverage struct {

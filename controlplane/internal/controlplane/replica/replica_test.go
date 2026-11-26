@@ -27,7 +27,7 @@ func newHarness(t *testing.T, config replica.Config) *harness {
 	t.Helper()
 	env := actortest.NewEnv(actortest.Config{Self: actor.Incarnation{Name: "replica"}, Counter: true})
 	return &harness{
-		t: t, m: replica.New(config)(env), env: env,
+		t: t, m: replica.New(config)(env.Env), env: env,
 		book: &actortest.Book{
 			Timers: map[actor.TimerKey]actortest.Record{},
 			Asked:  map[uint64]actortest.Record{},

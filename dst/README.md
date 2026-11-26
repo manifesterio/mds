@@ -21,7 +21,7 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | Package | Role |
 |---|---|
 | `actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Also the typed assertion handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable, `Pair`, `AssertKind`) and the declared buggify sites (`Site`, `NewSite`, `NewFaultSite`). Product actor code imports this package. Its types are aliases of `internal/core`, which holds the runtime seam for `sim` and `live`. |
-| `actor/actortest` | A fake `Env` and step helpers for unit tests of actors |
+| `actor/actortest` | A test `Env` and step helpers for unit tests of actors |
 | `trace` | Running FNV-1a `Hash` |
 | `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. Its `Result` carries `Coverage` and `SiteCount`. |
 | `live` | The production runtime for the same actors: a `Host` with one goroutine per actor, Control before Data inboxes, real keyed timers, an exec function per actor for product IO, and `Ask` / `Tell` / `OnLoop` for callers outside the actors. Real time and goroutines: it is not in the determinism gate. |
@@ -29,7 +29,7 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun`; also fixed seed-to-hash asserts (`AssertHash`, `AssertCampaign`) and golden file `LoadHashes` / `SaveHashes` |
 | `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
-The run stream (SplitMix64) is internal (`internal/rng`): code draws through `actor.Rand` (the Env), and host setup before a `System` exists uses `sim.DeriveRand(seed, label)`.
+`actor.Env` is a struct (`*Rand`, `Faults`, `Assertions`, `Self()`) built by the runtime with `actor.NewEnv`; pass it by value. `actor.Rand` is the one implementation of every draw (`Intn`, `Between`, `Float64`, `Chance`, `NewID`) over any `actor.Source`. The simulator's source is the internal SplitMix64 stream (`internal/rng`); host setup before a `System` exists uses `sim.DeriveRand(seed, label)`.
 The catalog of declared properties and sites (`internal/catalog`), the environment parser (`internal/seedenv`), the assertion log and the buggify injector (per-site latch and Quiet, inside `sim`) are internal too: code records and asks through the Env, and a harness reads coverage with `System.Coverage`.
 
 ## How to write an actor
@@ -180,7 +180,8 @@ go test ./campaign ./spectest ./...
 ## Host layer ownership
 
 Product simulators and production Envs should call dst for shared host glue rather
-than re-owning it: `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv`;
+than re-owning it: `live.NewEnv(self, opts...)` (one production Env; `OnViolation` or
+`LogViolations` choose what a broken assertion does), `live.RealClock` / `live.FakeClock`;
 `sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`, `EveryWhile`,
 `Timeline.PhaseStart`, `FaultCoverageRule`, `DrawBetween` / `MaybeAdd`;
 `campaign.Outcome` / `SetupFailure`;

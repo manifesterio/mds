@@ -166,7 +166,7 @@ func TestReplyToCrashedAskerDropped(t *testing.T) {
 				func(a answer) msg { return got(a) })
 		}
 	})
-	pa.Restart = func(actor.End, actor.Rand) (actor.Duration, bool) { return ms, true }
+	pa.Restart = func(actor.End, *actor.Rand) (actor.Duration, bool) { return ms, true }
 	a := sim.Spawn(w.sys, pa)
 	b = w.spawn("b", func(_ *scripted, _ actor.Now, m msg, o *outbox) {
 		switch m := m.(type) {
@@ -323,7 +323,7 @@ func TestStopDropsEverything(t *testing.T) {
 			o.Stop(actor.Trip, "test")
 		}
 	})
-	p.Restart = func(how actor.End, _ actor.Rand) (actor.Duration, bool) { return 2 * ms, how == actor.Trip }
+	p.Restart = func(how actor.End, _ *actor.Rand) (actor.Duration, bool) { return 2 * ms, how == actor.Trip }
 	sim.Spawn(w.sys, p, sim.WithExecutor(executor))
 	r := w.sys.Run()
 	mustOK(t, r)
@@ -418,7 +418,7 @@ func TestPerformAnswerScoped(t *testing.T) {
 			o.Stop(actor.Trip, "test")
 		}
 	})
-	p.Restart = func(actor.End, actor.Rand) (actor.Duration, bool) { return ms, true }
+	p.Restart = func(actor.End, *actor.Rand) (actor.Duration, bool) { return ms, true }
 	sim.Spawn(w.sys, p, sim.WithExecutor(executor))
 	mustOK(t, w.sys.Run())
 	for _, l := range w.lines("a") {

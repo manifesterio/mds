@@ -94,8 +94,8 @@
 //     logic: it imports none of domain, metadb or engine.
 //
 // Time: all time comes from one interface, machine.Clock, or from the step
-// context of a dst process. shared/clock has the production
-// clock (Real) and the test clock (Fake). The domain and server packages may not call
+// context of a dst process. dst/live has the production clock (RealClock) and
+// the test clock (FakeClock). The domain and server packages may not call
 // time.Now, time.AfterFunc and the like.
 // The import rules are checked by architecture_test.go in this folder. The
 // deterministic packages are checked by ops/tools/determinismcheck

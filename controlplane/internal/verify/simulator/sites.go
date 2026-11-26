@@ -25,7 +25,7 @@ var (
 // slowAnswer is the extra delay of the reply to call: zero, or (when the site
 // for the log or the object store fires) the same range as the Slow fault. The
 // call has taken effect already, so this only moves the reply later.
-func (st *storage) slowAnswer(r actor.Rand, call runtime.IO) actor.Duration {
+func (st *storage) slowAnswer(r *actor.Rand, call runtime.IO) actor.Duration {
 	site := SiteObjectsSlowAnswer
 	if isLogCall(call) {
 		site = SiteLogSlowAnswer

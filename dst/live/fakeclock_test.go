@@ -1,18 +1,20 @@
-package clock
+package live_test
 
 import (
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/live"
 )
 
-func TestTimersFireInTimeOrderOnAdvance(t *testing.T) {
-	c := NewFake(time.Unix(1000, 0))
+func TestFakeClockTimersFireInTimeOrderOnAdvance(t *testing.T) {
+	c := live.NewFakeClock(time.Unix(1000, 0))
 	var order []string
 	c.AfterFunc(actor.Duration(3*time.Second), func() { order = append(order, "c") })
-	c.AfterFunc(actor.Duration(1*time.Second), func() {
+	c.AfterFunc(actor.Duration(time.Second), func() {
 		order = append(order, "a")
 		// a timer started by a timer fires in the same Advance if it is due
 		c.AfterFunc(actor.Duration(time.Second), func() { order = append(order, "b") })
@@ -30,12 +32,15 @@ func TestTimersFireInTimeOrderOnAdvance(t *testing.T) {
 	}
 }
 
-func TestStopAndTimeMoves(t *testing.T) {
-	c := NewFake(time.Unix(1000, 0))
+func TestFakeClockStopAndTimeMoves(t *testing.T) {
+	c := live.NewFakeClock(time.Unix(1000, 0))
 	mono, wall := c.Mono(), c.Wall()
+	if mono != actor.Mono(time.Second) || wall != actor.Wall(time.Unix(1000, 0).UnixNano()) {
+		t.Fatalf("start mono %d wall %d", mono, wall)
+	}
 	tm := c.AfterFunc(actor.Duration(time.Second), func() { t.Error("a stopped timer fired") })
-	if !tm.Stop() || tm.Stop() {
-		t.Fatal("Stop must report true once")
+	if !tm.Stop() || tm.Stop() || c.Pending() != 0 {
+		t.Fatal("Stop must report true once and drop the pending count")
 	}
 	fired := c.AfterFunc(1, func() {})
 	c.Advance(time.Minute)
@@ -44,5 +49,25 @@ func TestStopAndTimeMoves(t *testing.T) {
 	}
 	if c.Mono()-mono != actor.Mono(time.Minute) || c.Wall()-wall != actor.Wall(time.Minute) {
 		t.Fatalf("mono moved %d, wall moved %d", c.Mono()-mono, c.Wall()-wall)
+	}
+}
+
+func TestFakeClockSafeFromManyGoroutines(t *testing.T) {
+	c := live.NewFakeClock(time.Unix(0, 0))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	n := 0
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
+				c.AfterFunc(3, func() { mu.Lock(); n++; mu.Unlock() })
+				_ = c.Mono()
+			}
+		})
+	}
+	wg.Wait()
+	c.Advance(5)
+	if n != 800 || c.Pending() != 0 {
+		t.Fatalf("fired %d pending %d", n, c.Pending())
 	}
 }

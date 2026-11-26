@@ -75,7 +75,7 @@ func newStorage(s *sim) *storage {
 	}
 }
 
-func (st *storage) netDelay(r actor.Rand) actor.Duration {
+func (st *storage) netDelay(r *actor.Rand) actor.Duration {
 	return dstsim.DrawBetween(r, netMin, netMax) + dstsim.MaybeAdd(r, st.s.faults.Slow, slowMin, slowMax)
 }
 
@@ -104,7 +104,7 @@ func isLogCall(call runtime.IO) bool {
 	return log
 }
 
-func (st *storage) decide(r actor.Rand, call runtime.IO) callMode {
+func (st *storage) decide(r *actor.Rand, call runtime.IO) callMode {
 	f := st.s.faults
 	if st.s.quiet {
 		return callOK

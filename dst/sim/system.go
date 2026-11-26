@@ -101,7 +101,8 @@ func (r Result) OK() bool { return len(r.Failures) == 0 }
 // It is not safe for concurrent use. Use one System per run.
 type System struct {
 	cfg     Config
-	rand    *rng.Rand
+	src     *rng.Rand // the run stream source; Calls counts its draws
+	rand    *actor.Rand
 	q       *queue
 	faults  *injector
 	asserts *assertLog
@@ -143,9 +144,11 @@ func NewSystem(cfg Config) *System {
 	if cfg.MaxSteps == 0 {
 		cfg.MaxSteps = defaultMaxSteps
 	}
+	src := rng.New(cfg.Seed)
 	sys := &System{
 		cfg:       cfg,
-		rand:      rng.New(cfg.Seed),
+		src:       src,
+		rand:      actor.NewRand(src),
 		hash:      trace.New(),
 		tl:        NewTimeline(),
 		owner:     core.NewOwner(),
@@ -154,7 +157,7 @@ func NewSystem(cfg Config) *System {
 		pairLanes: map[laneKey2]laneID{},
 		outside:   map[uint64]*outsideAsk{},
 	}
-	sys.q = newQueue(sys.rand)
+	sys.q = newQueue(sys.src)
 	sys.faults = newInjector(sys.rand)
 	sys.asserts = newAssertLog(func(property, detail string) { sys.Fail(FailViolation, property, detail) })
 	sys.asserts.SetStepCounter(sys.Steps)
@@ -174,11 +177,11 @@ func (sys *System) wall() actor.Wall { return sys.cfg.WallStart + actor.Wall(sys
 func (sys *System) Steps() uint64 { return sys.steps }
 
 // Draws is the number of draws from the run stream so far.
-func (sys *System) Draws() uint64 { return sys.rand.Calls() }
+func (sys *System) Draws() uint64 { return sys.src.Calls() }
 
 // Env is the run's Rand, Faults and Assertions for host code. Its Self is
 // the zero Incarnation.
-func (sys *System) Env() actor.Env { return env{sys: sys} }
+func (sys *System) Env() actor.Env { return sys.env(actor.Incarnation{}) }
 
 // Coverage returns a copy of the per-property stats so far.
 func (sys *System) Coverage() map[string]Coverage { return sys.asserts.Coverage() }
@@ -286,7 +289,7 @@ func EveryWhile(sys *System, mean actor.Duration, still func() bool, fn func()) 
 	if mean <= 0 {
 		return
 	}
-	gap := func() actor.Duration { return DrawBetween(sys.Env(), mean/2, mean*3/2) }
+	gap := func() actor.Duration { return DrawBetween(sys.rand, mean/2, mean*3/2) }
 	var tick func()
 	tick = func() {
 		if still != nil && !still() {
@@ -378,7 +381,7 @@ func (sys *System) Finish() Result {
 		}
 	}
 	res := Result{
-		Seed: sys.cfg.Seed, Steps: sys.steps, RandCalls: sys.rand.Calls(), Hash: sys.hash.Sum(),
+		Seed: sys.cfg.Seed, Steps: sys.steps, RandCalls: sys.src.Calls(), Hash: sys.hash.Sum(),
 		Crashes: sys.crashes, Trips: sys.trips, Exits: sys.exits,
 		Failures: append([]Failure(nil), sys.failures...),
 		Coverage: sys.asserts.Coverage(),

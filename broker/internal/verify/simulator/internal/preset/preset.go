@@ -78,7 +78,7 @@ var (
 )
 
 // Swarm draws the shared fault knobs from r.
-func Swarm(r actor.Rand, s *cluster.Settings) {
+func Swarm(r *actor.Rand, s *cluster.Settings) {
 	menu := [...]float64{0.5, 1, 2, 4}
 	knob := func(p *float64) {
 		if r.Chance(0.4) {

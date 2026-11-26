@@ -129,7 +129,7 @@ func (sys *System) end(s slot, how actor.End, cause string) {
 	}
 	var after actor.Duration
 	var again bool
-	if !sys.guard("Restart "+b.name, func() { after, again = b.restart(how, env{sys: sys}) }) {
+	if !sys.guard("Restart "+b.name, func() { after, again = b.restart(how, sys.rand) }) {
 		sys.halted = true
 		return
 	}

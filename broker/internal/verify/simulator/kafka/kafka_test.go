@@ -271,37 +271,10 @@ func TestCampaignIsNotVacuous(t *testing.T) {
 	}
 }
 
-// fakeEnv is the minimum Environment for driving the workload by hand.
-type fakeEnv struct{ n uint64 }
-
-func (e *fakeEnv) Uint64() uint64 { e.n++; return e.n }
-func (e *fakeEnv) Intn(n int) int { e.n++; return int(e.n % uint64(n)) }
-func (e *fakeEnv) NewID() actor.ID {
-	e.n++
-	var id actor.ID
-	id[0], id[1] = byte(e.n), byte(e.n>>8)
-	return id
+// testEnv is a seeded Env for driving the workload by hand.
+func testEnv(seed uint64) actor.Env {
+	return actortest.NewEnv(actortest.Config{Self: actor.Incarnation{Name: "w"}, Seed: seed}).Env
 }
-func (e *fakeEnv) Between(lo, hi int64) int64 {
-	if hi <= lo {
-		return lo
-	}
-	return lo + int64(e.Intn(int(hi-lo+1)))
-}
-func (e *fakeEnv) Duration(lo, hi actor.Duration) actor.Duration {
-	return actor.Duration(e.Between(int64(lo), int64(hi)))
-}
-func (e *fakeEnv) Float64() float64                                                 { return float64(e.Uint64()>>11) / (1 << 53) }
-func (*fakeEnv) Chance(float64) bool                                                { return false }
-func (*fakeEnv) Self() actor.Incarnation                                            { return actor.Incarnation{Name: "w"} }
-func (*fakeEnv) Maybe(actor.Site) bool                                              { return false }
-func (*fakeEnv) MaybeP(actor.Site, float64) bool                                    { return false }
-func (*fakeEnv) Fault(actor.Site, float64) bool                                     { return false }
-func (*fakeEnv) Always(bool, actor.Always, ...actor.Pair)                           {}
-func (*fakeEnv) AlwaysOrUnreachable(bool, actor.AlwaysOrUnreachable, ...actor.Pair) {}
-func (*fakeEnv) Sometimes(bool, actor.Sometimes)                                    {}
-func (*fakeEnv) Reachable(actor.Reachable)                                          {}
-func (*fakeEnv) Unreachable(actor.Unreachable, ...actor.Pair)                       {}
 
 // newTestHistory is a history for a workload that is driven by hand.
 func newTestHistory() *History {
@@ -314,7 +287,7 @@ func newTestHistory() *History {
 func TestFatalProduceErrorGivesUp(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
 		h := newTestHistory()
-		c := newTestClient(&fakeEnv{}, h)
+		c := newTestClient(testEnv(1), h)
 		c.newBatches()
 		if len(h.Ops()) == 0 || len(c.p.cur) != len(h.Ops()) {
 			t.Fatalf("no batches built: %d ops", len(h.Ops()))
@@ -367,7 +340,7 @@ func produceResp(c *client, code int16) *kmsg.ProduceResponse {
 func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
 		h := newTestHistory()
-		c := newTestClient(&fakeEnv{}, h)
+		c := newTestClient(testEnv(1), h)
 		c.newBatches()
 		for _, b := range c.p.cur {
 			b.ambiguous, b.idem = ambiguous, true
@@ -385,23 +358,9 @@ func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 	}
 }
 
-// rngEnv is a fakeEnv whose Intn is a seeded xorshift, for tests that need
-// rare events (1 in 40) to occur at unaligned draws.
-type rngEnv struct {
-	fakeEnv
-	x uint64
-}
-
-func (e *rngEnv) Intn(n int) int {
-	e.x ^= e.x << 13
-	e.x ^= e.x >> 7
-	e.x ^= e.x << 17
-	return int(e.x % uint64(n))
-}
-
 // Only the batches built with idem set carry a producer id on the wire.
 func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
-	c := newTestClient(&rngEnv{x: 88172645463325252}, newTestHistory())
+	c := newTestClient(testEnv(88172645463325252), newTestHistory())
 	idem, plain := 0, 0
 	for range 400 {
 		c.p.cur = nil
@@ -538,7 +497,7 @@ func (i *widestRule) AtEnd(sim.View) {
 // broker but decodable by the simulated consumer), plus damaged batches.
 func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 	h := newTestHistory()
-	c := newTestClient(&rngEnv{x: 88172645463325252}, h)
+	c := newTestClient(testEnv(88172645463325252), h)
 	seen := map[int]int{}
 	corrupt := 0
 	for range 400 {
@@ -582,7 +541,7 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 // code for a good batch stays fatal.
 func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
 	h := newTestHistory()
-	c := newTestClient(&fakeEnv{}, h)
+	c := newTestClient(testEnv(1), h)
 	c.newBatches()
 	for _, b := range c.p.cur {
 		b.idem, b.corrupt = false, true

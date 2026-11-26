@@ -117,7 +117,7 @@ func newBareHarness(t *testing.T, cfg Config, faults actor.Faults) *harness {
 		Self: actor.Incarnation{Name: "rebalance"}, Seed: seed, Stream: true, Faults: faults,
 	})
 	replica := actortest.Ref[runtime.EventData]("replica")
-	h := &harness{t: t, m: New(cfg, env, replica), replica: replica, env: env, log: spec.New(), watched: map[actor.ReplyID]Input{}}
+	h := &harness{t: t, m: New(cfg, env.Env, replica), replica: replica, env: env, log: spec.New(), watched: map[actor.ReplyID]Input{}}
 	shadow := actortest.NewEnv(actortest.Config{Seed: seed, Stream: true})
 	for range 64 {
 		h.suffix = append(h.suffix, newMemberID("", shadow.NewID()))
