@@ -105,7 +105,6 @@ func (h *host[In, IO]) arrive(msg actor.Payload, inc actor.ID, toInc bool, n uin
 		sys.Fail(FailProtocol, "wrong_message_type", fmt.Sprintf("%s: got %T, which is not its message type", h.name, msg))
 		return
 	}
-	sys.counters[countDeliveries]++
 	sys.logMsg("deliver "+h.name+" <-", msg)
 	if h.push(item[In]{msg: m, n: n}) {
 		h.pump()
@@ -152,7 +151,6 @@ func (h *host[In, IO]) boot() {
 	h.a, h.up = a, true
 	h.invalidateHash()
 	if h.boots > 1 {
-		sys.counters[countRestarts]++
 		sys.systemFact("sim_restarted", actor.Field{Key: "node", Value: actor.StringValue(h.name)})
 	}
 	if h.props.Boot != nil {
@@ -192,7 +190,6 @@ func (h *host[In, IO]) pump() {
 	if !ok {
 		return
 	}
-	sys.counters[countNodeSteps]++
 	if h.received == 0 && h.props.Boot != nil && !it.boot {
 		sys.Fail(FailProtocol, "boot_first", h.name+": the first Receive did not take the boot message")
 	}

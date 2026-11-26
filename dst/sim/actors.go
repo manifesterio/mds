@@ -123,7 +123,6 @@ func (b *actorBase) cancelKey(key actor.TimerKey) {
 	if n, ok := b.keyed[key]; ok {
 		delete(b.owned, n)
 		delete(b.keyed, key)
-		b.sys.counters[countTimersCancelled]++
 	}
 }
 
@@ -184,11 +183,9 @@ func (sys *System) ensureWake(b *actorBase, at Time) {
 	e := &entry{at: at, lane: nodeLane(b.idx, 1), kind: kindDeliver, node: b.idx, inc: inc, body: wakeBody{}}
 	e.run = func() {
 		if !b.alive(inc) {
-			sys.counters[countDroppedStale]++
 			return
 		}
 		b.wakePending = false
-		sys.counters[countWakes]++
 		sys.logMsg("wake "+b.name, nil)
 		sys.actors[b.idx].pump()
 	}
@@ -202,7 +199,6 @@ func nodeLane(idx int, k uint64) Lane {
 
 // dropped counts a delivery that was dropped and folds why.
 func (sys *System) dropped(reason uint64, target string) {
-	sys.counters[countDroppedStale]++
 	sys.hash.Uint64(tagDropped)
 	sys.hash.Uint64(reason)
 	sys.hash.String(target)

@@ -187,7 +187,6 @@ func (c *ServiceCtx) Later(d actor.Duration, fn func(ctx *ServiceCtx)) {
 	sys := c.sys
 	e := &entry{at: sys.q.now + Time(max(d, 0)), lane: NoLane, kind: kindServiceStep, node: -1, service: c.b.name}
 	e.run = func() {
-		sys.counters[countServiceSteps]++
 		sys.logMsg("service "+c.b.name+" later", nil)
 		c.b.invalidateHash()
 		if !sys.guard("Later "+c.b.name, func() { fn(c) }) {

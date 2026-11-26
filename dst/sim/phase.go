@@ -73,7 +73,6 @@ func QuietElapsed(waited, min, max actor.Duration, ready bool) bool {
 func (sys *System) queuePhase(at Time, to Phase) {
 	e := &entry{at: at, lane: hostLane, kind: kindPhase, node: -1, body: phaseBody{to}}
 	e.run = func() {
-		sys.counters[countKernelSteps]++
 		sys.SetPhase(to)
 	}
 	sys.q.add(e)

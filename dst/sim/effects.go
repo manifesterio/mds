@@ -68,7 +68,6 @@ func (h *host[In, IO]) applyOne(e actor.Effect) {
 // replaces the live timer of its key.
 func (h *host[In, IO]) startTimer(e actor.Effect) {
 	sys := h.sys
-	sys.counters[countTimersSet]++
 	n := h.nextNumber()
 	o := owned{scope: e.Scope, timer: true}
 	if e.Kind == actor.EffectStartTimer {

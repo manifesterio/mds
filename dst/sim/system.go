@@ -78,12 +78,6 @@ type Failure struct {
 	Repeats  int
 }
 
-// counter is one run statistic.
-type counter struct {
-	name string
-	n    uint64
-}
-
 // LogEntry is one step line. Its text is never hashed.
 type LogEntry struct {
 	Step uint64
@@ -95,7 +89,6 @@ type LogEntry struct {
 type Result struct {
 	Seed, Steps, RandCalls, Hash uint64
 	Crashes, Trips, Exits        int
-	stats                        []counter
 	Failures                     []Failure
 	Coverage                     map[string]assert.Coverage
 	Sites                        map[string]fault.SiteCount
@@ -105,42 +98,6 @@ type Result struct {
 
 // OK reports a run without failures.
 func (r Result) OK() bool { return len(r.Failures) == 0 }
-
-// Counter indexes. Their names and order are part of the Result.
-const (
-	countNodeSteps = iota
-	countServiceSteps
-	countKernelSteps
-	countDeliveries
-	countDroppedStale
-	countDroppedByCrash
-	countTimersSet
-	countTimersCancelled
-	countFaults
-	countWakes
-	countRestarts
-	countGracefulStops
-	countDeadlineKills
-	counterCount
-)
-
-func counterNames() [counterCount]string {
-	return [counterCount]string{
-		countNodeSteps:       "node_steps",
-		countServiceSteps:    "engine_steps",
-		countKernelSteps:     "sim_steps",
-		countDeliveries:      "deliveries",
-		countDroppedStale:    "dropped_stale",
-		countDroppedByCrash:  "dropped_by_crash",
-		countTimersSet:       "timers_set",
-		countTimersCancelled: "timers_cancelled",
-		countFaults:          "faults",
-		countWakes:           "wakes",
-		countRestarts:        "restarts",
-		countGracefulStops:   "graceful_stops",
-		countDeadlineKills:   "deadline_kills",
-	}
-}
 
 // System is one simulation run: one seed, one random stream, one event queue,
 // the actors, the services and the rules.
@@ -178,7 +135,6 @@ type System struct {
 	finished bool
 	result   Result
 
-	counters              [counterCount]uint64
 	crashes, trips, exits int
 	failures              []Failure
 	lines                 []logLine
@@ -246,7 +202,6 @@ func (sys *System) Fact(f actor.Fact) { sys.appendFact(actor.Incarnation{}, f) }
 // kind, then the extra fields (service name is optional; pass a "service"
 // field when the fault has one). ServiceCtx.RecordFault adds the service name.
 func (sys *System) RecordFault(kind string, fields ...actor.Field) {
-	sys.counters[countFaults]++
 	all := append([]actor.Field{
 		{Key: "kind", Value: actor.StringValue(kind)},
 	}, fields...)
@@ -293,7 +248,6 @@ func (sys *System) Fail(kind FailKind, property, detail string) {
 func (sys *System) At(t Time, lane Lane, fn func()) EntryID {
 	e := &entry{at: t, lane: lane, kind: kindHost, node: -1}
 	e.run = func() {
-		sys.counters[countKernelSteps]++
 		if !sys.guard("host task", fn) {
 			sys.halted = true
 		}
@@ -426,9 +380,6 @@ func (sys *System) Finish() Result {
 		Failures: append([]Failure(nil), sys.failures...),
 		Coverage: sys.asserts.Coverage(),
 		Sites:    sys.faults.Sites(),
-	}
-	for i, name := range counterNames() {
-		res.stats = append(res.stats, counter{name: name, n: sys.counters[i]})
 	}
 	for _, l := range sys.lines {
 		res.Log = append(res.Log, l.entry())

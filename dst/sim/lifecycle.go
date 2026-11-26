@@ -109,7 +109,7 @@ func (sys *System) end(s slot, how actor.End, cause string) {
 	who := b.self()
 	idx, inc := b.idx, b.inc
 	b.up, b.stopping, b.paused, b.lastEnd = false, false, false, how
-	sys.counters[countDroppedByCrash] += uint64(sys.q.dropIncarnation(idx, inc))
+	sys.q.dropIncarnation(idx, inc)
 	name := sys.countEnd(how)
 	sys.logMsg(fmt.Sprintf("%s %s (%s)", name, b.name, cause), nil)
 	sys.systemFact(name, actor.Field{Key: "node", Value: actor.StringValue(b.name)},
@@ -155,7 +155,6 @@ func (sys *System) queueBoot(s slot, at Time) {
 	b := s.base()
 	e := &entry{at: at, lane: hostLane, kind: kindRestart, node: b.idx}
 	e.run = func() {
-		sys.counters[countKernelSteps]++
 		s.boot()
 	}
 	sys.q.add(e)
@@ -169,16 +168,11 @@ func (sys *System) stop(s slot, grace actor.Duration) {
 		return
 	}
 	b.stopping = true
-	sys.counters[countGracefulStops]++
 	inc := b.inc
 	e := &entry{at: deadline, lane: hostLane, kind: kindCrash, node: b.idx, inc: inc}
 	e.run = func() {
-		sys.counters[countKernelSteps]++
 		if !b.alive(inc) {
 			return
-		}
-		if b.stopping {
-			sys.counters[countDeadlineKills]++
 		}
 		sys.end(s, actor.Crash, "stop deadline")
 	}
