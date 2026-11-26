@@ -70,10 +70,10 @@ type harness struct {
 	holdPut bool
 	held    []core.EventData
 
-	number  uint64                        // last pending number handed out
-	queue   []core.EventData              // adapted answers not yet received
+	number  uint64                          // last pending number handed out
+	queue   []core.EventData                // adapted answers not yet received
 	timers  map[actor.TimerKey]actor.Effect // mirror of book.Timers for tests
-	due     map[actor.TimerKey]actor.Mono // when each armed timer is due (fireNext)
+	due     map[actor.TimerKey]actor.Mono   // when each armed timer is due (fireNext)
 	clients map[core.ConnID]*client
 	all     []actor.Effect // every effect recorded, in order
 	paused  map[core.ConnID]bool

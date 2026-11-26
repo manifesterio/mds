@@ -11,7 +11,6 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
-	"github.com/manifesterio/mds/dst/verify/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
@@ -20,6 +19,7 @@ import (
 	"github.com/manifesterio/mds/dst/core/fault"
 	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/dst/verify/check/spectest"
+	"github.com/manifesterio/mds/dst/verify/history"
 )
 
 func seeds(from uint64, n int) []uint64 {

@@ -1,10 +1,10 @@
 package kafka
 
 import (
-	"github.com/manifesterio/mds/dst/verify/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/verify/history"
 )
 
 type progressCheck struct{ hist history.Reader[Op, Res] }
