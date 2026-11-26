@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
 	"github.com/manifesterio/mds/dst/core/trace"
 	"github.com/manifesterio/mds/dst/explore/campaign"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 func TestRunFoldsHashesInSeedOrder(t *testing.T) {
@@ -18,10 +20,10 @@ func TestRunFoldsHashesInSeedOrder(t *testing.T) {
 		want.Uint64(seed * 1000)
 	}
 
-	got := campaign.RunSeeds(first, seeds, 4, func(seed uint64) campaign.Result {
+	got := campaign.RunSeeds(first, seeds, 4, func(seed uint64) campaign.Outcome {
 		// Finish later seeds first so a buggy fold would scramble order.
 		time.Sleep(time.Duration(seeds-int(seed-first)) * time.Millisecond)
-		return campaign.Result{Hash: seed * 1000, OK: true}
+		return campaign.Outcome{Result: sim.Result{Hash: seed * 1000}}
 	})
 
 	if got.Hash != want.Sum() {
@@ -36,16 +38,17 @@ func TestRunFoldsHashesInSeedOrder(t *testing.T) {
 }
 
 func TestRunCollectsFailuresAndMergesCoverage(t *testing.T) {
-	got := campaign.RunSeeds(1, 4, 2, func(seed uint64) campaign.Result {
-		ok := seed%2 == 0
-		return campaign.Result{
+	got := campaign.RunSeeds(1, 4, 2, func(seed uint64) campaign.Outcome {
+		r := sim.Result{
 			Hash: seed,
-			OK:   ok,
-			Coverage: map[string]campaign.Coverage{
-				"path": {Kind: "reachable", Checks: 1, Passes: uint64(seed)},
+			Coverage: map[string]assert.Coverage{
+				"path": {Kind: assert.KindReachable, Checks: 1, Passes: seed},
 			},
-			Reproduce: "repro",
 		}
+		if seed%2 != 0 {
+			r.Failures = []sim.Failure{{Property: "p"}}
+		}
+		return campaign.Outcome{Result: r}
 	})
 
 	if got.Counts.Failed != 2 || got.Counts.OK != 2 {
@@ -58,14 +61,14 @@ func TestRunCollectsFailuresAndMergesCoverage(t *testing.T) {
 		t.Fatalf("failed seed order: %+v", got.Failed)
 	}
 	c := got.Coverage["path"]
-	if c.Kind != "reachable" || c.Checks != 4 || c.Passes != 1+2+3+4 {
+	if c.Kind != assert.KindReachable || c.Checks != 4 || c.Passes != 1+2+3+4 {
 		t.Fatalf("coverage: %+v", c)
 	}
 }
 
 func TestRunFoldsSitesAndNeverFired(t *testing.T) {
 	run := func(first uint64) campaign.Summary {
-		return campaign.RunSeeds(first, 4, 2, func(seed uint64) campaign.Result {
+		return campaign.RunSeeds(first, 4, 2, func(seed uint64) campaign.Outcome {
 			sites := map[string]fault.SiteCount{
 				"fires": {On: seed%2 == 0, Calls: 10},
 				"quiet": {On: true, Calls: 5},
@@ -73,7 +76,7 @@ func TestRunFoldsSitesAndNeverFired(t *testing.T) {
 			if seed == 2 {
 				sites["fires"] = fault.SiteCount{On: true, Calls: 10, Fired: 3}
 			}
-			return campaign.Result{OK: true, Sites: sites}
+			return campaign.Outcome{Result: sim.Result{Sites: sites}}
 		})
 	}
 	var total campaign.Summary
@@ -94,9 +97,9 @@ func TestRunFoldsSitesAndNeverFired(t *testing.T) {
 
 func TestRunZeroSeeds(t *testing.T) {
 	var calls atomic.Int32
-	got := campaign.RunSeeds(1, 0, 2, func(uint64) campaign.Result {
+	got := campaign.RunSeeds(1, 0, 2, func(uint64) campaign.Outcome {
 		calls.Add(1)
-		return campaign.Result{OK: true}
+		return campaign.Outcome{}
 	})
 	if calls.Load() != 0 {
 		t.Fatalf("ran %d times", calls.Load())
@@ -107,8 +110,12 @@ func TestRunZeroSeeds(t *testing.T) {
 }
 
 func TestRunStampsSeedOnFailedResults(t *testing.T) {
-	got := campaign.RunSeeds(7, 3, 1, func(seed uint64) campaign.Result {
-		return campaign.Result{Hash: seed, OK: seed != 8}
+	got := campaign.RunSeeds(7, 3, 1, func(seed uint64) campaign.Outcome {
+		r := sim.Result{Hash: seed}
+		if seed == 8 {
+			r.Failures = []sim.Failure{{Property: "p"}}
+		}
+		return campaign.Outcome{Result: r}
 	})
 	if len(got.Failed) != 1 || got.Failed[0].Seed != 8 {
 		t.Fatalf("seed stamp: %+v", got.Failed)
@@ -117,18 +124,17 @@ func TestRunStampsSeedOnFailedResults(t *testing.T) {
 
 func TestRunSumsCountersAndMergeAndMissing(t *testing.T) {
 	run := func(first uint64) campaign.Summary {
-		return campaign.RunSeeds(first, 3, 2, func(seed uint64) campaign.Result {
-			return campaign.Result{
-				OK:       true,
-				Counters: map[string]uint64{"steps": 10},
-				Coverage: map[string]campaign.Coverage{"a": {Kind: "reachable", Checks: 1, Passes: 1}},
+		return campaign.RunSeeds(first, 3, 2, func(seed uint64) campaign.Outcome {
+			return campaign.Outcome{
+				Result:   sim.Result{Steps: 10, Coverage: map[string]assert.Coverage{"a": {Kind: assert.KindReachable, Checks: 1, Passes: 1}}},
+				Counters: map[string]uint64{"writes": 1},
 			}
 		})
 	}
 	var total campaign.Summary
 	total.Merge(run(1))
 	total.Merge(run(10))
-	if total.Counters["steps"] != 60 || total.Coverage["a"].Passes != 6 {
+	if total.Counters["steps"] != 60 || total.Counters["writes"] != 6 || total.Coverage["a"].Passes != 6 {
 		t.Fatalf("merge: %+v %+v", total.Counters, total.Coverage)
 	}
 	got := campaign.Missing(total.Coverage, []string{"z", "a", "b"})

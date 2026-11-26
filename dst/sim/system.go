@@ -96,12 +96,6 @@ type Result struct {
 	Tail                         []LogEntry // the last Config.Tail steps, only on failure
 }
 
-// SetupFailure is the Result of a run that failed before any System existed
-// (unknown scenario, bad flags): one protocol failure of property.
-func SetupFailure(seed uint64, property, detail string) Result {
-	return Result{Seed: seed, Failures: []Failure{{Kind: FailProtocol, Property: property, Detail: detail}}}
-}
-
 // OK reports a run without failures.
 func (r Result) OK() bool { return len(r.Failures) == 0 }
 

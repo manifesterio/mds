@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // These tests are the tests of controlplane/cmd/cpsim/report_test.go, moved to
@@ -41,9 +43,9 @@ func TestCoverageCurve(t *testing.T) {
 // TestReportNamesLostPath: when a path that the campaign used to reach is no
 // longer reached, the report lists it and the coverage line says so.
 func TestReportNamesLostPath(t *testing.T) {
-	cov := map[string]Coverage{}
+	cov := map[string]assert.Coverage{}
 	for _, d := range testCatalog.asserts {
-		cov[d.Name] = Coverage{Kind: string(d.Kind), Checks: 1, Passes: 1}
+		cov[d.Name] = assert.Coverage{Kind: d.Kind, Checks: 1, Passes: 1}
 	}
 	lost := "t: standby took over"
 	delete(cov, lost)
@@ -57,9 +59,9 @@ func TestReportNamesLostPath(t *testing.T) {
 }
 
 func TestCoverageTextWhenAllPathsWereReached(t *testing.T) {
-	cov := map[string]Coverage{}
+	cov := map[string]assert.Coverage{}
 	for _, d := range testCatalog.asserts {
-		cov[d.Name] = Coverage{Kind: string(d.Kind), Checks: 1, Passes: 1}
+		cov[d.Name] = assert.Coverage{Kind: d.Kind, Checks: 1, Passes: 1}
 	}
 	rep := buildReport(campaignData{first: 1, seen: [][]string{{"x"}}, total: Summary{Coverage: cov}, runs: 1}, testCatalog)
 	// Four declared paths: three Reachable and one Sometimes.
@@ -108,7 +110,7 @@ func TestReportFailedSeedsFirst(t *testing.T) {
 // Always with zero checks is named as never checked. The kinds that may stay
 // silent (Unreachable, AlwaysOrUnreachable) are not.
 func TestNeverReachedAndNeverCheckedComeFromTheCatalog(t *testing.T) {
-	cov := map[string]Coverage{
+	cov := map[string]assert.Coverage{
 		"t: epoch claimed":     {Kind: "reachable", Checks: 3, Passes: 3},
 		"t: write dropped":     {Kind: "sometimes", Checks: 9, Passes: 0},
 		"t: undeclared maybe":  {Kind: "sometimes", Checks: 4, Passes: 0},
@@ -135,7 +137,7 @@ func TestNeverReachedAndNeverCheckedComeFromTheCatalog(t *testing.T) {
 // TestReportTextFormat pins the text of a small report. It is the format of
 // cpsim: change it only with a reason.
 func TestReportTextFormat(t *testing.T) {
-	cov := map[string]Coverage{
+	cov := map[string]assert.Coverage{
 		"t: one writer":  {Kind: "always", Checks: 7, Passes: 7},
 		"t: epoch claim": {Kind: "reachable", Checks: 2, Passes: 2},
 	}
@@ -218,16 +220,16 @@ func TestHasFailed(t *testing.T) {
 }
 
 func TestWriteFailure(t *testing.T) {
-	r := Result{
-		Seed: 9, Reproduce: "go run ./cmd/x -scenario s -seed 9",
-		Failures: []Failure{{Kind: "violation", Property: "p", Detail: "d", Step: 12, AtMs: 1500, Repeats: 2}},
-		Tail:     []string{"line one", "line two"},
-	}
+	r := Outcome{Result: sim.Result{
+		Seed:     9,
+		Failures: []sim.Failure{{Kind: sim.FailViolation, Property: "p", Detail: "d", Step: 12, At: sim.Time(1500 * time.Millisecond), Repeats: 2}},
+		Tail:     []sim.LogEntry{{Step: 1, At: 5, Text: "line one"}, {Step: 2, At: 2000000, Text: "line two"}},
+	}}
 	var b bytes.Buffer
-	writeFailure(&b, "s", r)
+	writeFailure(&b, "s", "go run ./cmd/x -scenario s -seed 9", r)
 	want := "FAIL s seed 9: violation (p) step=12 at=1.5s: d (and 2 more times)\n" +
 		"  repro: go run ./cmd/x -scenario s -seed 9\n" +
-		"  last steps:\n    line one\n    line two\n"
+		"  last steps:\n         1          5ns  line one\n         2          2ms  line two\n"
 	if b.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", b.String(), want)
 	}
@@ -243,7 +245,7 @@ func TestCatalogFlags(t *testing.T) {
 		{Name: "t: violation", Kind: assert.KindAlways, FailureOnly: true},
 		{Name: "t: checked always", Kind: assert.KindAlways},
 	}}
-	cov := map[string]Coverage{
+	cov := map[string]assert.Coverage{
 		"t: reached":        {Kind: "reachable", Checks: 1, Passes: 1},
 		"t: checked always": {Kind: "always", Checks: 2, Passes: 2},
 	}

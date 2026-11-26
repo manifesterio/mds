@@ -58,25 +58,27 @@ func registry(p *product) *campaign.Registry {
 	var reg campaign.Registry
 	for _, name := range simulator.ScenarioNames() {
 		sc, _ := simulator.ScenarioByName(name)
-		campaign.RegisterSim(&reg, sc.Name, sc.Detail,
-			"go run ./cmd/cpsim -scenario %s -seed %d",
-			runner(sc.Name, p),
-		)
+		reg.Add(campaign.Scenario{
+			Name:      sc.Name,
+			Detail:    sc.Detail,
+			Reproduce: "go run ./cmd/cpsim -scenario %s -seed %d",
+			Run:       runner(sc.Name, p),
+		})
 	}
 	return &reg
 }
 
 // runner keeps product Stats and Report text; ExtraFlags stay on Config.
-func runner(scenario string, p *product) func(uint64, campaign.RunOptions) campaign.SimSeed {
-	return func(seed uint64, o campaign.RunOptions) campaign.SimSeed {
+func runner(scenario string, p *product) func(uint64, campaign.RunOptions) campaign.Outcome {
+	return func(seed uint64, o campaign.RunOptions) campaign.Outcome {
 		res, err := simulator.Run(simulator.Config{
 			Seed: seed, Scenario: scenario, Nodes: p.nodes, Steps: p.steps, Bug: simulator.Bug(p.bug),
 			Log: o.Log, HaltOnFirst: o.HaltOnFirst,
 		})
 		if err != nil {
-			return campaign.FailSimSeed(seed, "scenario", err.Error())
+			return campaign.SetupFailure(seed, "scenario", err.Error())
 		}
-		out := campaign.SimSeed{
+		out := campaign.Outcome{
 			Result: res.Result,
 			Counters: map[string]uint64{
 				"slots": uint64(res.Stats.LogSlots),

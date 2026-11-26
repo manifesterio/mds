@@ -47,12 +47,17 @@ func config() campaign.Config {
 // registry has one scenario: kafka (the broker under a Kafka workload).
 func registry() *campaign.Registry {
 	var reg campaign.Registry
-	campaign.RegisterSim(&reg, "kafka", "the broker under a Kafka workload",
-		"go run ./cmd/mdssimulator -scenario %s -seed %d",
-		func(seed uint64, o campaign.RunOptions) campaign.SimSeed {
+	reg.Add(campaign.Scenario{
+		Name:      "kafka",
+		Detail:    "the broker under a Kafka workload",
+		Reproduce: "go run ./cmd/mdssimulator -scenario %s -seed %d",
+		Run: func(seed uint64, o campaign.RunOptions) campaign.Outcome {
 			r := kafka.Run(kafka.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
-			return campaign.SimSeed{Result: r, Counters: campaign.CrashExitCounters(r)}
+			return campaign.Outcome{
+				Result:   r,
+				Counters: map[string]uint64{"crashes": uint64(r.Crashes), "exits": uint64(r.Exits)},
+			}
 		},
-	)
+	})
 	return &reg
 }

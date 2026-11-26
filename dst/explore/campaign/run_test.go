@@ -19,8 +19,8 @@ import (
 // fake makes a scenario from a function. The function gets the seed and
 // RunOptions. The result gets the seed as its hash when it has none, and it
 // passes unless the function says otherwise.
-func fake(name string, f func(seed uint64, o RunOptions) Result) Scenario {
-	return Scenario{Name: name, Run: func(seed uint64, o RunOptions) Result {
+func fake(name string, f func(seed uint64, o RunOptions) Outcome) Scenario {
+	return Scenario{Name: name, Run: func(seed uint64, o RunOptions) Outcome {
 		r := f(seed, o)
 		if r.Hash == 0 {
 			r.Hash = seed*7919 + 1
@@ -35,8 +35,8 @@ func fake(name string, f func(seed uint64, o RunOptions) Result) Scenario {
 // pass is a scenario that passes every seed and reaches the paths a, b, ...
 // with the number of seeds in grow.
 func pass(name string) Scenario {
-	return fake(name, func(uint64, RunOptions) Result {
-		return Result{OK: true, Counters: map[string]uint64{"steps": 5}}
+	return fake(name, func(uint64, RunOptions) Outcome {
+		return Outcome{Counters: map[string]uint64{"writes": 5}}
 	})
 }
 
@@ -86,33 +86,6 @@ func TestRegistryAddPanics(t *testing.T) {
 	}
 }
 
-func TestFromSimNamesTheCounterAndKeepsFailures(t *testing.T) {
-	r := FromSim(simResult(), "")
-	if r.OK || r.Counters["steps"] != 40 || r.Steps != 40 || r.RandCalls != 9 || r.Hash != 0xabc {
-		t.Fatalf("result %+v", r)
-	}
-	if len(r.Failures) != 1 || r.Failures[0].Kind != "violation" || r.Failures[0].AtMs != 2500 || r.Failures[0].Repeats != 3 {
-		t.Fatalf("failures %+v", r.Failures)
-	}
-	if c := r.Coverage["x"]; c.Kind != "sometimes" || c.Checks != 4 || c.Passes != 1 {
-		t.Fatalf("coverage %+v", c)
-	}
-	if len(r.Tail) != 1 || !strings.Contains(r.Tail[0], "last step") || len(r.Log) != 0 {
-		t.Fatalf("tail %v log %v", r.Tail, r.Log)
-	}
-}
-
-// simResult is a failed sim run with one failure, one coverage entry
-// and one tail line.
-func simResult() sim.Result {
-	return sim.Result{
-		Seed: 3, Steps: 40, RandCalls: 9, Hash: 0xabc,
-		Failures: []sim.Failure{{Kind: sim.FailViolation, Property: "p", Detail: "d", Step: 7, At: sim.Time(2500 * time.Millisecond), Repeats: 3}},
-		Coverage: map[string]assert.Coverage{"x": {Kind: assert.KindSometimes, Checks: 4, Passes: 1}},
-		Tail:     []sim.LogEntry{{Step: 40, At: 1, Text: "last step"}},
-	}
-}
-
 // ---- determinism re-run ----
 
 // tracker counts how often each seed ran and with which Log setting.
@@ -133,9 +106,9 @@ func (k *tracker) note(seed uint64, o RunOptions) int {
 
 func TestDeterminismCheckRunsEveryNthSeedTwice(t *testing.T) {
 	var k tracker
-	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Result {
+	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Outcome {
 		k.note(seed, o)
-		return Result{OK: true}
+		return Outcome{}
 	}))
 	rep, err := RunCampaign(reg, Options{Scenarios: []string{"s"}, First: 1, Seeds: 10, CheckEvery: 3, Workers: 4})
 	if err != nil {
@@ -158,9 +131,9 @@ func TestDeterminismCheckRunsEveryNthSeedTwice(t *testing.T) {
 
 func TestDeterminismCheckOffByDefault(t *testing.T) {
 	var k tracker
-	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Result {
+	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Outcome {
 		k.note(seed, o)
-		return Result{OK: true}
+		return Outcome{}
 	}))
 	if _, err := RunCampaign(reg, Options{First: 1, Seeds: 6}); err != nil {
 		t.Fatal(err)
@@ -177,9 +150,9 @@ func TestDeterminismCheckOffByDefault(t *testing.T) {
 // kind "nondeterminism" and lists it, and it still counts the first run.
 func TestDeterminismCheckFindsADifferentSecondRun(t *testing.T) {
 	var k tracker
-	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Result {
+	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Outcome {
 		n := k.note(seed, o)
-		r := Result{OK: true}
+		var r Outcome
 		if seed == 4 && n == 2 {
 			r.Hash = 12345
 		}
@@ -197,7 +170,7 @@ func TestDeterminismCheckFindsADifferentSecondRun(t *testing.T) {
 		t.Fatalf("nondeterminism %+v", rep.Nondeterminism)
 	}
 	f := rep.FailedRuns[0]
-	if f.Seed != 4 || f.Replay != "go run ./cmd/tool -scenario s -seed 4" || len(f.Failures) != 1 || f.Failures[0].Kind != KindNotRepeatable {
+	if f.Seed != 4 || f.Replay != "go run ./cmd/tool -scenario s -seed 4" || len(f.Failures) != 1 || f.Failures[0].Kind != sim.FailNotRepeatable {
 		t.Fatalf("failed run %+v", f)
 	}
 	if !strings.Contains(out.String(), "FAIL s seed 4: nondeterminism (determinism)") {
@@ -211,13 +184,13 @@ func TestDeterminismCheckFindsADifferentSecondRun(t *testing.T) {
 }
 
 func TestDeterminismCheckComparesStepsAndRandCalls(t *testing.T) {
-	for name, change := range map[string]func(*Result){
-		"steps":      func(r *Result) { r.Steps++ },
-		"rand calls": func(r *Result) { r.RandCalls++ },
+	for name, change := range map[string]func(*Outcome){
+		"steps":      func(r *Outcome) { r.Steps++ },
+		"rand calls": func(r *Outcome) { r.RandCalls++ },
 	} {
 		var k tracker
-		reg := registry(t, fake("s", func(seed uint64, o RunOptions) Result {
-			r := Result{OK: true, RandCalls: 5}
+		reg := registry(t, fake("s", func(seed uint64, o RunOptions) Outcome {
+			r := Outcome{Result: sim.Result{RandCalls: 5}}
 			if k.note(seed, o) == 2 {
 				change(&r)
 			}
@@ -238,14 +211,14 @@ func TestDeterminismCheckComparesStepsAndRandCalls(t *testing.T) {
 // growing is a scenario that reaches one more assertion at each seed in the
 // list, and nothing new at the other seeds.
 func growing(newAt ...uint64) Scenario {
-	return fake("s", func(seed uint64, _ RunOptions) Result {
-		cov := map[string]Coverage{"base": {Kind: "always", Checks: 1, Passes: 1}}
+	return fake("s", func(seed uint64, _ RunOptions) Outcome {
+		cov := map[string]assert.Coverage{"base": {Kind: "always", Checks: 1, Passes: 1}}
 		for _, at := range newAt {
 			if seed >= at {
-				cov[fmt.Sprintf("path %d", at)] = Coverage{Kind: "reachable", Checks: 1, Passes: 1}
+				cov[fmt.Sprintf("path %d", at)] = assert.Coverage{Kind: "reachable", Checks: 1, Passes: 1}
 			}
 		}
-		return Result{OK: true, Coverage: cov}
+		return Outcome{Result: sim.Result{Coverage: cov}}
 	})
 }
 
@@ -275,9 +248,9 @@ func TestUntilStableGoesOnInBatchesUntilQuiet(t *testing.T) {
 }
 
 func TestUntilStableWarnsWhenTheLimitCameFirst(t *testing.T) {
-	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Result {
+	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Outcome {
 		// A new assertion at every seed: never stable.
-		return Result{OK: true, Coverage: map[string]Coverage{fmt.Sprint("p", seed): {Kind: "reachable", Checks: 1, Passes: 1}}}
+		return Outcome{Result: sim.Result{Coverage: map[string]assert.Coverage{fmt.Sprint("p", seed): {Kind: "reachable", Checks: 1, Passes: 1}}}}
 	}))
 	rep, err := RunCampaign(reg, Options{First: 1, UntilStable: true, StableAfter: 10, MaxSeeds: 120})
 	if err != nil {
@@ -294,10 +267,10 @@ func TestUntilStableWarnsWhenTheLimitCameFirst(t *testing.T) {
 }
 
 func TestUntilStableStopsAtAFailure(t *testing.T) {
-	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Result {
-		r := Result{OK: seed != 7, Coverage: map[string]Coverage{fmt.Sprint("p", seed): {Kind: "reachable", Checks: 1, Passes: 1}}}
-		if !r.OK {
-			r.Failures = []Failure{{Kind: "violation", Property: "p", Detail: "d"}}
+	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Outcome {
+		r := Outcome{Result: sim.Result{Coverage: map[string]assert.Coverage{fmt.Sprint("p", seed): {Kind: "reachable", Checks: 1, Passes: 1}}}}
+		if seed == 7 {
+			r.Failures = []sim.Failure{{Kind: sim.FailViolation, Property: "p", Detail: "d"}}
 		}
 		return r
 	}))
@@ -313,15 +286,15 @@ func TestUntilStableStopsAtAFailure(t *testing.T) {
 func TestUntilStableSeesAssertionsOfAnyScenario(t *testing.T) {
 	// Scenario b reaches a new path at seed 60; scenario a never does. The
 	// campaign is stable only after both are quiet.
-	a := fake("a", func(uint64, RunOptions) Result {
-		return Result{OK: true, Coverage: map[string]Coverage{"base": {Kind: "always", Checks: 1, Passes: 1}}}
+	a := fake("a", func(uint64, RunOptions) Outcome {
+		return Outcome{Result: sim.Result{Coverage: map[string]assert.Coverage{"base": {Kind: "always", Checks: 1, Passes: 1}}}}
 	})
-	b := fake("b", func(seed uint64, _ RunOptions) Result {
-		cov := map[string]Coverage{}
+	b := fake("b", func(seed uint64, _ RunOptions) Outcome {
+		cov := map[string]assert.Coverage{}
 		if seed >= 60 {
-			cov["late"] = Coverage{Kind: "reachable", Checks: 1, Passes: 1}
+			cov["late"] = assert.Coverage{Kind: "reachable", Checks: 1, Passes: 1}
 		}
-		return Result{OK: true, Coverage: cov}
+		return Outcome{Result: sim.Result{Coverage: cov}}
 	})
 	rep, err := RunCampaign(registry(t, a, b), Options{First: 1, UntilStable: true, StableAfter: 60, MaxSeeds: 1000})
 	if err != nil {
@@ -355,8 +328,11 @@ func TestDurationRunsBatchesUntilTheTimeIsUp(t *testing.T) {
 }
 
 func TestDurationStopsAtAFailure(t *testing.T) {
-	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Result {
-		return Result{OK: seed != 3}
+	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Outcome {
+		if seed == 3 {
+			return Outcome{Result: sim.Result{Failures: []sim.Failure{{Property: "p"}}}}
+		}
+		return Outcome{}
 	}))
 	now := func() time.Time { return time.Unix(0, 0) } // time never passes
 	rep, err := runCampaign(reg, Options{First: 1, Duration: time.Hour}, catalog{}, now)
@@ -373,9 +349,9 @@ func TestDurationStopsAtAFailure(t *testing.T) {
 func TestRunCampaignFoldsInSeedOrderWhateverTheWorkers(t *testing.T) {
 	hashOf := func(workers int) uint64 {
 		var sum uint64
-		reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Result {
+		reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Outcome {
 			time.Sleep(time.Duration(8-seed%8) * time.Millisecond)
-			return Result{OK: true}
+			return Outcome{}
 		}))
 		var out bytes.Buffer
 		if _, err := RunCampaign(reg, Options{First: 1, Seeds: 16, Workers: workers, Out: &out}); err != nil {
@@ -397,8 +373,8 @@ func TestRunCampaignUnknownScenario(t *testing.T) {
 }
 
 func TestRunCampaignFoldsSitesAndCounts(t *testing.T) {
-	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Result {
-		return Result{OK: true, Sites: map[string]fault.SiteCount{"x": {On: seed%2 == 0, Calls: 3, Fired: 1}}}
+	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Outcome {
+		return Outcome{Result: sim.Result{Sites: map[string]fault.SiteCount{"x": {On: seed%2 == 0, Calls: 3, Fired: 1}}}}
 	}))
 	rep, err := RunCampaign(reg, Options{First: 1, Seeds: 4, Workers: 2})
 	if err != nil {
@@ -439,15 +415,16 @@ func TestSummaryLineColumns(t *testing.T) {
 // TestResultTextReplacesTheStandardFailureLines: a seed with its own Text
 // prints that text, for a failed campaign seed and for a replay.
 func TestResultTextReplacesTheStandardFailureLines(t *testing.T) {
-	r := Result{Seed: 3, OK: false, Reproduce: "again", Text: "OWN TEXT",
-		Failures: []Failure{{Kind: "violation", Property: "p", Detail: "d"}}}
+	r := Outcome{Text: "OWN TEXT", Result: sim.Result{
+		Seed: 3, Failures: []sim.Failure{{Kind: sim.FailViolation, Property: "p", Detail: "d"}},
+	}}
 	var b bytes.Buffer
-	writeFailure(&b, "sc", r)
+	writeFailure(&b, "sc", "again", r)
 	if b.String() != "OWN TEXT\n" {
 		t.Fatalf("got %q", b.String())
 	}
 	var reg Registry
-	reg.Add(Scenario{Name: "sc", Run: func(uint64, RunOptions) Result { return r }})
+	reg.Add(Scenario{Name: "sc", Run: func(uint64, RunOptions) Outcome { return r }})
 	b.Reset()
 	if code := Replay(&reg, "sc", 3, &b); code != 1 || b.String() != "OWN TEXT\n" {
 		t.Fatalf("code %d, got %q", code, b.String())
@@ -595,8 +572,8 @@ func TestMainJSONAndUntilStable(t *testing.T) {
 		t.Fatalf("report %+v", rep)
 	}
 
-	reg = registry(t, fake("s", func(seed uint64, _ RunOptions) Result {
-		return Result{OK: true, Coverage: map[string]Coverage{fmt.Sprint("p", seed): {Kind: "reachable", Checks: 1, Passes: 1}}}
+	reg = registry(t, fake("s", func(seed uint64, _ RunOptions) Outcome {
+		return Outcome{Result: sim.Result{Coverage: map[string]assert.Coverage{fmt.Sprint("p", seed): {Kind: "reachable", Checks: 1, Passes: 1}}}}
 	}))
 	code, out, errOut = runMain(t, c, reg, env(), "-until-stable", "-scenario", "s", "-stable-after", "50", "-max-seeds", "50")
 	if code != 0 {
@@ -627,11 +604,14 @@ func TestMainTextOfACampaign(t *testing.T) {
 }
 
 func TestMainFailureText(t *testing.T) {
-	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Result {
+	reg := registry(t, fake("s", func(seed uint64, _ RunOptions) Outcome {
 		if seed != 2 {
-			return Result{OK: true}
+			return Outcome{}
 		}
-		return Result{Failures: []Failure{{Kind: "violation", Property: "p", Detail: "bad", Step: 3, AtMs: 20}}, Tail: []string{"tail line"}}
+		return Outcome{Result: sim.Result{
+			Failures: []sim.Failure{{Kind: sim.FailViolation, Property: "p", Detail: "bad", Step: 3, At: sim.Time(20 * time.Millisecond)}},
+			Tail:     []sim.LogEntry{{Step: 3, At: 7, Text: "tail line"}},
+		}}
 	}))
 	code, out, _ := runMain(t, Config{Tool: "tool"}, reg, env(), "-seeds", "3", "-report")
 	if code != 1 {
@@ -641,7 +621,7 @@ func TestMainFailureText(t *testing.T) {
 		"s                  3 seeds", "FAILED 1 of 3 seeds",
 		"FAIL s seed 2: violation (p) step=3 at=20ms: bad",
 		"  repro: go run ./cmd/tool -scenario s -seed 2",
-		"    tail line",
+		"       3          7ns  tail line",
 		"report: 3 seeds, 3 runs, 2 passed, 1 failed",
 		"  FAILED s seed 2: go run ./cmd/tool -scenario s -seed 2",
 		"tool: FAILED",
@@ -696,14 +676,13 @@ func TestMainBadInput(t *testing.T) {
 }
 
 func TestReplay(t *testing.T) {
-	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Result {
-		r := Result{OK: true, Hash: 0xbeef, Steps: 2}
+	reg := registry(t, fake("s", func(seed uint64, o RunOptions) Outcome {
+		r := Outcome{Result: sim.Result{Hash: 0xbeef, Steps: 2}}
 		if o.Log {
-			r.Log = []string{"line 1", "line 2"}
+			r.Log = []sim.LogEntry{{Step: 1, Text: "line 1"}, {Step: 2, Text: "line 2"}}
 		}
 		if seed == 9 {
-			r.OK = false
-			r.Failures = []Failure{{Kind: "panic", Property: "p", Detail: "boom", Step: 2, AtMs: 1000}}
+			r.Failures = []sim.Failure{{Kind: sim.FailPanic, Property: "p", Detail: "boom", Step: 2, At: sim.Time(time.Second)}}
 		}
 		if !o.HaltOnFirst {
 			t.Error("Replay should set HaltOnFirst")
@@ -714,7 +693,7 @@ func TestReplay(t *testing.T) {
 	if code := Replay(reg, "s", 5, &b); code != 0 {
 		t.Fatalf("code %d", code)
 	}
-	if want := "line 1\nline 2\nseed 5: steps=2 rand=0 hash=000000000000beef\n"; b.String() != want {
+	if want := "     1           0s  line 1\n     2           0s  line 2\nseed 5: steps=2 rand=0 hash=000000000000beef\n"; b.String() != want {
 		t.Fatalf("got %q, want %q", b.String(), want)
 	}
 	b.Reset()
@@ -728,67 +707,32 @@ func TestReplay(t *testing.T) {
 }
 
 func TestMainReplaysTheSeedOfTheVariable(t *testing.T) {
-	reg := registry(t, fake("only", func(_ uint64, o RunOptions) Result {
-		r := Result{OK: true}
+	reg := registry(t, fake("only", func(_ uint64, o RunOptions) Outcome {
+		var r Outcome
 		if o.Log {
-			r.Log = []string{"a step"}
+			r.Log = []sim.LogEntry{{Step: 1, Text: "a step"}}
 		}
 		return r
 	}))
 	// One scenario in the registry: "all" means that one.
 	code, out, errOut := runMain(t, Config{Tool: "tool", EnvPrefix: "MDS"}, reg, env("MDS_SEED", "4"))
-	if code != 0 || !strings.HasPrefix(out, "a step\nseed 4:") {
+	if code != 0 || !strings.HasPrefix(out, "     1           0s  a step\nseed 4:") {
 		t.Fatalf("code %d out %q err %q", code, out, errOut)
 	}
 }
 
-func TestFromSim(t *testing.T) {
-	sys := sim.NewSystem(sim.Config{Seed: 7})
-	sys.Fail(sim.FailProtocol, "p", "detail")
-	r := FromSim(sys.Run(), "replay")
-	if r.OK || r.Seed != 7 || len(r.Failures) != 1 || r.Failures[0].Kind != "protocol" || r.Reproduce != "replay" {
+func TestSetupFailure(t *testing.T) {
+	r := SetupFailure(7, "scenario", "bad")
+	if r.OK() || r.Seed != 7 || len(r.Failures) != 1 || r.Failures[0].Kind != sim.FailProtocol || r.Failures[0].Detail != "bad" {
 		t.Fatalf("%+v", r)
-	}
-	extra := FromSim(simResult(), "replay", map[string]uint64{"slots": 3})
-	if extra.Counters["steps"] != 40 || extra.Counters["slots"] != 3 {
-		t.Fatalf("extra counters %+v", extra.Counters)
 	}
 }
 
-func TestRegisterSim(t *testing.T) {
-	var reg Registry
-	RegisterSim(&reg, "demo", "a demo", "tool -scenario %s -seed %d",
-		func(seed uint64, o RunOptions) SimSeed {
-			r := sim.Result{Seed: seed, Steps: 11, Crashes: 2, Exits: 1, Hash: 0x11}
-			out := SimSeed{Result: r, Counters: CrashExitCounters(r)}
-			if !r.OK() || o.Log {
-				out.Text = "product report"
-			}
-			return out
-		},
-	)
-	sc, ok := reg.Get("demo")
-	if !ok {
-		t.Fatal("demo not registered")
-	}
-	r := sc.Run(9, RunOptions{})
-	if r.Reproduce != "tool -scenario demo -seed 9" || r.Counters["crashes"] != 2 || r.Counters["exits"] != 1 || r.Text != "" {
-		t.Fatalf("%+v", r)
-	}
-	logged := sc.Run(9, RunOptions{Log: true})
-	if logged.Text != "product report" {
-		t.Fatalf("text on log: %+v", logged)
-	}
-	RegisterSim(&reg, "fail", "a failing demo", "tool -scenario %s -seed %d",
-		func(seed uint64, _ RunOptions) SimSeed {
-			s := FailSimSeed(seed, "p", "d")
-			s.Text = "fail report"
-			return s
-		},
-	)
-	fail, _ := reg.Get("fail")
-	fr := fail.Run(1, RunOptions{})
-	if fr.OK || fr.Text != "fail report" || len(fr.Failures) != 1 || fr.Failures[0].Kind != "protocol" {
-		t.Fatalf("%+v", fr)
+func TestReproduceFormat(t *testing.T) {
+	sc := pass("demo")
+	sc.Reproduce = "tool -scenario %s -seed %d"
+	c := &runner{reg: registry(t, sc), o: Options{Tool: "other"}}
+	if got := c.replayCommand("demo", 9); got != "tool -scenario demo -seed 9" {
+		t.Fatalf("got %q", got)
 	}
 }

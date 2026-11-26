@@ -136,10 +136,10 @@ A product simulator command is a few lines. It registers its scenarios and calls
 ```go
 reg := &campaign.Registry{}
 reg.Add(campaign.Scenario{Name: "kv", Detail: "a store with no faults",
-    Run: func(seed uint64, o campaign.RunOptions) campaign.Result {
+    Run: func(seed uint64, o campaign.RunOptions) campaign.Outcome {
         sys := sim.NewSystem(sim.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst, Tail: 20})
         // ... AddService, Spawn: see dst/examples/kv/kv.go ...
-        return campaign.FromSim(sys.Run(), "") // "": the replay command is made from Config.Tool
+        return campaign.Outcome{Result: sys.Run()} // no Reproduce: the replay command is made from Config.Tool
     }})
 cfg := campaign.Config{Tool: "mysim", EnvPrefix: "MDS", Defaults: campaign.Options{CheckEvery: 10}}
 os.Exit(campaign.Main(cfg, reg, os.Args[1:], os.Stdout, os.Stderr))
@@ -185,7 +185,7 @@ Product simulators and production Envs should call dst for shared host glue rath
 than re-owning it: `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv`;
 `sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`, `EveryWhile`,
 `Timeline.PhaseStart`, `FaultCoverageRule`, `DrawBetween` / `MaybeAdd`;
-`campaign.RegisterSim` / `FromSim`;
+`campaign.Outcome` / `SetupFailure`;
 `trace.StateHasher`; `core/actor/actortest`.
 Domain schedules, fault rates, and message vocabularies stay
 in the product. Sched merge into sim remains deferred (sim keeps its own queue).
