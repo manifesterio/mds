@@ -14,6 +14,10 @@
 // fake exposes), a Recorder (its actor.Env), callbacks that decode and apply
 // entries, and the reference model. Bookkeeping that is specific to one shape of oracle, such as sorting
 // reads by the log prefix they saw, stays in the product.
+//
+// This is a harness kit, not actor core: it is shaped by the one replicated
+// log oracle that uses it (the control plane simulator). Do not grow it to fit
+// a second product; copy the part you need first.
 package check
 
 import (

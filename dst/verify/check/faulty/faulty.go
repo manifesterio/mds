@@ -29,6 +29,9 @@
 //
 // This package has no product words. The product gives it the spec, the fault
 // numbers, and a Shape that says how to read a request and how to build an answer.
+//
+// This is a harness kit, not actor core: today only the broker fake services
+// use it. The control plane keeps its own storage fakes on purpose.
 package faulty
 
 import (
