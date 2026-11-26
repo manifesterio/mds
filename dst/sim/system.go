@@ -183,7 +183,7 @@ type System struct {
 	crashes, trips, exits int
 	failures              []Failure
 	lines                 []logLine
-	tail                  *trace.Ring[logLine]
+	tail                  *ring[logLine]
 }
 
 // NewSystem makes a System for cfg.
@@ -207,7 +207,7 @@ func NewSystem(cfg Config) *System {
 	sys.asserts = assertlog.New(func(property, detail string) { sys.Fail(FailViolation, property, detail) })
 	sys.asserts.SetStepCounter(sys.Steps)
 	if cfg.Tail > 0 {
-		sys.tail = trace.NewRing[logLine](cfg.Tail)
+		sys.tail = newRing[logLine](cfg.Tail)
 	}
 	return sys
 }

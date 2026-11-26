@@ -1,23 +1,23 @@
-package trace
+package sim
 
-// Ring keeps the last N opaque step records for failure reports.
+// ring keeps the last N opaque step records for failure reports.
 // T is caller-defined. dst does not format domain events.
-type Ring[T any] struct {
+type ring[T any] struct {
 	buf []T
 	pos int
 	n   int
 }
 
-// NewRing returns a ring that retains at most n records. n <= 0 yields an empty ring.
-func NewRing[T any](n int) *Ring[T] {
+// newRing returns a ring that retains at most n records. n <= 0 yields an empty ring.
+func newRing[T any](n int) *ring[T] {
 	if n <= 0 {
-		return &Ring[T]{}
+		return &ring[T]{}
 	}
-	return &Ring[T]{buf: make([]T, n)}
+	return &ring[T]{buf: make([]T, n)}
 }
 
 // Add appends v, overwriting the oldest entry when full.
-func (r *Ring[T]) Add(v T) {
+func (r *ring[T]) Add(v T) {
 	if len(r.buf) == 0 {
 		return
 	}
@@ -29,7 +29,7 @@ func (r *Ring[T]) Add(v T) {
 }
 
 // Tail returns the retained records oldest first.
-func (r *Ring[T]) Tail() []T {
+func (r *ring[T]) Tail() []T {
 	if r.n == 0 {
 		return nil
 	}

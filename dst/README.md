@@ -26,7 +26,7 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap (live/clock adapters; sim keeps its own queue) |
 | `core/clock` | Wall offset over `core/sched`, `AfterFunc` / `Advance` on the same heap |
 | `core/syncclock`, `core/realclock` | Clock adapters for code that needs a real or synchronised clock outside a run |
-| `core/trace` | Running FNV-1a `Hash` / `StateHasher`, optional `Ring[T]` |
+| `core/trace` | Running FNV-1a `Hash` / `StateHasher` |
 | `core/assert` | Typed handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable), `Coverage` and the catalog |
 | `core/fault` | Declared buggify sites (`NewSite`, `NewFaultSite`), `SiteCount` and the catalog |
 | `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
