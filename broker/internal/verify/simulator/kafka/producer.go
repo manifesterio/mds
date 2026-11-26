@@ -9,9 +9,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // batch is one produce batch for one partition, retried unchanged until
@@ -167,7 +166,7 @@ func (c *client) newBatches() {
 		}
 		data, err := buildBatch(pp, recs, c.pickCodec())
 		if err != nil {
-			c.env.Unreachable(clientBatchBuilds, assert.Pair{Key: "err", Value: err.Error()})
+			c.env.Unreachable(clientBatchBuilds, actor.Pair{Key: "err", Value: err.Error()})
 			continue
 		}
 		b.corrupt = !b.idem && c.env.Intn(corruptEvery) == 0

@@ -1,6 +1,6 @@
 package sim
 
-import "github.com/manifesterio/mds/dst/core/actor"
+import "github.com/manifesterio/mds/dst/actor"
 
 // entry is one item of the event queue. The closure run was made by a generic
 // function that knew the types. body is kept only to fold it into the trace

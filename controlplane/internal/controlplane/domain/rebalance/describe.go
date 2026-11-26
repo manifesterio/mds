@@ -5,7 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // describe is a Describe call whose reads are in flight: one LocalRead per

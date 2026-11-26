@@ -6,14 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manifesterio/mds/dst/actor"
+
 	"github.com/manifesterio/mds/controlplane/internal/verify/check"
-	"github.com/manifesterio/mds/dst/core/assert"
 )
 
 var (
-	verdictHandle = assert.NewAlways("check test: verdict handle")
-	holeHandle    = assert.NewAlways("check test: log has no hole")
-	decodeHandle  = assert.NewAlways("check test: log entries decode")
+	verdictHandle = actor.NewAlways("check test: verdict handle")
+	holeHandle    = actor.NewAlways("check test: log has no hole")
+	decodeHandle  = actor.NewAlways("check test: log entries decode")
 )
 
 type fakeLog struct {
@@ -36,7 +37,7 @@ func (f fakeLog) QuietAfter(from check.Slot) bool {
 // failRecorder keeps "name: detail" of every false Always.
 type failRecorder struct{ fails []string }
 
-func (r *failRecorder) Always(cond bool, p assert.Always, details ...assert.Pair) {
+func (r *failRecorder) Always(cond bool, p actor.Always, details ...actor.Pair) {
 	if !cond {
 		r.fails = append(r.fails, fmt.Sprint(p.Name(), ": ", details[0].Value))
 	}
@@ -153,7 +154,7 @@ type recordAlways struct {
 	det  []string
 }
 
-func (r *recordAlways) Always(cond bool, p assert.Always, details ...assert.Pair) {
+func (r *recordAlways) Always(cond bool, p actor.Always, details ...actor.Pair) {
 	r.ok = append(r.ok, cond)
 	r.name = append(r.name, p.Name())
 	if len(details) > 0 {

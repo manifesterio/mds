@@ -9,8 +9,8 @@
 package clock
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/runtime/live"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/live"
 	dstreal "github.com/manifesterio/mds/shared/clock/internal/realclock"
 	"github.com/manifesterio/mds/shared/clock/internal/sched"
 )

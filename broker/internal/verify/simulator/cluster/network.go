@@ -5,8 +5,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -14,8 +13,8 @@ import (
 // the code uses the value. A name is never built at run time, and it must not
 // change: reports and replays use it.
 var (
-	connResetInjected = assert.NewReachable("net: conn reset injected") //determinismcheck:ok catalog handle, set once at start
-	crashResetPeer    = assert.NewSometimes("net: crash reset a peer")  //determinismcheck:ok catalog handle, set once at start
+	connResetInjected = actor.NewReachable("net: conn reset injected") //determinismcheck:ok catalog handle, set once at start
+	crashResetPeer    = actor.NewSometimes("net: crash reset a peer")  //determinismcheck:ok catalog handle, set once at start
 )
 
 // network is the executor of the brokers and the clients. Object store and

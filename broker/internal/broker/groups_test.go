@@ -8,7 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // groupCP is a fake control plane for the group calls of one test. answer

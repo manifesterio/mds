@@ -29,7 +29,7 @@ bash ops/broker/scripts/ci-determinism.sh
 
 `dst` and `controlplane` also run their gate inside `make build`. Broker `make build` does not. Root `make determinism` is the broker gate.
 
-The checker is `ops/tools/determinismcheck`. The dst gate covers every package under `core/` and `sim/` except paths listed in `ops/dst/determinism-exclude.txt`, plus `verify/check` and `verify/check/faulty`.
+The checker is `ops/tools/determinismcheck`. The dst gate covers every package under `actor/`, `trace/`, `internal/` and `sim/` except paths listed in `ops/dst/determinism-exclude.txt`.
 
 ## Allow-list and audit records
 
@@ -86,4 +86,4 @@ Rules the checker and reviews enforce:
 - Virtual time only through the simulator. No `time.Now` in actors.
 - Issue-time faults latched per site so drops and crashes replay stably.
 - No map-range control flow in deterministic packages. Go randomizes map order.
-- No goroutines or channels in gated packages. `runtime/live` and campaign runners stay outside the gate on purpose.
+- No goroutines or channels in gated packages. `live` and campaign runners stay outside the gate on purpose.

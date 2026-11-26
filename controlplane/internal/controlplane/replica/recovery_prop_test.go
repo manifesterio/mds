@@ -36,7 +36,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/spec"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Kinds of injected storage failure.

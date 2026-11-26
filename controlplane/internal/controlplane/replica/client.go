@@ -3,7 +3,7 @@ package replica
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // caller is the handle of a caller waiting for a control-plane answer.

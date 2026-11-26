@@ -3,13 +3,9 @@ package sim
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/core/trace"
-	"github.com/manifesterio/mds/dst/internal/assertlog"
-	"github.com/manifesterio/mds/dst/internal/inject"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/internal/rng"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Time is global virtual time in nanoseconds since the run started. Actors
@@ -90,8 +86,8 @@ type Result struct {
 	Seed, Steps, RandCalls, Hash uint64
 	Crashes, Trips, Exits        int
 	Failures                     []Failure
-	Coverage                     map[string]assert.Coverage
-	Sites                        map[string]fault.SiteCount
+	Coverage                     map[string]Coverage
+	Sites                        map[string]SiteCount
 	Log                          []LogEntry // every step, only with Config.Log
 	Tail                         []LogEntry // the last Config.Tail steps, only on failure
 }
@@ -106,8 +102,8 @@ type System struct {
 	cfg     Config
 	rand    *rng.Rand
 	q       *queue
-	faults  *inject.Injector
-	asserts *assertlog.Log
+	faults  *injector
+	asserts *assertLog
 	hash    trace.Hash
 	tl      *Timeline
 
@@ -158,8 +154,8 @@ func NewSystem(cfg Config) *System {
 		outside:   map[uint64]*outsideAsk{},
 	}
 	sys.q = newQueue(sys.rand)
-	sys.faults = inject.New(sys.rand)
-	sys.asserts = assertlog.New(func(property, detail string) { sys.Fail(FailViolation, property, detail) })
+	sys.faults = newInjector(sys.rand)
+	sys.asserts = newAssertLog(func(property, detail string) { sys.Fail(FailViolation, property, detail) })
 	sys.asserts.SetStepCounter(sys.Steps)
 	if cfg.Tail > 0 {
 		sys.tail = newRing[logLine](cfg.Tail)
@@ -184,7 +180,7 @@ func (sys *System) Draws() uint64 { return sys.rand.Calls() }
 func (sys *System) Env() actor.Env { return env{sys: sys} }
 
 // Coverage returns a copy of the per-property stats so far.
-func (sys *System) Coverage() map[string]assert.Coverage { return sys.asserts.Coverage() }
+func (sys *System) Coverage() map[string]Coverage { return sys.asserts.Coverage() }
 
 // Timeline is the fact timeline of the run.
 func (sys *System) Timeline() *Timeline { return sys.tl }

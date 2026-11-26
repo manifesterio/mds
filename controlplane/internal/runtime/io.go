@@ -2,7 +2,7 @@ package runtime
 
 //go:generate go run github.com/manifesterio/mds/ops/tools/dstgen
 
-import "github.com/manifesterio/mds/dst/core/actor"
+import "github.com/manifesterio/mds/dst/actor"
 
 // IO is the product IO of the replica: calls to the shared command log and to
 // the object store. The replica hands a case to actor.Perform; the executor

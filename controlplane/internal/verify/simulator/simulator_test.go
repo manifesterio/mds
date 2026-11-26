@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/fault"
-	"github.com/manifesterio/mds/dst/verify/spectest"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/spectest"
 )
 
 func mustRun(t *testing.T, cfg Config) Result {
@@ -82,7 +82,7 @@ func TestSitesFire(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range fault.Sites() {
+	for _, name := range actor.Sites() {
 		if fired[name] == 0 {
 			t.Errorf("site %q never fired", name)
 		}

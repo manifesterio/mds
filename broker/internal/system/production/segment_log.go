@@ -4,7 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

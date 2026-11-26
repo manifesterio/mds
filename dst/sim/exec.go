@@ -1,7 +1,7 @@
 package sim
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // ExecCtx is lent to one executor call: one Do or Perform of one actor.

@@ -21,7 +21,7 @@ const (
 	genTestFile  = "zz_dst_gen_test.go"   // types declared in _test.go files of the package
 	genXTestFile = "zz_dst_gen_x_test.go" // types of the external test package (pkg_test)
 	tagsFile     = "dst.tags"
-	tracePath    = "github.com/manifesterio/mds/dst/core/trace"
+	tracePath    = "github.com/manifesterio/mds/dst/trace"
 )
 
 func isGenerated(path string) bool {

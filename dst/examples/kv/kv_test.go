@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/verify/golden"
+	"github.com/manifesterio/mds/dst/spectest"
 )
 
 // script puts two keys, reads both, overwrites one and reads it again.
@@ -78,7 +78,7 @@ var goldenHashes = map[string]uint64{
 
 func TestGoldenHashes(t *testing.T) {
 	for seed := uint64(1); seed <= 3; seed++ {
-		golden.Assert(t, fmt.Sprintf("kv/%d", seed), Run(seed, script).Hash, goldenHashes)
+		spectest.AssertHash(t, fmt.Sprintf("kv/%d", seed), Run(seed, script).Hash, goldenHashes)
 	}
 }
 

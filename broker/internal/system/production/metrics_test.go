@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 func fact(name string, keyValue ...any) actor.Fact {

@@ -1,7 +1,7 @@
 package sim
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // actorOf resolves an EntityID of this System. A zero or foreign one is a

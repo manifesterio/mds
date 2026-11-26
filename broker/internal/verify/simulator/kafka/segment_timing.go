@@ -1,8 +1,7 @@
 package kafka
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -25,28 +24,28 @@ func (i *segmentTiming) Observe(v sim.View) {
 	for _, tf := range tl.Since("segment_put_done", &i.put) {
 		a.Always(n(tf.Fact, "put_ns") >= 0 && n(tf.Fact, "attempts") >= 1 && n(tf.Fact, "bytes") > 0,
 			segmentPutTimeNonNegative,
-			assert.Pair{Key: "put_ns", Value: n(tf.Fact, "put_ns")})
+			actor.Pair{Key: "put_ns", Value: n(tf.Fact, "put_ns")})
 	}
 	for _, tf := range tl.Since("segment_committed", &i.commit) {
 		f := tf.Fact
 		put, wait, com, total := n(f, "put_ns"), n(f, "wait_ns"), n(f, "commit_ns"), n(f, "total_ns")
-		d := []assert.Pair{{Key: "put_ns", Value: put}, {Key: "wait_ns", Value: wait},
+		d := []actor.Pair{{Key: "put_ns", Value: put}, {Key: "wait_ns", Value: wait},
 			{Key: "commit_ns", Value: com}, {Key: "total_ns", Value: total}}
 		a.Always(put >= 0 && wait >= 0 && com >= 0, segmentDurationsNonNegative, d...)
 		a.Always(put+wait+com == total, segmentDurationsAddUp, d...)
 		a.Always(n(f, "inflight") >= 0 && n(f, "buffered") >= 0 && n(f, "bytes") > 0,
 			committedSegmentReportsNonNegative,
-			assert.Pair{Key: "inflight", Value: n(f, "inflight")}, assert.Pair{Key: "buffered", Value: n(f, "buffered")})
+			actor.Pair{Key: "inflight", Value: n(f, "inflight")}, actor.Pair{Key: "buffered", Value: n(f, "buffered")})
 	}
 	for _, tf := range tl.Since("segment_failed", &i.fail) {
 		f := tf.Fact
 		a.Always(n(f, "total_ns") >= 0 && n(f, "inflight") >= 0 && n(f, "buffered") >= 0,
 			failedSegmentReportsNonNegative,
-			assert.Pair{Key: "total_ns", Value: n(f, "total_ns")})
+			actor.Pair{Key: "total_ns", Value: n(f, "total_ns")})
 	}
 	for _, tf := range tl.Since("backpressure_off", &i.off) {
 		a.Always(n(tf.Fact, "paused_ns") >= 0 && n(tf.Fact, "buffered") >= 0,
 			backpressurePauseNonNegative,
-			assert.Pair{Key: "paused_ns", Value: n(tf.Fact, "paused_ns")})
+			actor.Pair{Key: "paused_ns", Value: n(tf.Fact, "paused_ns")})
 	}
 }

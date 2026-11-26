@@ -16,7 +16,7 @@ var forbiddenImportPrefixes = []string{
 	"net/http",
 	"github.com/cockroachdb/pebble",
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb",
-	"github.com/manifesterio/mds/dst/core/machine",
+	"github.com/manifesterio/mds/dst/sim",
 }
 
 func TestImportBoundary(t *testing.T) {

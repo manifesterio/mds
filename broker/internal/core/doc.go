@@ -2,9 +2,9 @@
 // takes (EventData), the IO it hands to its executor (IO, the requests each
 // with their answer type), and the Environment through which the only
 // permitted nondeterminism (randomness, buggify) and assertion recording
-// enter. The broker is an actor (package dst/core/actor).
+// enter. The broker is an actor (package dst/actor).
 //
-// Time, identity and fact types come from dst/core/actor. A fact name and its
+// Time, identity and fact types come from dst/actor. A fact name and its
 // field encoding are trace-hash inputs: frozen, past-tense constants, never
 // derived from Go type names. An ack fact is recorded in the same Receive,
 // immediately before the Send that acks, so invariants can check "acked

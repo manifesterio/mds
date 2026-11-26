@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // ControlPlane is the model of topics, segments and consumer groups.

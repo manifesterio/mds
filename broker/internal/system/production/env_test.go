@@ -3,7 +3,7 @@ package production
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 func TestEnvIntnAndBetweenStayInRange(t *testing.T) {

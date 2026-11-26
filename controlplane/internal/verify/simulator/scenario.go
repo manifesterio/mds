@@ -2,7 +2,7 @@ package simulator
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 

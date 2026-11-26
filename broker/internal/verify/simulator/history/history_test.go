@@ -3,7 +3,7 @@ package history
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 

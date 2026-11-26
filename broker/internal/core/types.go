@@ -2,7 +2,7 @@ package core
 
 import "github.com/manifesterio/mds/controlplane/contract"
 
-// The time and identity types are not defined here. They come from dst/core/actor.
+// The time and identity types are not defined here. They come from dst/actor.
 //
 // The control plane call and reply types (CommitSegment, GroupJoin, and the others), and the
 // small value types they use, are defined once in controlplane/contract. The names below are

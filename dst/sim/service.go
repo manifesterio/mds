@@ -3,7 +3,7 @@ package sim
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Service simulates one outside system (an object store, a log, the control

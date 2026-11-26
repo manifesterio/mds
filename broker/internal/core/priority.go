@@ -1,6 +1,6 @@
 package core
 
-import "github.com/manifesterio/mds/dst/core/actor"
+import "github.com/manifesterio/mds/dst/actor"
 
 // PriorityOf picks the inbox of a message (actor.Props.Priority).
 //

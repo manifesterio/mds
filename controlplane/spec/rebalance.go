@@ -5,7 +5,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Rebalance is the model of the classic consumer group protocol, with the

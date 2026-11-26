@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // ---- the test protocol ----

@@ -75,11 +75,11 @@ linters:
             - "!**/cmd/*sim*/**"
           deny:
             - pkg: "github.com/manifesterio/mds/dst/sim"
-              desc: "production code may import dst/core and dst/runtime only; sim, verify and explore are for tests and simulators (plan section 6)"
-            - pkg: "github.com/manifesterio/mds/dst/verify"
-              desc: "production code may import dst/core and dst/runtime only; sim, verify and explore are for tests and simulators (plan section 6)"
-            - pkg: "github.com/manifesterio/mds/dst/explore"
-              desc: "production code may import dst/core and dst/runtime only; sim, verify and explore are for tests and simulators (plan section 6)"
+              desc: "production code may import dst/actor, dst/trace and dst/live only; sim, campaign and spectest are for tests and simulators (plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "production code may import dst/actor, dst/trace and dst/live only; sim, campaign and spectest are for tests and simulators (plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "production code may import dst/actor, dst/trace and dst/live only; sim, campaign and spectest are for tests and simulators (plan section 6)"
     gosec:
       excludes:
         - G115
@@ -90,11 +90,11 @@ linters:
       forbid:
         - pattern: ^panic$
           msg: "return an error; panic is for impossible state in internal/core and internal/verify/simulator only (Effective Go, Panic)"
-        # The actor runtime seam is for dst/sim and dst/runtime/live.
+        # The actor runtime seam is for dst/sim and dst/live.
         # Product code builds actors; only runtimes (and tests/verify) open effects.
         - pattern: ^actor\.(Effect([A-Z][A-Za-z]*)?|Binding|NewOutbox|Close|NewEntityRef|NewReplyTo|NewServiceRef|As|NewOwner|Asker|ReplyID|EntityID|ServiceID)$
-          pkg: ^github\.com/manifesterio/mds/dst/core/actor$
-          msg: "actor runtime seam is for dst/sim and dst/runtime/live only"
+          pkg: ^github\.com/manifesterio/mds/dst/actor$
+          msg: "actor runtime seam is for dst/sim and dst/live only"
     funlen:
       lines: 80
       statements: 50

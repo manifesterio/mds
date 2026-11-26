@@ -1,6 +1,6 @@
 package contract
 
-import "github.com/manifesterio/mds/dst/core/trace"
+import "github.com/manifesterio/mds/dst/trace"
 
 // Tag and Fold of every Operation case and every Response case. The operations
 // use the tags 202 to 218, the responses 302 to 312. The tag 200 (no operation)

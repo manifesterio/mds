@@ -9,8 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // groupMarker prefixes a multi-command commit entry so drain can tell it from a
@@ -155,9 +154,9 @@ func (m *Replica) emitCommitGroup(o *outbox) {
 	data := wrap(m.epoch, m.config.writer(), inner)
 	slot := m.alloc()
 	m.env.Always(slot >= m.trimFloor, putNeverWinsBelowTrimFloor,
-		assert.Pair{Key: "slot", Value: slot})
+		actor.Pair{Key: "slot", Value: slot})
 	m.env.Always(len(data) <= m.config.maxEntryBytes() || n == 1, groupEntryUnderByteCap,
-		assert.Pair{Key: "bytes", Value: len(data)})
+		actor.Pair{Key: "bytes", Value: len(data)})
 	m.waiters[id] = cmds
 	m.emitAppend(o, &inFlightAppend{slot: slot, id: id, data: data, cmds: cmds})
 }

@@ -3,7 +3,7 @@
 package kinds
 
 import (
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 func (ping) isTestIn() {}

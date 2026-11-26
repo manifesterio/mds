@@ -1,7 +1,7 @@
 // Package errors is dstgen test input: every misuse.
 package errors
 
-import "github.com/manifesterio/mds/dst/core/trace"
+import "github.com/manifesterio/mds/dst/trace"
 
 type Message interface{ Fold(h *trace.Hash) }
 

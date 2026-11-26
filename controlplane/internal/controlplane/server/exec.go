@@ -3,7 +3,7 @@ package server
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/runtime/live"
+	"github.com/manifesterio/mds/dst/live"
 )
 
 // runIO is the replica's exec function for live.Spawn: it starts io on a

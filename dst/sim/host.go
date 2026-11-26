@@ -3,7 +3,7 @@ package sim
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // slot is one actor of the System, whatever its types. It is the one seam

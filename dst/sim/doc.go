@@ -4,7 +4,7 @@
 // as Services and product IO with Executors, and folds every step into a
 // trace hash, so one seed always gives one hash.
 //
-// Test code only: production runs the same actors on dst/runtime/live.
+// Test code only: production runs the same actors on dst/live.
 //
 // Glossary:
 //

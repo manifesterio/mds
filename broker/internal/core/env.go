@@ -1,6 +1,6 @@
 package core
 
-import "github.com/manifesterio/mds/dst/core/actor"
+import "github.com/manifesterio/mds/dst/actor"
 
 // Environment is the Env of a broker or simulated client: random numbers,
 // buggify sites and assertions. It is the only way nondeterminism enters the

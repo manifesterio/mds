@@ -8,8 +8,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/runtime/live"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/live"
 )
 
 // Group calls go to the rebalance actor with live.Ask. The actor asks the

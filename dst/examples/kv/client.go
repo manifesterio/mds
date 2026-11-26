@@ -1,15 +1,14 @@
 package kv
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The client is the test workload. It plays a script of puts and gets
 // against the server, pauses a little between steps, and checks that every
 // read sees the value the script expects.
 
-var readSeesLastWrite = assert.NewAlways("kv: a read sees the last write")
+var readSeesLastWrite = actor.NewAlways("kv: a read sees the last write")
 
 // ---- what the client receives ----
 
@@ -56,9 +55,9 @@ func (c *client) Receive(_ actor.Now, msg clientMsg, outbox *actor.Outbox[client
 		c.playNextStep(outbox)
 	case serverAnswered:
 		c.env.Always(m.Answer.Value == m.Expected, readSeesLastWrite,
-			assert.Pair{Key: "key", Value: m.Answer.Key},
-			assert.Pair{Key: "got", Value: m.Answer.Value},
-			assert.Pair{Key: "expected", Value: m.Expected})
+			actor.Pair{Key: "key", Value: m.Answer.Key},
+			actor.Pair{Key: "got", Value: m.Answer.Value},
+			actor.Pair{Key: "expected", Value: m.Expected})
 	}
 }
 

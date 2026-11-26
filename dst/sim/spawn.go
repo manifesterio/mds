@@ -3,7 +3,7 @@ package sim
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // executor simulates product IO. One executor per IO sum, shared by every

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 func TestMonoGoesForwardAndWallIsNow(t *testing.T) {

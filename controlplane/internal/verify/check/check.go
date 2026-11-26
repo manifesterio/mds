@@ -22,7 +22,7 @@ import (
 	"cmp"
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Slot is a position in the log.
@@ -48,29 +48,29 @@ type Log interface {
 type Checker struct {
 	Rec Recorder
 	// Hole is the Always for NoHole.
-	Hole assert.Always
+	Hole actor.Always
 	// Decode is the Always for Replay decode failures.
-	Decode assert.Always
+	Decode actor.Always
 }
 
 // Recorder records Always properties. actor.Assertions and actor.Env satisfy it.
 type Recorder interface {
-	Always(cond bool, p assert.Always, details ...assert.Pair)
+	Always(cond bool, p actor.Always, details ...actor.Pair)
 }
 
 // Verdict records ok under p and returns ok, so the caller can skip work after a
 // failure. The detail is formatted only when the check fails.
-func Verdict(a Recorder, ok bool, p assert.Always, format string, args ...any) bool {
+func Verdict(a Recorder, ok bool, p actor.Always, format string, args ...any) bool {
 	if ok {
 		a.Always(true, p)
 		return true
 	}
-	a.Always(false, p, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
+	a.Always(false, p, actor.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
 	return false
 }
 
 // Violation records a failed Always with a formatted detail. The run goes on.
-func Violation(a Recorder, p assert.Always, format string, args ...any) {
+func Violation(a Recorder, p actor.Always, format string, args ...any) {
 	Verdict(a, false, p, format, args...)
 }
 

@@ -3,8 +3,8 @@ package sim
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Phase is the fault regime of the run.

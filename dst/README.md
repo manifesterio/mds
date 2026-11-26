@@ -1,9 +1,9 @@
 # dst
 
-Deterministic simulation tools for Go tests. A product writes **actors** (`core/actor`): state machines that
+Deterministic simulation tools for Go tests. A product writes **actors** (`actor`): state machines that
 take one message at a time and record effects on an outbox, and do no IO. The **simulator** (`sim`) runs many
-actors in one goroutine, with one seeded `rng`, virtual time, a `fault` injector, an `assert` log and a `trace`
-fingerprint per run. The same actors run in production on `runtime/live`.
+actors in one goroutine, with one seeded `rng`, virtual time, a buggify injector, an assertion log and a `trace`
+fingerprint per run. The same actors run in production on `live`.
 
 Module: `github.com/manifesterio/mds/dst`
 
@@ -20,25 +20,23 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 
 | Package | Role |
 |---|---|
-| `core/actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Product actor code imports this package. |
-| `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. |
-| `runtime/live` | The production runtime for the same actors: a `Host` with one goroutine per actor, Control before Data inboxes, real keyed timers, an exec function per actor for product IO, and `Ask` / `Tell` / `OnLoop` for callers outside the actors. Real time and goroutines: it is not in the determinism gate. |
-| `core/trace` | Running FNV-1a `Hash` / `StateHasher` |
-| `core/assert` | Typed handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable), `Coverage` and the catalog |
-| `core/fault` | Declared buggify sites (`NewSite`, `NewFaultSite`), `SiteCount` and the catalog |
-| `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
-| `verify/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
-| `verify/golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
+| `actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Also the typed assertion handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable, `Pair`, `AssertKind`) and the declared buggify sites (`Site`, `NewSite`, `NewFaultSite`). Product actor code imports this package. |
+| `actor/actortest` | A fake `Env` and step helpers for unit tests of actors |
+| `trace` | Running FNV-1a `Hash` |
+| `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. Its `Result` carries `Coverage` and `SiteCount`. |
+| `live` | The production runtime for the same actors: a `Host` with one goroutine per actor, Control before Data inboxes, real keyed timers, an exec function per actor for product IO, and `Ask` / `Tell` / `OnLoop` for callers outside the actors. Real time and goroutines: it is not in the determinism gate. |
+| `campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
+| `spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun`; also fixed seed-to-hash asserts (`AssertHash`, `AssertCampaign`) and golden file `LoadHashes` / `SaveHashes` |
 | `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
 The run stream (SplitMix64) is internal (`internal/rng`): code draws through `actor.Rand` (the Env), and host setup before a `System` exists uses `sim.DeriveRand(seed, label)`.
-The assertion log (`internal/assertlog`) and the buggify injector (`internal/inject`, per-site latch and Quiet) are internal too: code records and asks through the Env, and a harness reads coverage with `System.Coverage`.
+The catalog of declared properties and sites (`internal/catalog`), the environment parser (`internal/seedenv`), the assertion log and the buggify injector (per-site latch and Quiet, inside `sim`) are internal too: code records and asks through the Env, and a harness reads coverage with `System.Coverage`.
 
 ## How to write an actor
 
 An actor is a state machine. It takes one message at a time, does no IO, and records what it wants on
 an `Outbox`. The runtime carries the effects out after `Receive` returns. `sim` runs the same actor code
-in tests; `live` (`dst/runtime/live`) runs it in production with a `Host`.
+in tests; `live` (`dst/live`) runs it in production with a `Host`.
 
 ```go
 func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, actor.NoIO]) {
@@ -161,8 +159,8 @@ and `<EnvPrefix>_CAMPAIGN`. A flag wins over its variable. `ParseOptions` is the
 The report lists: counts, failed runs with the command that replays them, every assertion with its
 checks and passes, the paths that were never reached, the Always properties that were never checked,
 the buggify sites (asked, on, calls, fired), the sites that never fired, and the coverage curve.
-"Never reached", "never checked" and "never fired" come from the catalog (`assert.Catalog`,
-`fault.Sites`), so a path that never ran is still named. Every `CheckEvery`-th seed runs twice with the
+"Never reached", "never checked" and "never fired" come from the catalog (`catalog.Asserts`,
+`catalog.Sites`), so a path that never ran is still named. Every `CheckEvery`-th seed runs twice with the
 step log switched, and a different hash, step count or number of random calls fails the seed
 ("nondeterminism"). A campaign of `MinSeedsForCoverage` seeds or more also fails on a coverage gap.
 
@@ -172,11 +170,11 @@ Same seed must still replay to the same hash. Cross-seed hash collisions are nor
 
 For planted bugs, use `spectest.RequireCaught` so each bug fails at least once in seeds `1..budget`, and `spectest.RequireClean` so the same budget raises no false alarms. With a `spectest.Lockstep`, `RunSeed(seed)` runs one seed and returns the shrunk failure.
 
-A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and the command to run it again. The product sets `Rerun.EnvPrefix` (for example `P`); then `P_SEED=<n> go test -run '^TestX$' -count=1 -v .` runs only seed n. `Check` reads the same three variables as the campaign tool, with the same parser (`campaign.ReadEnv`): `P_SEED` (one seed), `P_CAMPAIGN` (seeds until a time has passed) and `P_SEEDS` (the number of checks). `Lockstep.Checks` and `Lockstep.StepsPerCheck` set the number of checks and the average number of steps in a check.
+A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and the command to run it again. The product sets `Rerun.EnvPrefix` (for example `P`); then `P_SEED=<n> go test -run '^TestX$' -count=1 -v .` runs only seed n. `Check` reads the same three variables as the campaign tool, with the same parser (`internal/seedenv`): `P_SEED` (one seed), `P_CAMPAIGN` (seeds until a time has passed) and `P_SEEDS` (the number of checks). `Lockstep.Checks` and `Lockstep.StepsPerCheck` set the number of checks and the average number of steps in a check.
 
 ```bash
 go test ./examples/kv -run TestCampaign -count=1
-go test ./explore/campaign ./verify/... ./...
+go test ./campaign ./spectest ./...
 ```
 
 ## Host layer ownership
@@ -186,7 +184,7 @@ than re-owning it: `live.NewEnv` / `NewLoggingEnv` / `NewCounterEnv`;
 `sim.Bootstrap`, `RecordFault`, `AskDelayed`, `QuiesceEvery`, `EveryWhile`,
 `Timeline.PhaseStart`, `FaultCoverageRule`, `DrawBetween` / `MaybeAdd`;
 `campaign.Outcome` / `SetupFailure`;
-`trace.StateHasher`; `core/actor/actortest`.
+`trace.Hash`; `actor/actortest`.
 Domain schedules, fault rates, and message vocabularies stay
 in the product. Sched merge into sim remains deferred (sim keeps its own queue).
 
@@ -207,7 +205,7 @@ These stay out of this module on purpose:
 - Product I/O fakes beyond the tiny KV examples
 - Full network-partition simulators
 
-Generic spec machinery is in: `verify/spectest` works on any spec with `Apply` and
+Generic spec machinery is in: `spectest` works on any spec with `Apply` and
 `StateHash`. It has no product words. A product brings its own spec, its own fault numbers and its
 own message types.
 

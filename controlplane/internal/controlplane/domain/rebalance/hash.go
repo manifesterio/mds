@@ -1,7 +1,7 @@
 package rebalance
 
 import (
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // StateHash implements actor.Actor. It folds the state that decides what the

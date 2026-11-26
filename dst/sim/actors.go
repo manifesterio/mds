@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Tag numbers of the trace hash for system bodies. They are frozen.

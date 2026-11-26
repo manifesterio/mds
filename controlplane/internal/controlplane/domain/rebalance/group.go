@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The Kafka names of the group states (Dead is a group the machine does not have).

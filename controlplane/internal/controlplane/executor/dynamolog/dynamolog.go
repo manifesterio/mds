@@ -17,7 +17,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/runtime/live"
+	"github.com/manifesterio/mds/dst/live"
 )
 
 // Client is the DynamoDB surface Log needs. *dynamodb.Client

@@ -15,8 +15,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -29,19 +28,19 @@ import (
 // failures counts violated Always props (the fake actor.Assertions).
 type failures map[string]int
 
-func (f failures) Always(c bool, p assert.Always, _ ...assert.Pair) {
+func (f failures) Always(c bool, p actor.Always, _ ...actor.Pair) {
 	if !c {
 		f[p.Name()]++
 	}
 }
-func (f failures) AlwaysOrUnreachable(c bool, p assert.AlwaysOrUnreachable, _ ...assert.Pair) {
+func (f failures) AlwaysOrUnreachable(c bool, p actor.AlwaysOrUnreachable, _ ...actor.Pair) {
 	if !c {
 		f[p.Name()]++
 	}
 }
-func (f failures) Sometimes(bool, assert.Sometimes)                   {}
-func (f failures) Reachable(assert.Reachable)                         {}
-func (f failures) Unreachable(p assert.Unreachable, _ ...assert.Pair) { f[p.Name()]++ }
+func (f failures) Sometimes(bool, actor.Sometimes)                  {}
+func (f failures) Reachable(actor.Reachable)                        {}
+func (f failures) Unreachable(p actor.Unreachable, _ ...actor.Pair) { f[p.Name()]++ }
 
 type stats struct{ retries, replays, indetLand, indetNo, rejected, multi int }
 

@@ -7,7 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/dst/runtime/live"
+	"github.com/manifesterio/mds/dst/live"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

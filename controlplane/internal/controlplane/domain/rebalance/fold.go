@@ -4,7 +4,7 @@ package rebalance
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Fold writes the reply into the trace hash: its tag, the code, then the

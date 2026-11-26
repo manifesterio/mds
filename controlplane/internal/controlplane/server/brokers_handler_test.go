@@ -9,7 +9,7 @@ import (
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 func hb(id int32, host string, port int32) *cpv1.BrokerHeartbeatRequest {

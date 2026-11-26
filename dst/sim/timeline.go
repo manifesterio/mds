@@ -3,7 +3,7 @@ package sim
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Kernel fact names written by the System (and host RecordFault).

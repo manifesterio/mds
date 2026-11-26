@@ -3,7 +3,7 @@ package rebalance
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The plain call types of the group protocol (Protocol, Member, Assignment) and

@@ -1,7 +1,7 @@
 // Package fresh is the kinds input with its generated files on disk (TestCheck).
 package fresh
 
-import "github.com/manifesterio/mds/dst/core/trace"
+import "github.com/manifesterio/mds/dst/trace"
 
 // Message is what every case has.
 type Message interface{ Fold(h *trace.Hash) }

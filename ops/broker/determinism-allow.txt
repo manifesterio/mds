@@ -29,16 +29,13 @@ github.com/manifesterio/mds/broker/...
 
 # Deterministic base types and the trace hash (github.com/manifesterio/mds/dst). They are
 # first-party code in this repo, so they need no audit record. Listed one by one on purpose.
-github.com/manifesterio/mds/dst/core/assert
-github.com/manifesterio/mds/dst/core/fault
-github.com/manifesterio/mds/dst/core/actor
-github.com/manifesterio/mds/dst/core/trace
+github.com/manifesterio/mds/dst/actor
+github.com/manifesterio/mds/dst/trace
 # The dst v2 kernel and the seeded random stream. The new simulation tree
 # (internal/verify/simulator) runs on the kernel. Both are first-party and have their own determinism gate in dst.
 github.com/manifesterio/mds/dst/sim
 github.com/manifesterio/mds/dst/internal/rng
-github.com/manifesterio/mds/dst/internal/assertlog
-github.com/manifesterio/mds/dst/internal/inject
+github.com/manifesterio/mds/dst/internal/catalog
 
 # The control plane contract (github.com/manifesterio/mds/controlplane/contract): plain data and
 # the Tag and Fold of the control plane operations and responses. It imports only dst, shared/objectstore,
@@ -46,7 +43,7 @@ github.com/manifesterio/mds/dst/internal/inject
 # package of the control plane: no runtime, no server, no client.
 github.com/manifesterio/mds/controlplane/contract
 # The one control plane spec (github.com/manifesterio/mds/controlplane/spec): a plain model with no
-# I/O. It imports only the contract and dst/core/trace. The bridge in internal/verify/speccheck/specbridge
+# I/O. It imports only the contract and dst/trace. The bridge in internal/verify/speccheck/specbridge
 # and the simulator use it. First-party, so no audit record.
 github.com/manifesterio/mds/controlplane/spec
 # Shared code of this repo (github.com/manifesterio/mds/shared). First-party, so no audit record.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/verify/golden"
+	"github.com/manifesterio/mds/dst/spectest"
 )
 
 // goldenHashes pins named scenario/seed traces. An accidental determinism
@@ -32,7 +32,7 @@ func TestGoldenWithoutGroups(t *testing.T) {
 		if !r.OK() {
 			t.Fatal(Report(r))
 		}
-		golden.Assert(t, name, r.Hash, goldenWithoutGroups)
+		spectest.AssertHash(t, name, r.Hash, goldenWithoutGroups)
 	}
 }
 
@@ -52,6 +52,6 @@ func TestGoldenTraceHashes(t *testing.T) {
 		if !r.OK() {
 			t.Fatal(Report(r))
 		}
-		golden.Assert(t, name, r.Hash, goldenHashes)
+		spectest.AssertHash(t, name, r.Hash, goldenHashes)
 	}
 }

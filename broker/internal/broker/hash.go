@@ -3,14 +3,14 @@ package broker
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
-// stateHasher folds broker state with trace.StateHasher. Domain folds are
-// methods here; the FNV-1a primitives live in dst/core/trace.
-type stateHasher struct{ trace.StateHasher }
+// stateHasher folds broker state with trace.Hash. Domain folds are
+// methods here; the FNV-1a primitives live in dst/trace.
+type stateHasher struct{ trace.Hash }
 
-func newStateHasher() stateHasher { return stateHasher{trace.NewStateHasher()} }
+func newStateHasher() stateHasher { return stateHasher{trace.New()} }
 
 func (h *stateHasher) ref(r core.SegmentRef) {
 	h.String(r.Key)

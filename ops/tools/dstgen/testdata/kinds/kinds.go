@@ -1,7 +1,7 @@
 // Package kinds is dstgen test input: every annotation and every field kind.
 package kinds
 
-import "github.com/manifesterio/mds/dst/core/trace"
+import "github.com/manifesterio/mds/dst/trace"
 
 // Message is what every case has.
 type Message interface{ Fold(h *trace.Hash) }

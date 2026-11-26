@@ -2,7 +2,7 @@
 // the production exec function and the socket goroutines use. SDK and HTTP
 // types never leak past an adapter. The simulator does not implement these;
 // it runs the same broker actor over simulated IO. The production runtime is
-// a dst/runtime/live Host (package production).
+// a dst/live Host (package production).
 package system
 
 import (

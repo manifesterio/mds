@@ -5,8 +5,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // consumer reads every partition from offset 0 with one multi-partition Fetch

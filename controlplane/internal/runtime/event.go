@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // EventData is every message the replica takes: lifecycle, its own timers,

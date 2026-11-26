@@ -4,8 +4,8 @@ import (
 	"log/slog"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/runtime/live"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/live"
 )
 
 // NewEnv returns the production Env of incarnation self that logs assertion

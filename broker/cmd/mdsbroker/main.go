@@ -23,7 +23,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system/production"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
 	"github.com/manifesterio/mds/controlplane/client"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/shared/awsmetrics"
 	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
 	"github.com/manifesterio/mds/shared/runinfo"

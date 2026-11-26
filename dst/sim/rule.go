@@ -1,8 +1,7 @@
 package sim
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Rule checks one property of a run. Make a fresh Rule for every run, so it
@@ -35,8 +34,8 @@ func (v view) Assert() actor.Assertions { return env{sys: v.sys} }
 
 // FaultCoverage names the Sometimes handles that FaultCoverageRule records.
 type FaultCoverage struct {
-	HardCrash    assert.Sometimes
-	GracefulStop assert.Sometimes
+	HardCrash    actor.Sometimes
+	GracefulStop actor.Sometimes
 }
 
 // FaultCoverageRule reports a hard crash (sim_crashed cause=attrition) and a

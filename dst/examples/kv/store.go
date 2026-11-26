@@ -1,17 +1,16 @@
 package kv
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // The store is a simulated outside service (think S3 or DynamoDB). It keeps
 // a map from keys to values, and answers each read after a short random
 // delay.
 
-var putIsStored = assert.NewAlways("kv: a put is stored")
+var putIsStored = actor.NewAlways("kv: a put is stored")
 
 // ---- what the store accepts, and what it answers ----
 
@@ -53,7 +52,7 @@ func (s *store) Handle(ctx *sim.ServiceCtx, req storeReq, reply sim.Responder[st
 			return
 		}
 		s.values[r.Key] = r.Value
-		ctx.Env().Always(s.values[r.Key] == r.Value, putIsStored, assert.Pair{Key: "key", Value: r.Key})
+		ctx.Env().Always(s.values[r.Key] == r.Value, putIsStored, actor.Pair{Key: "key", Value: r.Key})
 	case storeGet:
 		delay := ctx.Env().Duration(1*ms, 5*ms)
 		reply.After(delay, storeReply{Key: r.Key, Value: s.values[r.Key]})

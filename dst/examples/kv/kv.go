@@ -29,7 +29,7 @@ package kv
 //go:generate go run github.com/manifesterio/mds/ops/tools/dstgen
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 

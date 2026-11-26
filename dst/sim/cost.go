@@ -1,7 +1,7 @@
 package sim
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // CostParams is the CPU model of a node: how long the node is busy after one

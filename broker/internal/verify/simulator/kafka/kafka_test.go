@@ -15,11 +15,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/verify/spectest"
+	"github.com/manifesterio/mds/dst/spectest"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -78,7 +76,7 @@ func runSeeds(t *testing.T, ss []uint64, cfgFor func(seed uint64) Config) []sim.
 // of expectedReachable).
 func report(t *testing.T, results []sim.Result, coverage bool) {
 	t.Helper()
-	total := map[string]assert.Coverage{}
+	total := map[string]sim.Coverage{}
 	for _, r := range results {
 		for _, f := range r.Failures {
 			t.Errorf("seed %d: kind=%d %s step=%d at=%d: %s", r.Seed, f.Kind, f.Property, f.Step, f.At, f.Detail)
@@ -93,7 +91,7 @@ func report(t *testing.T, results []sim.Result, coverage bool) {
 		return
 	}
 	for name, c := range total {
-		if (c.Kind == assert.KindSometimes || c.Kind == assert.KindReachable) && c.Passes == 0 {
+		if (c.Kind == actor.KindSometimes || c.Kind == actor.KindReachable) && c.Passes == 0 {
 			t.Errorf("never satisfied: %q (%s)", name, c.Kind)
 		}
 	}
@@ -292,17 +290,17 @@ func (e *fakeEnv) Between(lo, hi int64) int64 {
 func (e *fakeEnv) Duration(lo, hi actor.Duration) actor.Duration {
 	return actor.Duration(e.Between(int64(lo), int64(hi)))
 }
-func (e *fakeEnv) Float64() float64                                                   { return float64(e.Uint64()>>11) / (1 << 53) }
-func (*fakeEnv) Chance(float64) bool                                                  { return false }
-func (*fakeEnv) Self() actor.Incarnation                                              { return actor.Incarnation{Name: "w"} }
-func (*fakeEnv) Maybe(fault.Site) bool                                                { return false }
-func (*fakeEnv) MaybeP(fault.Site, float64) bool                                      { return false }
-func (*fakeEnv) Fault(fault.Site, float64) bool                                       { return false }
-func (*fakeEnv) Always(bool, assert.Always, ...assert.Pair)                           {}
-func (*fakeEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
-func (*fakeEnv) Sometimes(bool, assert.Sometimes)                                     {}
-func (*fakeEnv) Reachable(assert.Reachable)                                           {}
-func (*fakeEnv) Unreachable(assert.Unreachable, ...assert.Pair)                       {}
+func (e *fakeEnv) Float64() float64                                                 { return float64(e.Uint64()>>11) / (1 << 53) }
+func (*fakeEnv) Chance(float64) bool                                                { return false }
+func (*fakeEnv) Self() actor.Incarnation                                            { return actor.Incarnation{Name: "w"} }
+func (*fakeEnv) Maybe(actor.Site) bool                                              { return false }
+func (*fakeEnv) MaybeP(actor.Site, float64) bool                                    { return false }
+func (*fakeEnv) Fault(actor.Site, float64) bool                                     { return false }
+func (*fakeEnv) Always(bool, actor.Always, ...actor.Pair)                           {}
+func (*fakeEnv) AlwaysOrUnreachable(bool, actor.AlwaysOrUnreachable, ...actor.Pair) {}
+func (*fakeEnv) Sometimes(bool, actor.Sometimes)                                    {}
+func (*fakeEnv) Reachable(actor.Reachable)                                          {}
+func (*fakeEnv) Unreachable(actor.Unreachable, ...actor.Pair)                       {}
 
 // newTestHistory is a history for a workload that is driven by hand.
 func newTestHistory() *History {

@@ -3,7 +3,7 @@ package kafka
 import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -18,7 +18,7 @@ func (p *progressCheck) AtEnd(v sim.View) {
 	after := heal + sim.Time(preset.ProgressGraceTime)
 	var produced, reads int
 	for _, operation := range p.hist.Ops() {
-		v.Assert().Always(operation.Outcome != history.Pending, noOpPendingAtEnd, assert.Pair{Key: "op", Value: operation.Op})
+		v.Assert().Always(operation.Outcome != history.Pending, noOpPendingAtEnd, actor.Pair{Key: "op", Value: operation.Op})
 		if !ok || operation.Outcome == history.Pending {
 			continue
 		}
@@ -27,7 +27,7 @@ func (p *progressCheck) AtEnd(v sim.View) {
 			produced++
 			if operation.Return >= after && r.Why != "rejected" {
 				v.Assert().Always(operation.Outcome == history.ResultKnown && r.Base >= 0, produceInHealIsAcked,
-					assert.Pair{Key: "op", Value: operation.Op}, assert.Pair{Key: "result", Value: r}, assert.Pair{Key: "return", Value: operation.Return})
+					actor.Pair{Key: "op", Value: operation.Op}, actor.Pair{Key: "result", Value: r}, actor.Pair{Key: "return", Value: operation.Return})
 			}
 		case ReadRes:
 			reads++
@@ -37,7 +37,7 @@ func (p *progressCheck) AtEnd(v sim.View) {
 					good = good && p.Code == 0
 				}
 				v.Assert().Always(good, fetchInHealSucceeds,
-					assert.Pair{Key: "op", Value: operation.Op}, assert.Pair{Key: "result", Value: r}, assert.Pair{Key: "invoke", Value: operation.Invoke})
+					actor.Pair{Key: "op", Value: operation.Op}, actor.Pair{Key: "result", Value: r}, actor.Pair{Key: "invoke", Value: operation.Invoke})
 			}
 		}
 	}

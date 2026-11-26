@@ -6,8 +6,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -73,8 +72,8 @@ const ProgressGraceTime = 6 * actor.Second
 // The fault coverage assertions of the scenario.
 var (
 	KafkaFaultCoverage = sim.FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
-		HardCrash:    assert.NewSometimes("kafka: fault fired: hard crash"),
-		GracefulStop: assert.NewSometimes("kafka: fault fired: graceful stop"),
+		HardCrash:    actor.NewSometimes("kafka: fault fired: hard crash"),
+		GracefulStop: actor.NewSometimes("kafka: fault fired: graceful stop"),
 	}
 )
 

@@ -3,7 +3,7 @@ package rebalance
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The timer keys. A timer started again under the same key replaces the old

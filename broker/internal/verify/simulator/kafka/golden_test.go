@@ -4,7 +4,7 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/verify/golden"
+	"github.com/manifesterio/mds/dst/spectest"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/golden_hashes.txt from the current code")
@@ -30,14 +30,14 @@ func goldenHashes() map[uint64]uint64 {
 func TestGoldenTraceHashes(t *testing.T) {
 	got := goldenHashes()
 	if *updateGolden {
-		if err := golden.Save(goldenFile, got); err != nil {
+		if err := spectest.SaveHashes(goldenFile, got); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
-	want, err := golden.Load(goldenFile)
+	want, err := spectest.LoadHashes(goldenFile)
 	if err != nil {
 		t.Fatalf("%v (create it with -update-golden)", err)
 	}
-	golden.AssertCampaign(t, got, want)
+	spectest.AssertCampaign(t, got, want)
 }

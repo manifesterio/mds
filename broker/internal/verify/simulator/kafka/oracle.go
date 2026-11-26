@@ -8,8 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -95,12 +94,12 @@ func topicPartitionName(topicPartition core.TopicPartition) string {
 // at this position of its batch, never from a definitely rejected batch). A
 // value may appear again only as a retry of its batch; AtEnd bounds the count
 // by the sends.
-func (o *expectedLogChecker) record(v sim.View, pl *partitionLog, off int64, i int, val string, det []assert.Pair) {
+func (o *expectedLogChecker) record(v sim.View, pl *partitionLog, off int64, i int, val string, det []actor.Pair) {
 	as := v.Assert()
 	if val == "?" {
 		return
 	}
-	d := append(slices.Clip(det), assert.Pair{Key: "offset", Value: off}, assert.Pair{Key: "value", Value: val})
+	d := append(slices.Clip(det), actor.Pair{Key: "offset", Value: off}, actor.Pair{Key: "value", Value: val})
 	o.seen[val]++
 	c, b, ri, ok := parseVal(val)
 	as.Always(ok && ri == i, batchRecordsKeepOrder, d...)
@@ -128,7 +127,7 @@ func (o *expectedLogChecker) acks(v sim.View) {
 		if !ok1 || !ok2 || !ok3 {
 			continue
 		}
-		det := []assert.Pair{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
+		det := []actor.Pair{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
 			{Key: "count", Value: int64(count)}, {Key: "node", Value: tf.Source.Name}}
 		ti, known := o.idx[contract.NewTopicPartition(string(topic), int32(part))]
 		bi, found := -1, false
@@ -163,18 +162,18 @@ func (o *expectedLogChecker) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
 		from := ro.Parts[i]
 		ti := o.idx[from.TopicPartition]
 		pl := o.logs[ti]
-		det := []assert.Pair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: topicPartitionName(from.TopicPartition)}, {Key: "from", Value: from.Off}}
+		det := []actor.Pair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: topicPartitionName(from.TopicPartition)}, {Key: "from", Value: from.Off}}
 		as.Always(!part.Corrupt, consumerNeverReceivesCorruptBatch, det...)
 		as.Always(part.Code != 1, consumerFetchNeverOutOfRange, det...)
 		if part.Code != 0 {
 			continue
 		}
 		as.Always(part.HWM <= int64(len(pl.vals)), fetchHighWatermarkNotAboveLog,
-			append(slices.Clip(det), assert.Pair{Key: "hwm", Value: part.HWM})...)
+			append(slices.Clip(det), actor.Pair{Key: "hwm", Value: part.HWM})...)
 		key := [2]int{ro.Client, ti}
 		as.Always(from.Off == o.cpos[key], consumerResumesWhereLastReadEnded, det...)
 		for j, r := range part.Recs {
-			d := append(slices.Clip(det), assert.Pair{Key: "offset", Value: r.Off}, assert.Pair{Key: "value", Value: r.Val})
+			d := append(slices.Clip(det), actor.Pair{Key: "offset", Value: r.Off}, actor.Pair{Key: "value", Value: r.Val})
 			ok := r.Off == from.Off+int64(j)
 			as.Always(ok, consumerSeesEveryOffsetInOrder, d...)
 			inLog := r.Off >= 0 && r.Off < int64(len(pl.vals)) && r.Off < part.HWM
@@ -206,8 +205,8 @@ func (o *expectedLogChecker) AtEnd(v sim.View) {
 			// Every send commits at most once (a MaybeApplied commit is retried
 			// under its key), so a batch is in the log at most once per send.
 			as.Always(o.seen[po.Vals[0]] <= max(res.Attempts, 1), batchCommittedAtMostOncePerSend,
-				assert.Pair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, assert.Pair{Key: "value", Value: po.Vals[0]},
-				assert.Pair{Key: "times", Value: o.seen[po.Vals[0]]}, assert.Pair{Key: "sends", Value: res.Attempts})
+				actor.Pair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, actor.Pair{Key: "value", Value: po.Vals[0]},
+				actor.Pair{Key: "times", Value: o.seen[po.Vals[0]]}, actor.Pair{Key: "sends", Value: res.Attempts})
 		}
 		switch operation.Outcome {
 		case history.ResultKnown:
@@ -215,27 +214,27 @@ func (o *expectedLogChecker) AtEnd(v sim.View) {
 				off := res.Base + int64(i)
 				same := res.Base >= 0 && off < int64(len(o.logs[ti].vals)) && o.logs[ti].vals[off] == val
 				as.Always(same, ackedRecordAtAckedOffset,
-					assert.Pair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, assert.Pair{Key: "offset", Value: off}, assert.Pair{Key: "value", Value: val})
+					actor.Pair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, actor.Pair{Key: "offset", Value: off}, actor.Pair{Key: "value", Value: val})
 			}
 			// One batch at a time per (client, partition): the next batch is built
 			// after this one was acked, so its acked offset is higher.
 			k := [2]int{po.Client, ti}
 			if prev, had := lastAcked[k]; had {
 				as.Always(res.Base >= prev+1, clientAckedOffsetsIncrease,
-					assert.Pair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, assert.Pair{Key: "base", Value: res.Base}, assert.Pair{Key: "previous", Value: prev})
+					actor.Pair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, actor.Pair{Key: "base", Value: res.Base}, actor.Pair{Key: "previous", Value: prev})
 			}
 			lastAcked[k] = res.Base
 		case history.GivenUp:
 			for _, val := range po.Vals {
-				as.Always(o.seen[val] == 0, definitelyRejectedBatchNeverCommitted, assert.Pair{Key: "value", Value: val})
+				as.Always(o.seen[val] == 0, definitelyRejectedBatchNeverCommitted, actor.Pair{Key: "value", Value: val})
 			}
 		}
 	}
 	for c := o.opts.Producers; c < o.opts.Producers+o.opts.Consumers; c++ {
 		for ti, pl := range o.logs {
 			as.Always(o.cpos[[2]int{c, ti}] == int64(len(pl.vals)), everyConsumerCaughtUp,
-				assert.Pair{Key: "client", Value: c}, assert.Pair{Key: "tp", Value: topicPartitionName(pl.topicPartition)},
-				assert.Pair{Key: "pos", Value: o.cpos[[2]int{c, ti}]}, assert.Pair{Key: "hwm", Value: int64(len(pl.vals))})
+				actor.Pair{Key: "client", Value: c}, actor.Pair{Key: "tp", Value: topicPartitionName(pl.topicPartition)},
+				actor.Pair{Key: "pos", Value: o.cpos[[2]int{c, ti}]}, actor.Pair{Key: "hwm", Value: int64(len(pl.vals))})
 		}
 	}
 	total := 0

@@ -3,8 +3,8 @@ package preset
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/actor/actortest"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/actor/actortest"
 )
 
 func TestNewAndPhases(t *testing.T) {

@@ -1,7 +1,7 @@
 package core
 
 import (
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/trace"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 

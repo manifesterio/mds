@@ -3,7 +3,7 @@ package replica
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Config tunes the control-plane replica. Zero value keeps catch-up and the

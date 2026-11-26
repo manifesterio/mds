@@ -16,10 +16,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Opts configures the workload.
@@ -244,7 +243,7 @@ func (c *client) send(kind requestKind, request kmsg.Request, o *outbox) {
 	h := core.RequestHeader{APIKey: request.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.id)}
 	data, err := c.codec.EncodeRequest(h, request)
 	if err != nil {
-		c.env.Unreachable(clientRequestEncodes, assert.Pair{Key: "err", Value: err.Error()})
+		c.env.Unreachable(clientRequestEncodes, actor.Pair{Key: "err", Value: err.Error()})
 		return
 	}
 	timeout := c.opts.requestTimeout()

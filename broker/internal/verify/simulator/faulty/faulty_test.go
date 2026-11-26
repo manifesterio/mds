@@ -5,10 +5,9 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // The tests use a tiny spec: a map from a name to a number. A "set" op stores a
@@ -97,9 +96,9 @@ func (s *spec) StateHash() uint64 {
 
 // The assertions of the test service.
 var (
-	testAsserts = faulty.NamedAsserts("test")                  //determinismcheck:ok catalog handles, set once at start
-	slotAsserts = faulty.NamedAsserts("slot")                  //determinismcheck:ok catalog handles, set once at start
-	testFlipped = assert.NewReachable("test answer corrupted") //determinismcheck:ok catalog handle, set once at start
+	testAsserts = faulty.NamedAsserts("test")                 //determinismcheck:ok catalog handles, set once at start
+	slotAsserts = faulty.NamedAsserts("slot")                 //determinismcheck:ok catalog handles, set once at start
+	testFlipped = actor.NewReachable("test answer corrupted") //determinismcheck:ok catalog handle, set once at start
 )
 
 // Which extras a test turns on.

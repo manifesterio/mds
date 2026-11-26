@@ -3,8 +3,9 @@ package rebalance
 import (
 	"testing"
 
+	"github.com/manifesterio/mds/dst/actor"
+
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/fault"
 )
 
 // everyOther is a fault injector for tests: each site that is on fires on
@@ -15,7 +16,7 @@ type everyOther struct {
 	fired map[string]int
 }
 
-func newEveryOther(sites ...fault.Site) *everyOther {
+func newEveryOther(sites ...actor.Site) *everyOther {
 	f := &everyOther{on: map[string]bool{}, calls: map[string]int{}, fired: map[string]int{}}
 	for _, s := range sites {
 		f.on[s.Name()] = true
@@ -23,7 +24,7 @@ func newEveryOther(sites ...fault.Site) *everyOther {
 	return f
 }
 
-func (f *everyOther) Maybe(site fault.Site) bool {
+func (f *everyOther) Maybe(site actor.Site) bool {
 	s := site.Name()
 	if !f.on[s] {
 		return false
@@ -36,8 +37,8 @@ func (f *everyOther) Maybe(site fault.Site) bool {
 	return false
 }
 
-func (f *everyOther) MaybeP(site fault.Site, _ float64) bool { return f.Maybe(site) }
-func (f *everyOther) Fault(fault.Site, float64) bool         { return false }
+func (f *everyOther) MaybeP(site actor.Site, _ float64) bool { return f.Maybe(site) }
+func (f *everyOther) Fault(actor.Site, float64) bool         { return false }
 
 // The sites that do not move time must not change any reply.
 func TestSitesKeepTheReplies(t *testing.T) {
@@ -72,7 +73,7 @@ func TestSitesKeepTheReplies(t *testing.T) {
 		{sec + delay + 5*sec, nil, nil}, // both sessions end: both are removed
 	})
 	h.check("expired", h.phase("g"), stateEmpty)
-	for _, site := range []fault.Site{SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
+	for _, site := range []actor.Site{SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
 		if f.fired[site.Name()] == 0 {
 			t.Errorf("site %s never fired", site.Name())
 		}

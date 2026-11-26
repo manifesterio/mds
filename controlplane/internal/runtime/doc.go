@@ -2,9 +2,9 @@
 // the messages it takes (EventData), the IO it performs on the log and the object
 // store (IO, each case with its answer type), and the Environment through which
 // the only permitted nondeterminism (randomness, buggify) and assertion recording
-// enter. The replica is an actor (package dst/core/actor).
+// enter. The replica is an actor (package dst/actor).
 //
-// Time and identity types come from dst/core/actor.
+// Time and identity types come from dst/actor.
 //
 // Rules (enforced by depguard/forbidigo in CI):
 //   - no imports of time, math/rand, crypto/rand, os, net, sync, or any SDK;

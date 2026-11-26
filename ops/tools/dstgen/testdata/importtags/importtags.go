@@ -1,7 +1,7 @@
 // Package importtags is dstgen test input for -import.
 package importtags
 
-import "github.com/manifesterio/mds/dst/core/trace"
+import "github.com/manifesterio/mds/dst/trace"
 
 type a struct{}
 type b struct{ N int }

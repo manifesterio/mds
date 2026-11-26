@@ -3,7 +3,7 @@ package sim
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // AttritionPlan makes the System kill actors spawned with the Attrition option

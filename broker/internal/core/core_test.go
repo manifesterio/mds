@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Connection events are Data; everything the node caused itself is Control.

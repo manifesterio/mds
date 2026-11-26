@@ -2,8 +2,7 @@ package simulator
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The buggify sites of the simulator. Each is a place where the fake log or
@@ -13,14 +12,14 @@ import (
 // and a replay refer to them.
 var (
 	// SiteLogSlowAnswer: the log applies the call, and the reply comes back late.
-	SiteLogSlowAnswer = fault.NewSite("sim.log.slow-answer") //determinismcheck:ok catalog handle, set once at start
+	SiteLogSlowAnswer = actor.NewSite("sim.log.slow-answer") //determinismcheck:ok catalog handle, set once at start
 	// SiteLogShortPage: a LogRead returns fewer entries than it could (at least
 	// one). LogRead promises "up to Limit", and the reader asks again from the
 	// slot after the last entry it got.
-	SiteLogShortPage = fault.NewSite("sim.log.short-read-page") //determinismcheck:ok catalog handle, set once at start
+	SiteLogShortPage = actor.NewSite("sim.log.short-read-page") //determinismcheck:ok catalog handle, set once at start
 	// SiteObjectsSlowAnswer: the object store applies the call, and the reply
 	// comes back late.
-	SiteObjectsSlowAnswer = fault.NewSite("sim.objects.slow-answer") //determinismcheck:ok catalog handle, set once at start
+	SiteObjectsSlowAnswer = actor.NewSite("sim.objects.slow-answer") //determinismcheck:ok catalog handle, set once at start
 )
 
 // slowAnswer is the extra delay of the reply to call: zero, or (when the site

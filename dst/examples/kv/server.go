@@ -1,6 +1,6 @@
 package kv
 
-import "github.com/manifesterio/mds/dst/core/actor"
+import "github.com/manifesterio/mds/dst/actor"
 
 // The server is the system under test: the state machine that a gRPC server
 // would wrap. It writes values to the store, reads them back for its callers,

@@ -1,7 +1,7 @@
 package sim
 
 import (
-	"github.com/manifesterio/mds/dst/core/actor"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // apply carries out the effects of one Receive in record order. Each is

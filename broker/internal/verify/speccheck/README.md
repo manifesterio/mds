@@ -43,7 +43,7 @@ go test ./internal/verify/simulator/kafka -run C4 -count=1      # C4
 ```
 
 Campaign-style env vars for the simulator use the `MDS` prefix via
-`dst/explore/campaign` (`campaign.ReadEnv`):
+`dst/campaign`:
 
 | Variable | Meaning |
 | --- | --- |

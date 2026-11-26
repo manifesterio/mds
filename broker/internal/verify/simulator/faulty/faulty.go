@@ -36,10 +36,9 @@ package faulty
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/assert"
-	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Spec is the fault-free program that gives the right answer. It has the same
@@ -82,28 +81,28 @@ type Faults struct {
 // package level (the assertion catalog needs that), with names it chooses --
 // or with NamedAsserts for the usual naming slots of a Prefix.
 type Asserts struct {
-	Outage      assert.Reachable // an outage window started
-	Unavailable assert.Reachable // a call was refused
-	Timeout     assert.Reachable // a timeout was injected
-	Lost        assert.Reachable // a reply was lost
-	Applied     assert.Sometimes // a timed-out op was applied
-	NotApplied  assert.Sometimes // a timed-out op was not applied
+	Outage      actor.Reachable // an outage window started
+	Unavailable actor.Reachable // a call was refused
+	Timeout     actor.Reachable // a timeout was injected
+	Lost        actor.Reachable // a reply was lost
+	Applied     actor.Sometimes // a timed-out op was applied
+	NotApplied  actor.Sometimes // a timed-out op was not applied
 }
 
 // NamedAsserts declares the six Asserts handles with the usual names for a
 // fault Prefix. Call it only in a package-level var block, like
-// assert.NewReachable. The names are "{prefix} outage started",
+// actor.NewReachable. The names are "{prefix} outage started",
 // "{prefix} 503 injected", "{prefix} timeout injected",
 // "{prefix} lost response injected", "{prefix} timed-out op applied" and
 // "{prefix} timed-out op not applied".
 func NamedAsserts(prefix string) Asserts {
 	return Asserts{
-		Outage:      assert.NewReachable(prefix + " outage started"),
-		Unavailable: assert.NewReachable(prefix + " 503 injected"),
-		Timeout:     assert.NewReachable(prefix + " timeout injected"),
-		Lost:        assert.NewReachable(prefix + " lost response injected"),
-		Applied:     assert.NewSometimes(prefix + " timed-out op applied"),
-		NotApplied:  assert.NewSometimes(prefix + " timed-out op not applied"),
+		Outage:      actor.NewReachable(prefix + " outage started"),
+		Unavailable: actor.NewReachable(prefix + " 503 injected"),
+		Timeout:     actor.NewReachable(prefix + " timeout injected"),
+		Lost:        actor.NewReachable(prefix + " lost response injected"),
+		Applied:     actor.NewSometimes(prefix + " timed-out op applied"),
+		NotApplied:  actor.NewSometimes(prefix + " timed-out op not applied"),
 	}
 }
 
@@ -116,8 +115,8 @@ type Corruption[Op, Res any] struct {
 	// res. It reports the bit it flipped, or false when res has nothing to flip.
 	// The answer of Apply must be a copy, so Flip may change it in place.
 	Flip    func(res Res, bits uint64) (out Res, bit uint64, ok bool)
-	Kind    string           // the name of the fault fact, for example "obj_get_corrupt"
-	Reached assert.Reachable // recorded when a bit was flipped
+	Kind    string          // the name of the fault fact, for example "obj_get_corrupt"
+	Reached actor.Reachable // recorded when a bit was flipped
 }
 
 // Shape tells Faulty how to read a request and how to build an answer. It is

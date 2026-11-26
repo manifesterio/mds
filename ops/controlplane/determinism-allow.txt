@@ -40,16 +40,13 @@ google.golang.org/protobuf/reflect/protoreflect
 # Deterministic simulation primitives (github.com/manifesterio/mds/dst). They are first-party
 # code in this repo, so they need no audit record. Listed one by one on purpose.
 # Deliberately absent: model and examples (not audited for determinism).
-github.com/manifesterio/mds/dst/core/assert
-github.com/manifesterio/mds/dst/explore/campaign
-github.com/manifesterio/mds/dst/core/fault
-github.com/manifesterio/mds/dst/verify/golden
+github.com/manifesterio/mds/dst/actor
+github.com/manifesterio/mds/dst/campaign
+github.com/manifesterio/mds/dst/spectest
 github.com/manifesterio/mds/dst/sim
-github.com/manifesterio/mds/dst/core/actor
+github.com/manifesterio/mds/dst/trace
 github.com/manifesterio/mds/dst/internal/rng
-github.com/manifesterio/mds/dst/internal/assertlog
-github.com/manifesterio/mds/dst/internal/inject
-github.com/manifesterio/mds/dst/core/trace
+github.com/manifesterio/mds/dst/internal/catalog
 
 # Shared code of this repo (github.com/manifesterio/mds/shared). First-party, so no audit record.
 # objectstore: the object store calls, results and spec as plain types (no I/O). status: ErrCode
