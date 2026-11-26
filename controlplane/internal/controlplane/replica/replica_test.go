@@ -25,7 +25,7 @@ type harness struct {
 
 func newHarness(t *testing.T, config replica.Config) *harness {
 	t.Helper()
-	env := actortest.NewEnv(actortest.Config{Self: actor.Incarnation{Name: "replica"}, Counter: true})
+	env := actortest.NewEnv(1, actortest.WithSelf(actor.Incarnation{Name: "replica"}))
 	return &harness{
 		t: t, m: replica.New(config)(env.Env), env: env,
 		book: &actortest.Book{

@@ -28,6 +28,6 @@ func TestSwarm(t *testing.T) {
 	t.Parallel()
 	p := New()
 	s := p.Settings
-	Swarm(actortest.NewEnv(actortest.Config{Seed: 1, Stream: true}).Rand, &s)
-	Swarm(actortest.NewEnv(actortest.Config{Seed: 2, Stream: true}).Rand, &s)
+	Swarm(actortest.NewEnv(1).Rand, &s)
+	Swarm(actortest.NewEnv(2).Rand, &s)
 }

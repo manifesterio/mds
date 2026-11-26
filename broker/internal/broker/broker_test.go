@@ -792,7 +792,7 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 	if len(a) != 3 || !reflect.DeepEqual(a, b) {
 		t.Fatalf("keys differ: %v %v", a, b)
 	}
-	env := actortest.NewEnv(actortest.Config{Self: testSelf, Seed: 7})
+	env := actortest.NewEnv(7, actortest.WithSelf(testSelf))
 	for _, k := range a {
 		if !segKeyRE.MatchString(k) || k != segmentformat.SegmentKey([16]byte(env.NewID())) {
 			t.Fatalf("key %q", k)

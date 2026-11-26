@@ -84,7 +84,7 @@ type harness struct {
 }
 
 func newHarness(t testT, config Config) *harness {
-	env := actortest.NewEnv(actortest.Config{Self: testSelf, Seed: 7})
+	env := actortest.NewEnv(7, actortest.WithSelf(testSelf))
 	h := &harness{t: t, env: env, book: &actortest.Book{Timers: map[actor.TimerKey]actortest.Record{}},
 		store: objectstore.NewSpec(), cp: testControlPlane{spec.New()},
 		config: config, timers: map[actor.TimerKey]actor.Effect{}, due: map[actor.TimerKey]actor.Mono{},

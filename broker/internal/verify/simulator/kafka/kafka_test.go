@@ -273,7 +273,7 @@ func TestCampaignIsNotVacuous(t *testing.T) {
 
 // testEnv is a seeded Env for driving the workload by hand.
 func testEnv(seed uint64) actor.Env {
-	return actortest.NewEnv(actortest.Config{Self: actor.Incarnation{Name: "w"}, Seed: seed}).Env
+	return actortest.NewEnv(seed, actortest.WithSelf(actor.Incarnation{Name: "w"})).Env
 }
 
 // newTestHistory is a history for a workload that is driven by hand.

@@ -113,12 +113,11 @@ func newHarnessFaults(t *testing.T, cfg Config, faults actor.Faults) *harness {
 // newBareHarness makes a harness and its machine. The machine has not taken any message yet.
 func newBareHarness(t *testing.T, cfg Config, faults actor.Faults) *harness {
 	t.Helper()
-	env := actortest.NewEnv(actortest.Config{
-		Self: actor.Incarnation{Name: "rebalance"}, Seed: seed, Stream: true, Faults: faults,
-	})
+	env := actortest.NewEnv(seed,
+		actortest.WithSelf(actor.Incarnation{Name: "rebalance"}), actortest.WithFaults(faults))
 	replica := actortest.Ref[runtime.EventData]("replica")
 	h := &harness{t: t, m: New(cfg, env.Env, replica), replica: replica, env: env, log: spec.New(), watched: map[actor.ReplyID]Input{}}
-	shadow := actortest.NewEnv(actortest.Config{Seed: seed, Stream: true})
+	shadow := actortest.NewEnv(seed)
 	for range 64 {
 		h.suffix = append(h.suffix, newMemberID("", shadow.NewID()))
 	}
