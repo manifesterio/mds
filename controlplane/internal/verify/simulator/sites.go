@@ -9,7 +9,7 @@ import (
 // The buggify sites of the simulator. Each is a place where the fake log or
 // the fake object store does something that the real one may do too. A site is
 // switched on for some runs and off for others, and when on it fires now and
-// then (dst fault.Injector.Maybe). The names are stable plain strings: a report
+// then (actor.Env.Maybe). The names are stable plain strings: a report
 // and a replay refer to them.
 var (
 	// SiteLogSlowAnswer: the log applies the call, and the reply comes back late.

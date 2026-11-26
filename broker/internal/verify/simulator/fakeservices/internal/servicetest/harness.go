@@ -213,7 +213,7 @@ func (h *Harness) Faults() []string {
 // Hit reports whether the assertion with that name passed at least once (a
 // Reachable that was reached, a Sometimes that was true).
 func (h *Harness) Hit(name string) bool {
-	c, ok := h.Sys.Assert().Coverage()[name]
+	c, ok := h.Sys.Coverage()[name]
 	return ok && c.Passes > 0
 }
 

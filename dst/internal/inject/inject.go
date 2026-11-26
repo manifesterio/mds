@@ -1,7 +1,11 @@
-// Package fault is cooperative fault injection drawn from one rng stream.
-package fault
+// Package inject is cooperative fault injection drawn from one rng stream.
+// The run owns the Injector; products reach it only through actor.Env.
+package inject
 
-import "github.com/manifesterio/mds/dst/internal/rng"
+import (
+	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/internal/rng"
+)
 
 // Default rates for Maybe activation and fire.
 const (
@@ -16,23 +20,13 @@ const (
 type Injector struct {
 	rand  *rng.Rand
 	quiet bool
-	sites map[string]*SiteCount
+	sites map[string]*fault.SiteCount
 	order []string // site names in first-seen order, so Sites never ranges over the map
-}
-
-// SiteCount is what happened at one site during a run.
-// On is the latch: the site was switched on for the run. A Fault site is always On,
-// because it has no latch. Calls is how often the site was asked. Fired is how often
-// it answered true. A site that is off has Fired 0.
-type SiteCount struct {
-	On    bool
-	Calls uint64
-	Fired uint64
 }
 
 // New returns an injector that draws from r.
 func New(r *rng.Rand) *Injector {
-	return &Injector{rand: r, sites: map[string]*SiteCount{}}
+	return &Injector{rand: r, sites: map[string]*fault.SiteCount{}}
 }
 
 // SetQuiet enables or disables the quiet tail.
@@ -43,18 +37,18 @@ func (i *Injector) Quiet() bool { return i.quiet }
 
 // Maybe activates the site for the run with probability MaybeActivateRate on first
 // sight, then fires with probability MaybeFireRate on each call when active.
-func (i *Injector) Maybe(site Site) bool {
+func (i *Injector) Maybe(site fault.Site) bool {
 	return i.maybe(site, MaybeFireRate)
 }
 
 // MaybeP activates the site like Maybe, then fires with probability p when active.
-func (i *Injector) MaybeP(site Site, p float64) bool {
+func (i *Injector) MaybeP(site fault.Site, p float64) bool {
 	return i.maybe(site, p)
 }
 
-func (i *Injector) maybe(site Site, fire float64) bool {
-	c := i.count(site.Name(), func() *SiteCount {
-		return &SiteCount{On: i.rand.Chance(MaybeActivateRate)}
+func (i *Injector) maybe(site fault.Site, fire float64) bool {
+	c := i.count(site.Name(), func() *fault.SiteCount {
+		return &fault.SiteCount{On: i.rand.Chance(MaybeActivateRate)}
 	})
 	c.Calls++
 	if c.On && i.rand.Chance(fire) {
@@ -66,7 +60,7 @@ func (i *Injector) maybe(site Site, fire float64) bool {
 
 // count returns the counts for name. On first sight it stores the counts made by
 // first. first is called only once per name, so it is the only place a draw can happen.
-func (i *Injector) count(name string, first func() *SiteCount) *SiteCount {
+func (i *Injector) count(name string, first func() *fault.SiteCount) *fault.SiteCount {
 	c, known := i.sites[name]
 	if !known {
 		c = first()
@@ -78,8 +72,8 @@ func (i *Injector) count(name string, first func() *SiteCount) *SiteCount {
 
 // Sites returns a copy of the counts of every site that Maybe, MaybeP or Fault has
 // seen in this run.
-func (i *Injector) Sites() map[string]SiteCount {
-	out := make(map[string]SiteCount, len(i.sites))
+func (i *Injector) Sites() map[string]fault.SiteCount {
+	out := make(map[string]fault.SiteCount, len(i.sites))
 	for _, name := range i.order {
 		out[name] = *i.sites[name]
 	}
@@ -88,9 +82,9 @@ func (i *Injector) Sites() map[string]SiteCount {
 
 // Fault fires with probability p. It counts the call on the site. It never fires
 // and never draws while Quiet is set.
-func (i *Injector) Fault(site Site, p float64) bool {
-	c := i.count(site.Name(), func() *SiteCount {
-		return &SiteCount{On: true}
+func (i *Injector) Fault(site fault.Site, p float64) bool {
+	c := i.count(site.Name(), func() *fault.SiteCount {
+		return &fault.SiteCount{On: true}
 	})
 	c.Calls++
 	if i.quiet {

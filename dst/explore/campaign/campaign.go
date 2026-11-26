@@ -64,7 +64,7 @@ type Result struct {
 	Coverage  map[string]Coverage
 	// Counters are named totals of the run (steps, writes, ...). RunSeeds sums them.
 	Counters map[string]uint64
-	// Sites are the counts of the run's Maybe sites (fault.Injector.Sites).
+	// Sites are the counts of the run's buggify sites (sim.Result.Sites).
 	Sites map[string]fault.SiteCount
 	// Tail holds the last step lines of a failed run. Log holds every step
 	// line, only when RunOptions.Log was set.

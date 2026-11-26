@@ -1,14 +1,15 @@
-package assert_test
+package assertlog_test
 
 import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/assert"
+	"github.com/manifesterio/mds/dst/internal/assertlog"
 )
 
 func TestAlwaysCoverageAndFail(t *testing.T) {
 	var fails []string
-	l := assert.New(func(property, detail string) {
+	l := assertlog.New(func(property, detail string) {
 		fails = append(fails, property+":"+detail)
 	})
 	l.Always(true, "ok", assert.Pair{Key: "k", Value: 1})
@@ -27,7 +28,7 @@ func TestAlwaysCoverageAndFail(t *testing.T) {
 
 func TestSometimesReachableUnreachable(t *testing.T) {
 	var fails []string
-	l := assert.New(func(property, detail string) {
+	l := assertlog.New(func(property, detail string) {
 		fails = append(fails, property+"|"+detail)
 	})
 	l.Sometimes(true, "rare")
@@ -56,7 +57,7 @@ func TestSometimesReachableUnreachable(t *testing.T) {
 
 func TestAlwaysOrUnreachableFails(t *testing.T) {
 	var fails []string
-	l := assert.New(func(property, detail string) { fails = append(fails, property+"|"+detail) })
+	l := assertlog.New(func(property, detail string) { fails = append(fails, property+"|"+detail) })
 	l.AlwaysOrUnreachable(false, "x", assert.Pair{Key: "k", Value: 2})
 	if len(fails) != 1 || fails[0] != "x|k=2" {
 		t.Fatalf("fails = %v", fails)
@@ -67,7 +68,7 @@ func TestAlwaysOrUnreachableFails(t *testing.T) {
 // passed coverage check.
 func TestFirstStep(t *testing.T) {
 	step := uint64(0)
-	l := assert.New(nil)
+	l := assertlog.New(nil)
 	l.SetStepCounter(func() uint64 { return step })
 	step = 3
 	l.Always(true, "safe")
@@ -86,7 +87,7 @@ func TestFirstStep(t *testing.T) {
 }
 
 func TestNilOnFail(t *testing.T) {
-	l := assert.New(nil)
+	l := assertlog.New(nil)
 	l.Always(false, "x")
 	l.Unreachable("y")
 }

@@ -5,14 +5,14 @@
 // The log oracle of a simulator: replay a log into a reference model and
 // judge, one writer per epoch, no hole in the log, per-slot state agreement,
 // monotonic floors, and the convergence predicate. Every check records
-// through assert.Log, so a failure never panics and the run goes on.
+// through a Recorder, so a failure never panics and the run goes on.
 //
 // The crash checks by hand (Persistence, ForwardProgress, DirtyReboot), for a
 // test that does not use spectest.Lockstep.
 //
 // The package knows no product types. A product gives it a Log (what its log
-// fake exposes), callbacks that decode and apply entries, and the reference
-// model. Bookkeeping that is specific to one shape of oracle, such as sorting
+// fake exposes), a Recorder (its actor.Env), callbacks that decode and apply
+// entries, and the reference model. Bookkeeping that is specific to one shape of oracle, such as sorting
 // reads by the log prefix they saw, stays in the product.
 package check
 
@@ -41,30 +41,19 @@ type Log interface {
 	QuietAfter(from Slot) bool
 }
 
-// Checker records verdicts as properties named Prefix + name, or through the
-// typed Hole and Decode handles when those are set.
+// Checker records the built-in log checks on Rec under the typed Hole and
+// Decode handles.
 type Checker struct {
-	Log    *assert.Log
-	Prefix string
-	// Hole is the Always for NoHole. When its name is empty, NoHole uses
-	// Prefix + "log has no hole".
+	Rec Recorder
+	// Hole is the Always for NoHole.
 	Hole assert.Always
-	// Decode is the Always for Replay decode failures. When its name is empty,
-	// Replay uses Prefix + "log entries decode".
+	// Decode is the Always for Replay decode failures.
 	Decode assert.Always
 }
 
 // Recorder records Always properties. actor.Assertions and actor.Env satisfy it.
 type Recorder interface {
 	Always(cond bool, p assert.Always, details ...assert.Pair)
-}
-
-// LogRecorder adapts *assert.Log to Recorder using the handle's catalog name.
-type LogRecorder struct{ Log *assert.Log }
-
-// Always implements Recorder.
-func (r LogRecorder) Always(cond bool, p assert.Always, details ...assert.Pair) {
-	r.Log.Always(cond, assert.Property(p.Name()), details...)
 }
 
 // Verdict records ok under p and returns ok, so the caller can skip work after a
@@ -83,31 +72,10 @@ func Violation(a Recorder, p assert.Always, format string, args ...any) {
 	Verdict(a, false, p, format, args...)
 }
 
-// Verdict records a check and returns ok, so the caller can skip work after a
-// failure. The detail is formatted only when the check fails. Prefer the
-// package-level Verdict with an assert.Always handle when the name is fixed.
-func (c Checker) Verdict(ok bool, property, format string, args ...any) bool {
-	p := assert.Property(c.Prefix + property)
-	if ok {
-		c.Log.Always(true, p)
-		return true
-	}
-	c.Log.Always(false, p, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
-	return false
-}
-
-// verdictNamed records under handle when its name is set, else Prefix + name.
-func (c Checker) verdictNamed(ok bool, handle assert.Always, name, format string, args ...any) bool {
-	if handle.Name() != "" {
-		return Verdict(LogRecorder{c.Log}, ok, handle, format, args...)
-	}
-	return c.Verdict(ok, name, format, args...)
-}
-
 // NoHole checks that the log has no slot missing below its last slot.
 func (c Checker) NoHole(l Log) {
 	end, hole := l.End()
-	c.verdictNamed(!hole, c.Hole, "log has no hole",
+	Verdict(c.Rec, !hole, c.Hole,
 		"the log history has a slot missing below its last slot (contiguous up to %d)", end)
 }
 
@@ -124,7 +92,7 @@ func Replay[Op, Spec any](c Checker, l Log, spec Spec,
 	judge(0)
 	for slot := range end {
 		ops, err := decode(l.Entry(slot))
-		if !c.verdictNamed(err == nil, c.Decode, "log entries decode", "slot %d: %v", slot, err) {
+		if !Verdict(c.Rec, err == nil, c.Decode, "slot %d: %v", slot, err) {
 			return false
 		}
 		for _, op := range ops {

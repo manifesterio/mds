@@ -251,7 +251,7 @@ func (t *testWorld) faults() []string {
 
 // hit reports whether the assertion passed at least once.
 func (t *testWorld) hit(name string) bool {
-	c, ok := t.sys.Assert().Coverage()[name]
+	c, ok := t.sys.Coverage()[name]
 	return ok && c.Passes > 0
 }
 

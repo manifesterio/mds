@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/fault"
 )
 
 // Service simulates one outside system (an object store, a log, the control
@@ -181,9 +180,6 @@ type ServiceCtx struct {
 
 // Now is the virtual time.
 func (c *ServiceCtx) Now() actor.Mono { return actor.Mono(c.sys.q.now) }
-
-// Injector is the run's buggify injector, for helpers that take one.
-func (c *ServiceCtx) Injector() *fault.Injector { return c.sys.faults }
 
 // Later runs fn as a later step of this service after d. A Later step is not
 // dropped when an actor crashes.

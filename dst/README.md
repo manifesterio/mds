@@ -27,8 +27,8 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `core/clock` | Wall offset over `core/sched`, `AfterFunc` / `Advance` on the same heap |
 | `core/syncclock`, `core/realclock` | Clock adapters for code that needs a real or synchronised clock outside a run |
 | `core/trace` | Running FNV-1a `Hash` / `StateHasher`, optional `Ring[T]` |
-| `core/assert` | Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable with coverage; typed handles and the catalog |
-| `core/fault` | Maybe / MaybeP / Fault with per-site latch and Quiet; declared sites (`NewSite`) and the catalog |
+| `core/assert` | Typed handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable), `Coverage` and the catalog |
+| `core/fault` | Declared buggify sites (`NewSite`, `NewFaultSite`), `SiteCount` and the catalog |
 | `explore/campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
 | `verify/check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `verify/check/faulty` | Puts timing and faults (slow replies, errors, timeouts, lost answers, outages) around a fault-free spec, so the code under test meets an outside system that fails |
@@ -37,6 +37,7 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `ops/tools/dstgen` (repo root) | Generates the sum-type boilerplate (markers, `Tag`, `Fold`, state hash) into `zz_dst_gen.go`; tag numbers are kept in `dst.tags`. |
 
 The run stream (SplitMix64) is internal (`internal/rng`): code draws through `actor.Rand` (the Env), and host setup before a `System` exists uses `sim.DeriveRand(seed, label)`.
+The assertion log (`internal/assertlog`) and the buggify injector (`internal/inject`, per-site latch and Quiet) are internal too: code records and asks through the Env, and a harness reads coverage with `System.Coverage`.
 
 ## How to write an actor
 

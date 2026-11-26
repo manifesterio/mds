@@ -1,3 +1,5 @@
+// Package fault is the catalog of buggify sites. The injector that answers
+// them is run machinery in dst/internal/inject; code asks it through actor.Env.
 package fault
 
 import (
@@ -28,10 +30,8 @@ func NewSite(name string) Site {
 	return declareSite(name, true)
 }
 
-// NewFaultSite declares a site that the code asks with Injector.Fault. The
-// injector does not count a Fault site (see Injector.Sites), so it can never
-// show as fired. Sites leaves it out, and a campaign does not list it as
-// "never fired". Call it only in a package-level var block.
+// NewFaultSite declares a site that the code asks with Env.Fault. Sites
+// leaves it out, and a campaign does not list it as "never fired". Call it only in a package-level var block.
 func NewFaultSite(name string) Site {
 	return declareSite(name, false)
 }
@@ -59,4 +59,14 @@ func Sites() []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// SiteCount is what happened at one site during a run.
+// On is the latch: the site was switched on for the run. A Fault site is always On,
+// because it has no latch. Calls is how often the site was asked. Fired is how often
+// it answered true. A site that is off has Fired 0.
+type SiteCount struct {
+	On    bool
+	Calls uint64
+	Fired uint64
 }

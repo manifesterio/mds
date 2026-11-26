@@ -6,6 +6,7 @@ import (
 	"github.com/manifesterio/mds/dst/core/actor"
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/internal/assertlog"
 )
 
 // env is the actor.Env of a System: the run stream, buggify and assertions,
@@ -28,9 +29,9 @@ func (e env) Between(lo, hi int64) int64   { return e.sys.rand.Between(lo, hi) }
 func (e env) Float64() float64             { return e.sys.rand.Float64() }
 func (e env) Chance(p float64) bool        { return e.sys.rand.Chance(p) }
 func (e env) Maybe(s fault.Site) bool      { return e.sys.faults.Maybe(s) }
-func (e env) Reachable(p assert.Reachable) { e.sys.asserts.Reachable(assert.Property(p.Name())) }
+func (e env) Reachable(p assert.Reachable) { e.sys.asserts.Reachable(assertlog.Property(p.Name())) }
 func (e env) Sometimes(c bool, p assert.Sometimes) {
-	e.sys.asserts.Sometimes(c, assert.Property(p.Name()))
+	e.sys.asserts.Sometimes(c, assertlog.Property(p.Name()))
 }
 
 // NewID draws two Uint64 values and puts them in the id, little-endian.
@@ -49,15 +50,15 @@ func (e env) Fault(s fault.Site, p float64) bool {
 }
 
 func (e env) Always(c bool, p assert.Always, d ...assert.Pair) {
-	e.sys.asserts.Always(c, assert.Property(p.Name()), d...)
+	e.sys.asserts.Always(c, assertlog.Property(p.Name()), d...)
 }
 
 func (e env) AlwaysOrUnreachable(c bool, p assert.AlwaysOrUnreachable, d ...assert.Pair) {
-	e.sys.asserts.AlwaysOrUnreachable(c, assert.Property(p.Name()), d...)
+	e.sys.asserts.AlwaysOrUnreachable(c, assertlog.Property(p.Name()), d...)
 }
 
 func (e env) Unreachable(p assert.Unreachable, d ...assert.Pair) {
-	e.sys.asserts.Unreachable(assert.Property(p.Name()), d...)
+	e.sys.asserts.Unreachable(assertlog.Property(p.Name()), d...)
 }
 
 // logLine is one step line. The message is kept and turned into text only

@@ -150,7 +150,7 @@ func (s *sim) after(d actor.Duration, run func()) { s.w.After(d, run) }
 // check returns the checker of dst/verify/check. Hole and Decode are the catalog
 // handles for the built-in log checks.
 func (s *sim) check() check.Checker {
-	return check.Checker{Log: s.w.Assert(), Hole: logHasNoHole, Decode: logEntriesDecode}
+	return check.Checker{Rec: s.env, Hole: logHasNoHole, Decode: logEntriesDecode}
 }
 
 func (s *sim) noteBoot(n *simNode) {

@@ -1,9 +1,45 @@
+// Package assert is the catalog of properties (Always, Sometimes, Reachable,
+// ...). A typed handle is declared once in a package-level var block, for
+// example var oneWriter = assert.NewAlways("sim: one writer per epoch"). The
+// declaration puts the name in the catalog (see Catalog). Code records a
+// handle through actor.Env; the log that counts them is run machinery in
+// dst/internal/assertlog.
 package assert
 
 import (
 	"slices"
 	"strings"
 )
+
+// Kind classifies how a property was recorded.
+type Kind string
+
+// The kinds of property a run records.
+const (
+	KindAlways              Kind = "always"
+	KindAlwaysOrUnreachable Kind = "always_or_unreachable"
+	KindSometimes           Kind = "sometimes"
+	KindReachable           Kind = "reachable"
+	KindUnreachable         Kind = "unreachable"
+)
+
+// Pair is one ordered context field for a failure detail.
+type Pair struct {
+	Key   string
+	Value any
+}
+
+// Coverage counts evaluations of one property.
+//
+// FirstStep is the step of the first interesting evaluation: a safety check
+// that failed, or a coverage check that passed. It is 0 when there was none,
+// or when it happened before the first step.
+type Coverage struct {
+	Kind      Kind
+	Checks    uint64
+	Passes    uint64
+	FirstStep uint64
+}
 
 // Typed handles. Each kind of assertion has its own type, so a Sometimes
 // property cannot be used where an Always is needed. Make them only with the

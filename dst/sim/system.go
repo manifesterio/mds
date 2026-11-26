@@ -7,6 +7,8 @@ import (
 	"github.com/manifesterio/mds/dst/core/assert"
 	"github.com/manifesterio/mds/dst/core/fault"
 	"github.com/manifesterio/mds/dst/core/trace"
+	"github.com/manifesterio/mds/dst/internal/assertlog"
+	"github.com/manifesterio/mds/dst/internal/inject"
 	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
@@ -148,8 +150,8 @@ type System struct {
 	cfg     Config
 	rand    *rng.Rand
 	q       *queue
-	faults  *fault.Injector
-	asserts *assert.Log
+	faults  *inject.Injector
+	asserts *assertlog.Log
 	hash    trace.Hash
 	tl      *Timeline
 
@@ -201,8 +203,8 @@ func NewSystem(cfg Config) *System {
 		outside:   map[uint64]*outsideAsk{},
 	}
 	sys.q = newQueue(sys.rand)
-	sys.faults = fault.New(sys.rand)
-	sys.asserts = assert.New(func(property, detail string) { sys.Fail(FailViolation, property, detail) })
+	sys.faults = inject.New(sys.rand)
+	sys.asserts = assertlog.New(func(property, detail string) { sys.Fail(FailViolation, property, detail) })
 	sys.asserts.SetStepCounter(sys.Steps)
 	if cfg.Tail > 0 {
 		sys.tail = trace.NewRing[logLine](cfg.Tail)
@@ -226,11 +228,8 @@ func (sys *System) Draws() uint64 { return sys.rand.Calls() }
 // the zero Incarnation.
 func (sys *System) Env() actor.Env { return env{sys: sys} }
 
-// Faults is the buggify injector of the run.
-func (sys *System) Faults() *fault.Injector { return sys.faults }
-
-// Assert is the assertion log of the run.
-func (sys *System) Assert() *assert.Log { return sys.asserts }
+// Coverage returns a copy of the per-property stats so far.
+func (sys *System) Coverage() map[string]assert.Coverage { return sys.asserts.Coverage() }
 
 // Timeline is the fact timeline of the run.
 func (sys *System) Timeline() *Timeline { return sys.tl }

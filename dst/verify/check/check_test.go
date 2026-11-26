@@ -3,6 +3,7 @@ package check_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/assert"
@@ -12,6 +13,7 @@ import (
 var (
 	verdictHandle = assert.NewAlways("check test: verdict handle")
 	holeHandle    = assert.NewAlways("check test: log has no hole")
+	decodeHandle  = assert.NewAlways("check test: log entries decode")
 )
 
 type fakeLog struct {
@@ -31,9 +33,18 @@ func (f fakeLog) QuietAfter(from check.Slot) bool {
 	return true
 }
 
+// failRecorder keeps "name: detail" of every false Always.
+type failRecorder struct{ fails []string }
+
+func (r *failRecorder) Always(cond bool, p assert.Always, details ...assert.Pair) {
+	if !cond {
+		r.fails = append(r.fails, fmt.Sprint(p.Name(), ": ", details[0].Value))
+	}
+}
+
 func newChecker() (check.Checker, *[]string) {
-	var fails []string
-	return check.Checker{Log: assert.New(func(p, d string) { fails = append(fails, p+": "+d) }), Prefix: "t: "}, &fails
+	r := &failRecorder{}
+	return check.Checker{Rec: r, Hole: holeHandle, Decode: decodeHandle}, &r.fails
 }
 
 func TestReplayAppliesInOrderAndJudgesEveryPrefix(t *testing.T) {
@@ -66,7 +77,7 @@ func TestReplayStopsOnDecodeError(t *testing.T) {
 	ok := check.Replay(c, l, struct{}{},
 		func([]byte) ([]int, error) { return nil, errors.New("bad") },
 		func(struct{}, int) { n++ }, func(check.Slot) {})
-	if ok || n != 0 || len(*fails) != 1 {
+	if ok || n != 0 || len(*fails) != 1 || !strings.HasPrefix((*fails)[0], decodeHandle.Name()+": ") {
 		t.Fatalf("ok=%v n=%d fails=%v", ok, n, *fails)
 	}
 }
@@ -78,7 +89,7 @@ func TestNoHole(t *testing.T) {
 		t.Fatal(*fails)
 	}
 	c.NoHole(fakeLog{entries: [][]byte{{1}}, hole: true})
-	if len(*fails) != 1 {
+	if len(*fails) != 1 || !strings.HasPrefix((*fails)[0], holeHandle.Name()+": ") {
 		t.Fatal(*fails)
 	}
 }
@@ -169,17 +180,5 @@ func TestVerdictHandle(t *testing.T) {
 	}
 	if rec.name[0] != verdictHandle.Name() {
 		t.Fatalf("name=%q", rec.name[0])
-	}
-}
-
-func TestNoHoleUsesHoleHandle(t *testing.T) {
-	var fails []string
-	c := check.Checker{
-		Log:  assert.New(func(p, d string) { fails = append(fails, p+": "+d) }),
-		Hole: holeHandle,
-	}
-	c.NoHole(fakeLog{entries: [][]byte{{1}}, hole: true})
-	if len(fails) != 1 || fails[0][:len(holeHandle.Name())] != holeHandle.Name() {
-		t.Fatalf("fails=%v", fails)
 	}
 }

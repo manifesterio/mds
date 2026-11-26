@@ -1,9 +1,10 @@
-package fault_test
+package inject_test
 
 import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/core/fault"
+	"github.com/manifesterio/mds/dst/internal/inject"
 	"github.com/manifesterio/mds/dst/internal/rng"
 )
 
@@ -22,7 +23,7 @@ var (
 )
 
 func TestFaultCountsCallsAndFires(t *testing.T) {
-	inj := fault.New(rng.New(3))
+	inj := inject.New(rng.New(3))
 	_ = inj.Fault(siteFaultCnt, 1.0)
 	_ = inj.Fault(siteFaultCnt, 1.0)
 	got, ok := inj.Sites()[siteFaultCnt.Name()]
@@ -36,7 +37,7 @@ func TestFaultCountsCallsAndFires(t *testing.T) {
 }
 
 func TestFaultQuietCountsButDoesNotFire(t *testing.T) {
-	inj := fault.New(rng.New(4))
+	inj := inject.New(rng.New(4))
 	inj.SetQuiet(true)
 	if inj.Fault(siteFaultQt, 1.0) {
 		t.Fatal("Fault fired while quiet")
@@ -53,7 +54,7 @@ func TestFaultQuietCountsButDoesNotFire(t *testing.T) {
 func TestFaultDrawsLikeChance(t *testing.T) {
 	const n = 500
 	a, b := rng.New(77), rng.New(77)
-	inj := fault.New(a)
+	inj := inject.New(a)
 	for k := range n {
 		got := inj.Fault(siteFaultDr, 0.5)
 		want := b.Chance(0.5)
@@ -68,7 +69,7 @@ func TestFaultDrawsLikeChance(t *testing.T) {
 
 func TestQuietSilencesFaultOnly(t *testing.T) {
 	r := rng.New(42)
-	inj := fault.New(r)
+	inj := inject.New(r)
 	inj.SetQuiet(true)
 	if !inj.Quiet() {
 		t.Fatal("Quiet not set")
@@ -92,7 +93,7 @@ func TestMaybeLatchesPerSite(t *testing.T) {
 	// Find a seed where site A activates (2 draws), then confirm a second call draws once.
 	for seed := range uint64(10_000) {
 		r := rng.New(seed)
-		inj := fault.New(r)
+		inj := inject.New(r)
 		c0 := r.Calls()
 		_ = inj.Maybe(siteLatchA)
 		if r.Calls()-c0 != 2 {
@@ -116,7 +117,7 @@ func TestMaybeLatchesPerSite(t *testing.T) {
 
 func TestMaybePIgnoresQuiet(t *testing.T) {
 	r := rng.New(11)
-	inj := fault.New(r)
+	inj := inject.New(r)
 	inj.SetQuiet(true)
 	before := r.Calls()
 	_ = inj.MaybeP(siteMaybeP, 0.5)
@@ -126,7 +127,7 @@ func TestMaybePIgnoresQuiet(t *testing.T) {
 }
 
 func TestSitesCountCallsAndFires(t *testing.T) {
-	inj := fault.New(rng.New(5))
+	inj := inject.New(rng.New(5))
 	if len(inj.Sites()) != 0 {
 		t.Fatal("a new injector has sites")
 	}
@@ -154,7 +155,7 @@ func TestSitesCountCallsAndFires(t *testing.T) {
 // TestSiteCountsDoNotMoveTheStream: counting draws nothing, so the same seed
 // gives the same answers whether or not anyone reads Sites.
 func TestSiteCountsDoNotMoveTheStream(t *testing.T) {
-	a, b := fault.New(rng.New(9)), fault.New(rng.New(9))
+	a, b := inject.New(rng.New(9)), inject.New(rng.New(9))
 	for range 100 {
 		if a.Maybe(siteSameSeed) != b.Maybe(siteSameSeed) {
 			t.Fatal("same seed, different answers")
@@ -166,7 +167,7 @@ func TestSiteCountsDoNotMoveTheStream(t *testing.T) {
 func TestMaybePLatchesPerSite(t *testing.T) {
 	for seed := range uint64(10_000) {
 		r := rng.New(seed)
-		inj := fault.New(r)
+		inj := inject.New(r)
 		c0 := r.Calls()
 		_ = inj.MaybeP(siteLatchP, 0.05)
 		if r.Calls()-c0 != 2 {
