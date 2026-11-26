@@ -4,13 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/clock"
-	"github.com/manifesterio/mds/dst/core/sched"
-	"github.com/manifesterio/mds/dst/internal/rng"
+	"github.com/manifesterio/mds/shared/clock/internal/clock"
+	"github.com/manifesterio/mds/shared/clock/internal/sched"
 )
 
 func TestAdvanceFiresTimersInOrder(t *testing.T) {
-	s := sched.New(rng.New(1))
+	s := sched.New(1)
 	c := clock.New(s, 1_000)
 	var order []string
 
@@ -43,7 +42,7 @@ func TestAdvanceFiresTimersInOrder(t *testing.T) {
 }
 
 func TestStopCancels(t *testing.T) {
-	s := sched.New(rng.New(2))
+	s := sched.New(2)
 	c := clock.New(s, 0)
 	ran := false
 	tm := c.AfterFunc(10, func() { ran = true })
@@ -65,7 +64,7 @@ func TestStopCancels(t *testing.T) {
 }
 
 func TestStopAfterFire(t *testing.T) {
-	s := sched.New(rng.New(3))
+	s := sched.New(3)
 	c := clock.New(s, 0)
 	tm := c.AfterFunc(5, func() {})
 	c.Advance(5)
@@ -75,7 +74,7 @@ func TestStopAfterFire(t *testing.T) {
 }
 
 func TestNestedTimerFiresInSameAdvance(t *testing.T) {
-	s := sched.New(rng.New(1))
+	s := sched.New(1)
 	c := clock.New(s, 0)
 	var order []string
 	c.AfterFunc(3, func() { order = append(order, "c") })

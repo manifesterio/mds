@@ -7,7 +7,7 @@
 // deterministic gates later.
 package clock
 
-import "github.com/manifesterio/mds/dst/core/sched"
+import "github.com/manifesterio/mds/shared/clock/internal/sched"
 
 // Clock is a single-threaded virtual clock.
 // Wall is wallStart + Mono.

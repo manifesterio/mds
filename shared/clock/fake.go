@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/dst/core/actor"
-	"github.com/manifesterio/mds/dst/core/sched"
-	"github.com/manifesterio/mds/dst/core/syncclock"
+	"github.com/manifesterio/mds/shared/clock/internal/sched"
+	"github.com/manifesterio/mds/shared/clock/internal/syncclock"
 	"github.com/manifesterio/mds/dst/runtime/live"
 )
 

@@ -39,9 +39,7 @@ google.golang.org/protobuf/reflect/protoreflect
 
 # Deterministic simulation primitives (github.com/manifesterio/mds/dst). They are first-party
 # code in this repo, so they need no audit record. Listed one by one on purpose.
-# Deliberately absent: realclock (reads the real clock), syncclock (uses sync; goroutine
-# callers race, so timer order is not reproducible), model and examples
-# (not audited for determinism).
+# Deliberately absent: model and examples (not audited for determinism).
 github.com/manifesterio/mds/dst/core/assert
 github.com/manifesterio/mds/dst/explore/campaign
 github.com/manifesterio/mds/dst/verify/check

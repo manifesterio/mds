@@ -5,9 +5,8 @@ package syncclock
 import (
 	"sync"
 
-	"github.com/manifesterio/mds/dst/core/clock"
-	"github.com/manifesterio/mds/dst/core/sched"
-	"github.com/manifesterio/mds/dst/internal/rng"
+	"github.com/manifesterio/mds/shared/clock/internal/clock"
+	"github.com/manifesterio/mds/shared/clock/internal/sched"
 )
 
 // Sync is a goroutine-safe virtual clock for code under test that starts timers
@@ -35,7 +34,7 @@ type SyncTimer struct {
 // wall at that moment. Use a nonzero monoStart if zero means "not set" in the
 // code under test.
 func NewSync(wall, monoStart sched.TimeNs) *Sync {
-	s := sched.New(rng.New(1))
+	s := sched.New(1)
 	s.Jump(monoStart)
 	return &Sync{s: s, inner: clock.New(s, wall-monoStart)}
 }

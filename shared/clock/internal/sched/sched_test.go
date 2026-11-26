@@ -3,13 +3,11 @@ package sched_test
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/sched"
-	"github.com/manifesterio/mds/dst/internal/rng"
+	"github.com/manifesterio/mds/shared/clock/internal/sched"
 )
 
 func TestOrderByTimeThenTie(t *testing.T) {
-	r := rng.New(1)
-	s := sched.New(r)
+	s := sched.New(1)
 	var order []string
 
 	s.After(20, "late", func() { order = append(order, "late") })
@@ -37,8 +35,7 @@ func TestOrderByTimeThenTie(t *testing.T) {
 
 func TestSameSeedSameOrder(t *testing.T) {
 	run := func(seed uint64) []string {
-		r := rng.New(seed)
-		s := sched.New(r)
+		s := sched.New(seed)
 		var order []string
 		for _, label := range []string{"a", "b", "c", "d"} {
 			s.After(5, label, func() {
@@ -61,8 +58,7 @@ func TestSameSeedSameOrder(t *testing.T) {
 }
 
 func TestNegativeDelayIsZero(t *testing.T) {
-	r := rng.New(3)
-	s := sched.New(r)
+	s := sched.New(3)
 	ran := false
 	s.After(-1, "neg", func() {
 		ran = true
@@ -76,8 +72,7 @@ func TestNegativeDelayIsZero(t *testing.T) {
 }
 
 func TestMonoAdvances(t *testing.T) {
-	r := rng.New(4)
-	s := sched.New(r)
+	s := sched.New(4)
 	s.After(100, "t", func() {})
 	s.Next()
 	if s.Mono() != 100 {
@@ -89,7 +84,7 @@ func TestMonoAdvances(t *testing.T) {
 }
 
 func TestPeekAndJump(t *testing.T) {
-	s := sched.New(rng.New(5))
+	s := sched.New(5)
 	if _, ok := s.Peek(); ok {
 		t.Fatal("empty Peek want ok=false")
 	}

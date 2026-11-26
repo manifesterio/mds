@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/core/sched"
-	"github.com/manifesterio/mds/dst/core/syncclock"
+	"github.com/manifesterio/mds/shared/clock/internal/sched"
+	"github.com/manifesterio/mds/shared/clock/internal/syncclock"
 )
 
 func TestSyncTimersFireInOrderAndChain(t *testing.T) {

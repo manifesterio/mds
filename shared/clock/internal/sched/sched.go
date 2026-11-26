@@ -2,8 +2,6 @@
 // heap of one run.
 package sched
 
-import "github.com/manifesterio/mds/dst/internal/rng"
-
 // TimeNs is virtual monotonic nanoseconds since run start.
 type TimeNs int64
 
@@ -70,15 +68,26 @@ func (h *eventHeap) pop() *event {
 // Invariant: same-time events order by seeded tie, then by enqueue seq (total order).
 // Not safe for concurrent use.
 type Scheduler struct {
-	rand  *rng.Rand
+	tie   splitmix
 	now   TimeNs
 	seq   uint64
 	steps int
 	queue eventHeap
 }
 
-// New returns a scheduler that draws ties from r.
-func New(r *rng.Rand) *Scheduler { return &Scheduler{rand: r} }
+// New returns a scheduler that draws ties from a SplitMix64 stream of seed.
+func New(seed uint64) *Scheduler { return &Scheduler{tie: splitmix(seed)} }
+
+// splitmix is a SplitMix64 stream. It matches dst/internal/rng for one seed.
+type splitmix uint64
+
+func (m *splitmix) next() uint64 {
+	*m += 0x9e3779b97f4a7c15
+	z := uint64(*m)
+	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
+	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
+	return z ^ (z >> 31)
+}
 
 // Mono is the virtual monotonic time.
 func (s *Scheduler) Mono() TimeNs { return s.now }
@@ -108,7 +117,7 @@ func (s *Scheduler) Jump(t TimeNs) {
 // After queues run at Mono+delay (delay<0 counts as 0). label is for traces only.
 // Same-time events order by a seeded tie, then by enqueue seq.
 func (s *Scheduler) After(delay TimeNs, label string, run func()) {
-	s.after(delay, s.rand.Uint64(), label, run)
+	s.after(delay, s.tie.next(), label, run)
 }
 
 // AfterFIFO queues like After, but same-time events keep enqueue order (tie=0).

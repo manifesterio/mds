@@ -23,9 +23,6 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 | `core/actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Product actor code imports this package. |
 | `sim` | The simulator for actors: `System`, `AddService` services, `Spawn` with executors and workloads, `Run`. |
 | `runtime/live` | The production runtime for the same actors: a `Host` with one goroutine per actor, Control before Data inboxes, real keyed timers, an exec function per actor for product IO, and `Ask` / `Tell` / `OnLoop` for callers outside the actors. Real time and goroutines: it is not in the determinism gate. |
-| `core/sched` | Virtual mono clock and `(at, tie, seq)` event heap (live/clock adapters; sim keeps its own queue) |
-| `core/clock` | Wall offset over `core/sched`, `AfterFunc` / `Advance` on the same heap |
-| `core/syncclock`, `core/realclock` | Clock adapters for code that needs a real or synchronised clock outside a run |
 | `core/trace` | Running FNV-1a `Hash` / `StateHasher` |
 | `core/assert` | Typed handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable), `Coverage` and the catalog |
 | `core/fault` | Declared buggify sites (`NewSite`, `NewFaultSite`), `SiteCount` and the catalog |
@@ -216,7 +213,7 @@ Generic spec machinery is in: `verify/check/spectest` and `verify/check/faulty` 
 `StateHash`. They have no product words. A product brings its own spec, its own fault numbers and its
 own message types.
 
-Product wall clocks, product fault policy, and domain IDs belong in the importing project. Use `core/clock` only for virtual time over `core/sched`.
+Product wall clocks, product fault policy, and domain IDs belong in the importing project.
 
 ## License
 
