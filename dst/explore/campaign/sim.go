@@ -72,12 +72,7 @@ type SimSeed struct {
 
 // FailSimSeed is a SimSeed for a setup error (unknown scenario, bad flags, ...).
 func FailSimSeed(seed uint64, property, detail string) SimSeed {
-	return SimSeed{Result: sim.Result{
-		Seed: seed,
-		Failures: []sim.Failure{{
-			Kind: sim.FailProtocol, Property: property, Detail: detail,
-		}},
-	}}
+	return SimSeed{Result: sim.SetupFailure(seed, property, detail)}
 }
 
 // RegisterSim adds a scenario whose Run returns a SimSeed. reproduceFmt is

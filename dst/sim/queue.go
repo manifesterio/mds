@@ -20,7 +20,7 @@ const (
 
 // laneKey names one (lane, time) FIFO group.
 type laneKey struct {
-	lane Lane
+	lane laneID
 	at   Time
 }
 
@@ -35,23 +35,23 @@ type laneGroup struct {
 // tie, seq).
 //
 // add draws exactly one tie per entry, so the number of draws never depends
-// on lane history. If a pending entry has the same lane (not NoLane) and the
+// on lane history. If a pending entry has the same lane (not noLane) and the
 // same time, the new entry takes that entry's tie instead. Equal (at, tie)
 // falls through to seq, the order of adding. So one lane at one time is FIFO,
-// and different lanes at one time are in seeded random order. NoLane entries
+// and different lanes at one time are in seeded random order. noLane entries
 // never share a tie.
 type queue struct {
 	rand  *rng.Rand
 	now   Time
 	seq   uint64
 	heap  []*entry
-	byID  map[EntryID]*entry
+	byID  map[entryID]*entry
 	lanes map[laneKey]*laneGroup
 	live  int
 }
 
 func newQueue(r *rng.Rand) *queue {
-	return &queue{rand: r, byID: map[EntryID]*entry{}, lanes: map[laneKey]*laneGroup{}}
+	return &queue{rand: r, byID: map[entryID]*entry{}, lanes: map[laneKey]*laneGroup{}}
 }
 
 func earlier(a, b *entry) bool {
@@ -94,12 +94,12 @@ func (q *queue) down(i int) {
 }
 
 // add queues e. A time in the past becomes now.
-func (q *queue) add(e *entry) EntryID {
+func (q *queue) add(e *entry) entryID {
 	e.at = max(e.at, q.now)
 	q.seq++
 	e.seq = q.seq
 	e.tie = q.rand.Uint64()
-	if e.lane != NoLane {
+	if e.lane != noLane {
 		k := laneKey{e.lane, e.at}
 		if g, ok := q.lanes[k]; ok {
 			e.tie = g.tie
@@ -108,7 +108,7 @@ func (q *queue) add(e *entry) EntryID {
 			q.lanes[k] = &laneGroup{tie: e.tie, n: 1}
 		}
 	}
-	id := EntryID(e.seq)
+	id := entryID(e.seq)
 	q.byID[id] = e
 	q.heap = append(q.heap, e)
 	q.up(len(q.heap) - 1)
@@ -120,7 +120,7 @@ func (q *queue) add(e *entry) EntryID {
 func (q *queue) kill(e *entry) {
 	e.dead = true
 	q.live--
-	if e.lane != NoLane {
+	if e.lane != noLane {
 		k := laneKey{e.lane, e.at}
 		if g := q.lanes[k]; g != nil {
 			if g.n--; g.n == 0 {
@@ -128,11 +128,11 @@ func (q *queue) kill(e *entry) {
 			}
 		}
 	}
-	delete(q.byID, EntryID(e.seq))
+	delete(q.byID, entryID(e.seq))
 }
 
 // cancel retires the entry id, if it is still pending.
-func (q *queue) cancel(id EntryID) {
+func (q *queue) cancel(id entryID) {
 	if e, ok := q.byID[id]; ok {
 		q.kill(e)
 	}

@@ -17,22 +17,22 @@ import (
 // node.
 type Time int64
 
-// Lane is an ordering group of the event queue. Entries on one lane at one
+// laneID is an ordering group of the event queue. Entries on one lane at one
 // time run in the order they were added (FIFO).
-type Lane uint64
+type laneID uint64
 
-// EntryID names one queue entry, so that it can be cancelled.
-type EntryID uint64
+// entryID names one queue entry, so that it can be cancelled.
+type entryID uint64
 
 // The lanes the System gives a meaning to.
 const (
-	// NoLane is no FIFO group: every entry gets a fresh random tie.
-	NoLane Lane = 0
+	// noLane is no FIFO group: every entry gets a fresh random tie.
+	noLane laneID = 0
 	// hostLane is the lane of the System itself (restarts, kills, phases).
 	// Lanes at or above it belong to the System: it keeps one wake-up lane
 	// per actor there. Pair lanes (one per sender and receiver) are just
 	// below it; host code may use the lanes below those.
-	hostLane Lane = 1 << 62
+	hostLane laneID = 1 << 62
 )
 
 const (
@@ -96,6 +96,12 @@ type Result struct {
 	Tail                         []LogEntry // the last Config.Tail steps, only on failure
 }
 
+// SetupFailure is the Result of a run that failed before any System existed
+// (unknown scenario, bad flags): one protocol failure of property.
+func SetupFailure(seed uint64, property, detail string) Result {
+	return Result{Seed: seed, Failures: []Failure{{Kind: FailProtocol, Property: property, Detail: detail}}}
+}
+
 // OK reports a run without failures.
 func (r Result) OK() bool { return len(r.Failures) == 0 }
 
@@ -118,8 +124,8 @@ type System struct {
 	svcNames map[string]bool
 	rules    []Rule
 
-	pairLanes    map[laneKey2]Lane
-	nextPairLane Lane
+	pairLanes    map[laneKey2]laneID
+	nextPairLane laneID
 	watches      []watch
 	outside      map[uint64]*outsideAsk
 	outsideAsks  uint64
@@ -154,7 +160,7 @@ func NewSystem(cfg Config) *System {
 		owner:     actor.NewOwner(),
 		names:     map[string]bool{},
 		svcNames:  map[string]bool{},
-		pairLanes: map[laneKey2]Lane{},
+		pairLanes: map[laneKey2]laneID{},
 		outside:   map[uint64]*outsideAsk{},
 	}
 	sys.q = newQueue(sys.rand)
@@ -220,7 +226,7 @@ func Bootstrap(cfg Config) (*System, actor.Env) {
 
 // cancel retires a pending queue entry. An entry that already ran, or an
 // unknown id, is ignored.
-func (sys *System) cancel(id EntryID) { sys.q.cancel(id) }
+func (sys *System) cancel(id entryID) { sys.q.cancel(id) }
 
 // AddRule adds a rule. Add every rule before the run starts.
 func (sys *System) AddRule(r Rule) { sys.rules = append(sys.rules, r) }
@@ -243,9 +249,15 @@ func (sys *System) Fail(kind FailKind, property, detail string) {
 	}
 }
 
-// At runs fn as a host task at time t on lane. Host code (clients, nemesis,
-// phase changes) uses host tasks. A panic in fn halts the run.
-func (sys *System) At(t Time, lane Lane, fn func()) EntryID {
+// At runs fn as a host task at time t. Host code (clients, nemesis, phase
+// changes) uses host tasks. A panic in fn halts the run.
+func (sys *System) At(t Time, fn func()) { sys.at(t, noLane, fn) }
+
+// After runs fn as a host task after d.
+func (sys *System) After(d actor.Duration, fn func()) { sys.after(d, fn) }
+
+// at queues fn as a host task at time t on lane and returns its entry id.
+func (sys *System) at(t Time, lane laneID, fn func()) entryID {
 	e := &entry{at: t, lane: lane, kind: kindHost, node: -1}
 	e.run = func() {
 		if !sys.guard("host task", fn) {
@@ -255,9 +267,9 @@ func (sys *System) At(t Time, lane Lane, fn func()) EntryID {
 	return sys.q.add(e)
 }
 
-// After runs fn as a host task after d, with no lane.
-func (sys *System) After(d actor.Duration, fn func()) EntryID {
-	return sys.At(sys.q.now+Time(max(d, 0)), NoLane, fn)
+// after queues fn as a host task after d, with no lane.
+func (sys *System) after(d actor.Duration, fn func()) entryID {
+	return sys.at(sys.q.now+Time(max(d, 0)), noLane, fn)
 }
 
 // QuiesceEvery schedules a repeating host task every d that appends a

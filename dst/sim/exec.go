@@ -74,7 +74,7 @@ func Tell[P actor.Payload](sys *System, to actor.EntityRef[P], d actor.Duration,
 // outsideAsk is one sim.Ask that has not finished.
 type outsideAsk struct {
 	done     func(answer actor.Payload, ok bool)
-	deadline EntryID
+	deadline entryID
 }
 
 // Ask asks an actor from host code (a scenario step, a simulated gRPC
@@ -94,7 +94,7 @@ func Ask[Req, Rep actor.Payload](sys *System, to actor.EntityRef[Req], makeReq f
 		done(rep, ok)
 	}}
 	sys.outside[n] = ask
-	ask.deadline = sys.After(within, func() {
+	ask.deadline = sys.after(within, func() {
 		if _, waiting := sys.outside[n]; !waiting {
 			return
 		}

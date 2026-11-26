@@ -146,7 +146,7 @@ func inScope(path, scope string) bool {
 
 // actorLane is the lane of messages from source to actor idx: one lane per
 // (source, target) pair, so they keep their order at one time.
-func (sys *System) actorLane(source string, idx int) Lane {
+func (sys *System) actorLane(source string, idx int) laneID {
 	k := laneKey2{source: source, target: idx}
 	if l, ok := sys.pairLanes[k]; ok {
 		return l
@@ -163,7 +163,7 @@ type laneKey2 struct {
 }
 
 // pairLaneBase puts pair lanes above any lane host code allocates.
-const pairLaneBase Lane = 1 << 61
+const pairLaneBase laneID = 1 << 61
 
 func actorSource(idx int) string { return fmt.Sprintf("actor/%d", idx) }
 
@@ -193,8 +193,8 @@ func (sys *System) ensureWake(b *actorBase, at Time) {
 }
 
 // nodeLane is a lane of the system for actor idx: k=1 wake-ups.
-func nodeLane(idx int, k uint64) Lane {
-	return hostLane + 1 + Lane(idx)<<8 + Lane(k)
+func nodeLane(idx int, k uint64) laneID {
+	return hostLane + 1 + laneID(idx)<<8 + laneID(k)
 }
 
 // dropped counts a delivery that was dropped and folds why.

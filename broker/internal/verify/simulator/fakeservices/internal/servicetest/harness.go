@@ -175,7 +175,7 @@ func (h *Harness) Run() {
 func (h *Harness) RunTo(at sim.Time) {
 	h.t.Helper()
 	reached := false
-	h.Sys.At(at, sim.NoLane, func() { reached = true })
+	h.Sys.At(at, func() { reached = true })
 	h.Sys.RunUntil(func() bool { return reached })
 }
 

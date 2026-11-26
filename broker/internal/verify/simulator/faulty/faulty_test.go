@@ -215,7 +215,7 @@ func (t *testWorld) run() { t.sys.RunUntil(nil) }
 
 func (t *testWorld) runTo(at sim.Time) {
 	reached := false
-	t.sys.At(at, sim.NoLane, func() { reached = true })
+	t.sys.At(at, func() { reached = true })
 	t.sys.RunUntil(func() bool { return reached })
 }
 

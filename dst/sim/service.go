@@ -185,7 +185,7 @@ func (c *ServiceCtx) Now() actor.Mono { return actor.Mono(c.sys.q.now) }
 // dropped when an actor crashes.
 func (c *ServiceCtx) Later(d actor.Duration, fn func(ctx *ServiceCtx)) {
 	sys := c.sys
-	e := &entry{at: sys.q.now + Time(max(d, 0)), lane: NoLane, kind: kindServiceStep, node: -1, service: c.b.name}
+	e := &entry{at: sys.q.now + Time(max(d, 0)), lane: noLane, kind: kindServiceStep, node: -1, service: c.b.name}
 	e.run = func() {
 		sys.logMsg("service "+c.b.name+" later", nil)
 		c.b.invalidateHash()

@@ -92,7 +92,7 @@ func (h *host[In, IO]) target(n uint64) responderTarget {
 
 // deliverAt queues msg for this incarnation at time at on lane, carrying
 // owned number n.
-func (h *host[In, IO]) deliverAt(at Time, lane Lane, msg actor.Payload, n uint64) EntryID {
+func (h *host[In, IO]) deliverAt(at Time, lane laneID, msg actor.Payload, n uint64) entryID {
 	inc := h.inc
 	e := &entry{at: at, lane: lane, kind: kindDeliver, node: h.idx, inc: inc, body: msg}
 	e.run = func() { h.arrive(msg, inc, true, n) }

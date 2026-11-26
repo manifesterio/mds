@@ -188,7 +188,7 @@ func (n *network) push(c *connection, s int, d actor.Duration, ev core.EventData
 	at := max(n.sys.Now()+sim.Time(d), dir.last)
 	dir.last = at
 	dir.flight = append(dir.flight, frame{at: at, ev: ev})
-	n.sys.At(at, sim.NoLane, func() { n.land(c, s) })
+	n.sys.At(at, func() { n.land(c, s) })
 }
 
 // land delivers every frame of the direction from end s that has arrived.

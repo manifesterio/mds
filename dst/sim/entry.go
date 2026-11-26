@@ -9,7 +9,7 @@ type entry struct {
 	at   Time
 	tie  uint64 // drawn when the entry is added
 	seq  uint64 // the order of adding
-	lane Lane
+	lane laneID
 	kind entryKind
 
 	// The target, for the trace hash and for dropping the entries of an
