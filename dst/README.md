@@ -20,7 +20,7 @@ determinism check. The determinism tool is in `ops/tools/determinismcheck`.
 
 | Package | Role |
 |---|---|
-| `actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ServiceRef`, `ReplyTo`), `Perform` and `Sub`. Also the typed assertion handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable, `Pair`, `AssertKind`) and the declared buggify sites (`Site`, `NewSite`, `NewFaultSite`). Product actor code imports this package. Its types are aliases of `internal/core`, which holds the runtime seam for `sim` and `live`. |
+| `actor` | The actor API: `Actor`, `Props`, `Outbox` with its effects, the handles (`EntityRef`, `ReplyTo`), `Perform` and `Sub`. Also the typed assertion handles (Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable, `Pair`, `AssertKind`) and the declared buggify sites (`Site`, `NewSite`, `NewFaultSite`). Product actor code imports this package. Its types are aliases of `internal/core`, which holds the runtime seam for `sim` and `live`. |
 | `actor/actortest` | A test `Env` and step helpers for unit tests of actors |
 | `trace` | Running FNV-1a `Hash` |
 | `sim` | The simulation kernel, mechanism only: `System` (queue, virtual time, trace hash, rules), `Spawn` with executors, workloads and `Cost`, `Tell` / `Ask` from host code, `Hold` / `Reply` and `Track` for outside systems, `Crash` / `Stop` / `Pause`, `OnStep`, `SetFaults`, `SetEnd`, `Run`. Its `Result` carries `Coverage` and `SiteCount`. |
@@ -40,12 +40,12 @@ an `Outbox`. The runtime carries the effects out after `Receive` returns. `sim` 
 in tests; `live` (`dst/live`) runs it in production with a `Host`.
 
 ```go
-func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, actor.NoIO]) {
+func (s *server) Receive(_ actor.Now, msg serverReq, outbox *actor.Outbox[serverReq, storeReq]) {
 	switch m := msg.(type) {
 	case putValue:
-		s.store.Tell(outbox, storePut(m))
+		outbox.Do(storePut(m))
 	case getValue:
-		actor.Call(outbox, s.store.Request(storeGet{Key: m.Key}), thenAnswer(m.ReplyTo))
+		actor.Perform(outbox, storeGet{Key: m.Key}, thenAnswer(m.ReplyTo))
 	case storeAnswered:
 		actor.Reply(outbox, m.Asker, serverReply(m.Answer))
 	}
@@ -95,10 +95,9 @@ Effects on the outbox:
 
 Sends go through handles and the outbox:
 
-- `ref.Tell(outbox, msg)` sends to an actor, and `svc.Tell(outbox, req)` to a service. No answer.
+- `ref.Tell(outbox, msg)` sends to an actor. No answer.
 - `actor.Ask(outbox, ref, makeReq, adapt)` asks an actor. `makeReq` puts a fresh `ReplyTo` in the request,
   and the answer comes back as my own message, built by `adapt`.
-- `actor.Call(outbox, svc.Request(req), adapt)` asks a service. It gets the reply handle itself.
 - `actor.Reply(outbox, replyTo, answer)` answers an Ask I received.
 - `actor.Perform(outbox, req, adapt)` hands a product IO request (a case with `//dst:answer`) to the executor.
 - `actor.Sub(outbox, name, wrap)` lends a component its own outbox. Its messages come back wrapped into mine.
