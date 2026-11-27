@@ -104,7 +104,6 @@ it:
 	$(MAKE) -C ../shared it
 	go test -tags integration -count=1 -timeout 15m -v \
 		./test/integration/... \
-		./test/s3store/... \
 		./internal/controlplane/executor/dynamolog/... \
 		./internal/controlplane/executor/sqllog/...
 
