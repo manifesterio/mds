@@ -240,6 +240,7 @@ func TestPerformAnswerScoped(t *testing.T) {
 		case start:
 			actor.Perform(o, read{"forgotten"}, func(d readDone) msg { return got(d) })
 			o.TellSelf(note{"forget"})
+			o.TellSelf(note{"queued"}) // already in the inbox when forget runs
 		case note:
 			if m.S == "forget" {
 				o.ForgetPending()
@@ -277,6 +278,7 @@ func TestForgetPendingDropsAnswers(t *testing.T) {
 			o.StartTimer("t", 20*ms, note{"timer"})
 			o.After(0, note{"after"})
 			o.TellSelf(note{"forget"})
+			o.TellSelf(note{"queued"}) // already in the inbox when forget runs
 		case note:
 			if m.S == "forget" {
 				o.ForgetPending()
@@ -289,6 +291,9 @@ func TestForgetPendingDropsAnswers(t *testing.T) {
 	_ = done()
 	if slices.Contains(rec.lines(), "note timer") {
 		t.Fatalf("a forgotten timer fired: %v", rec.lines())
+	}
+	if slices.Contains(rec.lines(), "note queued") {
+		t.Fatalf("a forgotten message already in the inbox was received: %v", rec.lines())
 	}
 }
 

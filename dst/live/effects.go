@@ -180,15 +180,30 @@ func (h *Host) replyToActor(r actor.ReplyID, answer actor.Payload) error {
 }
 
 // watch registers a Watch; if the asker is already gone, gone comes at once.
+// The watch is registered before the asker is checked: an asker that ends
+// after the check finds it, and one that ended before is seen as gone.
+// Either askerEnded or this function takes the watch, never both.
 func (h *Host) watch(idx int, boot actor.ID, r actor.ReplyID, gone actor.Payload) {
 	w := watch{idx: idx, boot: boot, reply: r, gone: gone}
-	if !h.askerAlive(r) {
-		h.fire(w)
-		return
-	}
 	h.mu.Lock()
 	h.watches = append(h.watches, w)
 	h.mu.Unlock()
+	if h.askerAlive(r) {
+		return
+	}
+	taken := false
+	h.mu.Lock()
+	h.watches = removeWatches(h.watches, func(x watch) bool {
+		if !taken && x.idx == idx && x.boot == boot && x.reply == r {
+			taken = true
+			return true
+		}
+		return false
+	})
+	h.mu.Unlock()
+	if taken {
+		h.fire(w)
+	}
 }
 
 func (h *Host) askerAlive(r actor.ReplyID) bool {
@@ -284,9 +299,17 @@ func Ask[Req, Rep actor.Payload](ctx context.Context, h *Host, to actor.EntityRe
 		return zero, ErrHostStopped
 	case <-ctx.Done():
 		if !h.forgetOutside(n) {
-			// The answer won the race: it is already in the channel.
-			if a, ok := core.As[Rep](<-c.answer); ok {
-				return a, nil
+			// The call is gone: either the answer won the race and is in
+			// the channel, or the Host stopped and closed stopped.
+			select {
+			case a := <-c.answer:
+				rep, ok := core.As[Rep](a)
+				if !ok {
+					return zero, fmt.Errorf("%w: the answer is a %T", ErrProtocol, a)
+				}
+				return rep, nil
+			case <-c.stopped:
+				return zero, ErrHostStopped
 			}
 		}
 		h.askerEnded(func(r actor.ReplyID) bool { return r == id })

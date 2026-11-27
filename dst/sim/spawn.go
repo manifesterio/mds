@@ -10,7 +10,7 @@ import (
 // executor simulates product IO. One executor per IO sum, shared by every
 // actor of that sum. It runs right after the Receive that recorded the IO,
 // once per Do or Perform, in record order. It must not block: it answers a
-// Perform with Answer or Forward, and sends unsolicited results with Tell.
+// Perform with Answer or Hold, and sends unsolicited results with Tell.
 type executor[IO actor.Payload] func(ctx *ExecCtx, io IO)
 
 // SpawnOption configures what only a simulation needs.

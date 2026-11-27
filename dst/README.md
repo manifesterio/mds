@@ -109,8 +109,13 @@ To run a system, use `sim`:
 
 ```go
 system := sim.NewSystem(sim.Config{Seed: seed})
-serverRef := sim.Spawn(system, actor.Props[serverReq, actor.NoIO]{Name: "server",
-	New: func(actor.Env) actor.Actor[serverReq, actor.NoIO] { return &server{} }})
+tracked := system.Track("store", theStore.StateHash)
+serverRef := sim.Spawn(system, actor.Props[serverReq, storeReq]{Name: "server",
+	New: func(actor.Env) actor.Actor[serverReq, storeReq] { return &server{} },
+}, sim.WithExecutor(func(ctx *sim.ExecCtx, req storeReq) {
+	tracked.Touch()
+	theStore.handle(system.Env(), ctx, req)
+}))
 sim.Spawn(system, actor.Props[clientMsg, actor.NoIO]{Name: "client",
 	Boot: func(actor.Incarnation) clientMsg { return start{} },
 	New:  func(env actor.Env) actor.Actor[clientMsg, actor.NoIO] { return &client{env: env, server: serverRef, script: script} },

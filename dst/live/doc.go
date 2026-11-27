@@ -3,8 +3,8 @@
 // function per actor for product IO (answers come back through Answer), and
 // outside callers through Ask, Tell and OnLoop. The same actors run in tests
 // on package sim. When one actor ends, the Host stops the others; Run returns
-// nil (Exit), ErrTripped (Trip), ErrKilled (a stop missed StopGrace), or the
-// crash or protocol error.
+// nil (Exit), ErrTripped (Trip), ErrKilled (a stop missed StopGrace),
+// ErrStopped (its context ended), or the crash or protocol error.
 //
 // NewEnv is the one production Env. RealClock is the process clock and
 // FakeClock is the test clock that moves only on Advance.
