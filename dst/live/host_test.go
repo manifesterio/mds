@@ -235,6 +235,7 @@ func TestPerformAnswerScoped(t *testing.T) {
 	h := newHost()
 	rec := newRecorder()
 	var answerLater func()
+	forgottenRan := make(chan struct{}) // execs run on workers in any order
 	live.Spawn(h, props("a", rec, func(m msg, o *outbox) {
 		switch m := m.(type) {
 		case start:
@@ -251,12 +252,12 @@ func TestPerformAnswerScoped(t *testing.T) {
 		r := x.(read)
 		if r.Key == "forgotten" {
 			answerLater = func() { live.Answer(ctx, r, readDone{"forgotten"}) }
+			close(forgottenRan)
 			return nil
 		}
-		go func() {
-			answerLater() // the forgotten answer arrives first
-			live.Answer(ctx, r, readDone{"kept"})
-		}()
+		<-forgottenRan
+		answerLater() // the forgotten answer arrives first
+		live.Answer(ctx, r, readDone{"kept"})
 		return nil
 	})
 	done := runHost(t, h)

@@ -11,10 +11,10 @@ import (
 	"github.com/manifesterio/mds/dst/internal/core"
 )
 
-// owned is one timer or awaited answer of the actor. It is checked when the
-// message is taken from the inbox, so a cancelled, replaced or forgotten one
-// is dropped even if it already arrived.
-type owned struct {
+// expectedItem records that an inbox item is still expected, from a timer or
+// an awaited answer. An item whose record is gone when it is taken from the
+// inbox is dropped, because it was cancelled, replaced or forgotten.
+type expectedItem struct {
 	scope string
 	key   actor.TimerKey // keyed timers only
 	timer Timer          // the real timer, while it has not fired
@@ -40,10 +40,10 @@ type actorRunner[In, IO actor.Payload] struct {
 	killed  chan struct{}
 	stopMsg chan actor.Mono // the graceful stop request, at most once
 
-	a       actor.Actor[In, IO]
-	numbers uint64
-	own     map[uint64]*owned
-	keyed   map[actor.TimerKey]uint64
+	a             actor.Actor[In, IO]
+	numbers       uint64
+	expectedItems map[uint64]*expectedItem
+	keyed         map[actor.TimerKey]uint64
 }
 
 func newActorRunner[In, IO actor.Payload](h *Host, idx int, p actor.Props[In, IO],
@@ -53,8 +53,8 @@ func newActorRunner[In, IO actor.Payload](h *Host, idx int, p actor.Props[In, IO
 	return &actorRunner[In, IO]{
 		h: h, idx: idx, props: p, exec: exec, after: after, boot: boot,
 		wake: make(chan struct{}, 1), done: make(chan struct{}), killed: make(chan struct{}),
-		stopMsg: make(chan actor.Mono, 1),
-		own:     map[uint64]*owned{}, keyed: map[actor.TimerKey]uint64{},
+		stopMsg:       make(chan actor.Mono, 1),
+		expectedItems: map[uint64]*expectedItem{}, keyed: map[actor.TimerKey]uint64{},
 	}
 }
 
@@ -212,8 +212,8 @@ func (r *actorRunner[In, IO]) handle(it item) bool {
 	}
 	msg := it.msg
 	if it.answer {
-		msg = r.own[it.n].adaptOr(msg)
-		delete(r.own, it.n)
+		msg = r.expectedItems[it.n].adaptOr(msg)
+		delete(r.expectedItems, it.n)
 	}
 	m, ok := core.As[In](msg)
 	if !ok {
@@ -229,24 +229,24 @@ func (r *actorRunner[In, IO]) take(n uint64) bool {
 	if n == 0 {
 		return true
 	}
-	o, ok := r.own[n]
+	e, ok := r.expectedItems[n]
 	if !ok {
 		return false
 	}
-	if o.adapt == nil {
-		delete(r.own, n)
-		if o.key != "" && r.keyed[o.key] == n {
-			delete(r.keyed, o.key)
+	if e.adapt == nil {
+		delete(r.expectedItems, n)
+		if e.key != "" && r.keyed[e.key] == n {
+			delete(r.keyed, e.key)
 		}
 	}
 	return true
 }
 
-func (o *owned) adaptOr(msg actor.Payload) actor.Payload {
-	if o == nil || o.adapt == nil {
+func (e *expectedItem) adaptOr(msg actor.Payload) actor.Payload {
+	if e == nil || e.adapt == nil {
 		return msg
 	}
-	return o.adapt(msg)
+	return e.adapt(msg)
 }
 
 // receive runs one Receive and carries out its effects. It reports false
@@ -291,32 +291,32 @@ func (r *actorRunner[In, IO]) nextNumber() uint64 {
 
 // forget drops every timer and awaited answer in scope or below.
 func (r *actorRunner[In, IO]) forget(scope string) {
-	for n, o := range r.own { //determinismcheck:ok production: deletes only
-		if scope == "" || o.scope == scope || strings.HasPrefix(o.scope, scope+"/") {
-			r.drop(n, o)
+	for n, e := range r.expectedItems { //determinismcheck:ok production: deletes only
+		if scope == "" || e.scope == scope || strings.HasPrefix(e.scope, scope+"/") {
+			r.drop(n, e)
 		}
 	}
 }
 
 // drop forgets owned number n and stops its timer.
-func (r *actorRunner[In, IO]) drop(n uint64, o *owned) {
-	if o.timer != nil {
-		o.timer.Stop()
+func (r *actorRunner[In, IO]) drop(n uint64, expectedItem *expectedItem) {
+	if expectedItem.timer != nil {
+		expectedItem.timer.Stop()
 	}
-	delete(r.own, n)
-	if o.key != "" && r.keyed[o.key] == n {
-		delete(r.keyed, o.key)
+	delete(r.expectedItems, n)
+	if expectedItem.key != "" && r.keyed[expectedItem.key] == n {
+		delete(r.keyed, expectedItem.key)
 	}
 }
 
 func (r *actorRunner[In, IO]) cancelKey(key actor.TimerKey) {
 	if n, ok := r.keyed[key]; ok {
-		r.drop(n, r.own[n])
+		r.drop(n, r.expectedItems[n])
 	}
 }
 
 func (r *actorRunner[In, IO]) stopTimers() {
-	for n, o := range r.own { //determinismcheck:ok production: deletes only
-		r.drop(n, o)
+	for n, e := range r.expectedItems { //determinismcheck:ok production: deletes only
+		r.drop(n, e)
 	}
 }

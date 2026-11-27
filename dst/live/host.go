@@ -54,6 +54,10 @@ type HostConfig struct {
 	StopGrace actor.Duration
 	// Facts, when set, receives every Fact an actor records.
 	Facts func(source actor.Incarnation, f actor.Fact)
+	// ExecWorkers is the number of workers that run the IO of all actors.
+	// 0 means 100. When the Host stops, the workers finish the queued and
+	// the running IO, up to StopGrace, before the exec context is cancelled.
+	ExecWorkers int
 }
 
 const defaultStopGrace = 5 * actor.Second
@@ -77,6 +81,10 @@ type Host struct {
 	watches     []watch
 	outside     map[uint64]*outsideCall
 	outsideAsks uint64
+
+	pool       *execPool
+	execCtx    context.Context // ends when the Host stops, after the pool has drained or StopGrace
+	execCancel context.CancelFunc
 }
 
 // NewHost makes a Host. Spawn the actors, then Run it.
@@ -84,14 +92,23 @@ func NewHost(cfg HostConfig) *Host {
 	if cfg.StopGrace <= 0 {
 		cfg.StopGrace = defaultStopGrace
 	}
+	if cfg.ExecWorkers <= 0 {
+		cfg.ExecWorkers = defaultExecWorkers
+	}
 	if cfg.Env == nil {
 		cfg.Env = func(self actor.Incarnation) actor.Env { return NewEnv(self) }
 	}
+	execCtx, execCancel := context.WithCancel(context.Background())
 	return &Host{
 		cfg: cfg, owner: core.NewOwner(), names: map[string]bool{},
 		outside: map[uint64]*outsideCall{}, ended: make(chan struct{}),
+		pool: newExecPool(cfg.ExecWorkers), execCtx: execCtx, execCancel: execCancel,
 	}
 }
+
+// ExecStats reports how many IOs wait for a worker and how many run now, in
+// that order. Safe from any goroutine.
+func (h *Host) ExecStats() (int, int) { return h.pool.stats() }
 
 // hosted is one actor of the Host, whatever its types.
 type hosted interface {
@@ -115,10 +132,19 @@ type item struct {
 	fn     func()
 }
 
-// Spawn adds an actor before Run. exec runs product IO on the actor's
-// goroutine and must not block: it starts the IO and answers later with
-// Answer, from any goroutine. exec may be nil for an actor with actor.NoIO.
-// An error from exec ends the Host.
+// Spawn adds an actor before Run. exec runs product IO on a worker of the
+// Host, never on the actor's goroutine, so it may block: it does the IO and
+// answers with Answer before it returns, or later from any goroutine. exec
+// may be nil for an actor with actor.NoIO. An error or a panic from exec
+// ends the Host; the actor may have handled more messages by then.
+//
+// dst gives no order between IOs: the IOs of one actor may run concurrently
+// and finish in any order. If order matters, wait for the Perform's answer
+// before recording the next IO.
+//
+// When the Host stops, IO already recorded is still carried out: the workers
+// finish the queued and the running IO for up to StopGrace, then the exec
+// context is cancelled. Answers for ended actors are dropped.
 func Spawn[In, IO actor.Payload](h *Host, p actor.Props[In, IO], exec func(ctx *ExecCtx, io IO) error,
 	opts ...SpawnOption) actor.EntityRef[In] {
 	h.mu.Lock()
@@ -171,6 +197,7 @@ func (h *Host) Run(ctx context.Context) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	h.pool.start()
 	var wg sync.WaitGroup
 	for _, a := range actors {
 		wg.Go(func() { a.run(runCtx) })
@@ -178,8 +205,28 @@ func (h *Host) Run(ctx context.Context) error {
 	killed := h.supervise(ctx, actors)
 	cancel()
 	wg.Wait()
+	h.stopExec()
 	h.finish()
 	return h.result(ctx, killed)
+}
+
+// stopExec lets the pool run the queued IO and finish the running IO, up to
+// StopGrace, then cancels the exec context and returns. The exec context stays
+// live meanwhile, so IO recorded just before the stop is carried out. Go
+// cannot kill a goroutine, so an exec that is still running after the grace
+// sees its context cancelled and is left behind.
+func (h *Host) stopExec() {
+	defer h.execCancel()
+	h.pool.close()
+	idle := make(chan struct{})
+	go func() { h.pool.wg.Wait(); close(idle) }()
+	grace := make(chan struct{})
+	t := h.cfg.Clock.AfterFunc(h.cfg.StopGrace, func() { close(grace) })
+	defer t.Stop()
+	select {
+	case <-idle:
+	case <-grace:
+	}
 }
 
 // supervise waits for the reason to stop, then stops every actor: StopMsg,

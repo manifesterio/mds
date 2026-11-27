@@ -53,9 +53,8 @@ func (o *Outbox[In, IO]) Do(io IO) {
 	o.record(Effect{Kind: EffectDo, Msg: io})
 }
 
-// Stop ends this incarnation; how is Trip or Exit. Everything it owned is
-// dropped. It must be the last effect of the Receive, and it cannot be
-// recorded through a Sub.
+// Stop ends this incarnation. Everything it owned is dropped. It must be the
+// last effect of the Receive, and it cannot be recorded through a Sub.
 func (o *Outbox[In, IO]) Stop(how End, cause string) {
 	if o.scope != "" {
 		o.rec.misuse("Stop through the Sub " + o.scope + ": a component cannot end its actor")

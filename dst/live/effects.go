@@ -54,14 +54,14 @@ func (r *actorRunner[In, IO]) applyOne(e actor.Effect) error {
 	case actor.EffectTell:
 		return r.h.tell(e.To, e.Msg)
 	case actor.EffectAsk:
-		r.own[e.Number] = &owned{scope: e.Scope, adapt: e.Adapt}
+		r.expectedItems[e.Number] = &expectedItem{scope: e.Scope, adapt: e.Adapt}
 		return r.h.tell(e.To, e.Msg)
 	case actor.EffectReply:
 		return r.h.reply(r.idx, r.boot, e.Reply, e.Msg)
 	case actor.EffectWatch:
 		r.h.watch(r.idx, r.boot, e.Reply, e.Msg)
 	case actor.EffectPerform:
-		r.own[e.Number] = &owned{scope: e.Scope, adapt: e.Adapt}
+		r.expectedItems[e.Number] = &expectedItem{scope: e.Scope, adapt: e.Adapt}
 		return r.execute(e.Msg, e.Number)
 	case actor.EffectDo:
 		return r.execute(e.Msg, 0)
@@ -74,14 +74,14 @@ func (r *actorRunner[In, IO]) applyOne(e actor.Effect) error {
 // behind what is there, in record order.
 func (r *actorRunner[In, IO]) startTimer(e actor.Effect) {
 	n := r.nextNumber()
-	o := &owned{scope: e.Scope}
+	o := &expectedItem{scope: e.Scope}
 	if e.Kind == actor.EffectStartTimer {
 		key := e.StoredKey()
 		r.cancelKey(key)
 		o.key = key
 		r.keyed[key] = n
 	}
-	r.own[n] = o
+	r.expectedItems[n] = o
 	it := item{msg: e.Msg, n: n}
 	if e.D <= 0 {
 		r.push(it)
@@ -90,7 +90,8 @@ func (r *actorRunner[In, IO]) startTimer(e actor.Effect) {
 	o.timer = r.h.cfg.Clock.AfterFunc(e.D, func() { r.push(it) })
 }
 
-// execute hands io to the executor. n is the Perform's number, 0 for Do.
+// execute checks io and queues it for a worker; it does not wait. n is the
+// Perform's number, 0 for Do.
 func (r *actorRunner[In, IO]) execute(io actor.Payload, n uint64) error {
 	if r.exec == nil {
 		return fmt.Errorf("%w: %s: Do or Perform without an exec function", ErrProtocol, r.name())
@@ -100,13 +101,21 @@ func (r *actorRunner[In, IO]) execute(io actor.Payload, n uint64) error {
 		return fmt.Errorf("%w: %s: the IO value is not of the actor's IO type", ErrProtocol, r.name())
 	}
 	ctx := &ExecCtx{h: r.h, to: r, boot: r.boot, n: n, self: r.self()}
-	if err := r.exec(ctx, v); err != nil {
-		return fmt.Errorf("live: %s: exec: %w", r.name(), err)
-	}
+	r.h.pool.enqueue(func() {
+		var err error
+		if perr := guard(func() { err = r.exec(ctx, v) }); perr != nil {
+			err = perr
+		}
+		if err != nil {
+			r.h.actorEnded(fmt.Errorf("live: %s: exec: %w", r.name(), err))
+		}
+	})
 	return nil
 }
 
 // ExecCtx is lent to one exec call. Answer may be called from any goroutine.
+// The IOs of one actor may run concurrently and finish in any order; if order
+// matters, wait for the Perform's answer before recording the next IO.
 type ExecCtx struct {
 	h    *Host
 	to   hosted
@@ -117,6 +126,11 @@ type ExecCtx struct {
 
 // Host is the Host, for exec functions that Tell actors.
 func (c *ExecCtx) Host() *Host { return c.h }
+
+// Context ends when the Host stops, after the workers have finished the
+// queued and running IO or StopGrace has passed. A blocking exec should watch
+// it.
+func (c *ExecCtx) Context() context.Context { return c.h.execCtx }
 
 // Issuer is the incarnation that recorded the IO.
 func (c *ExecCtx) Issuer() actor.Incarnation { return c.self }
