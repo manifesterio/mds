@@ -137,7 +137,9 @@ func (b *Broker) seal(why string, outbox *brokerOutbox) {
 		b.env.Reachable(segmentSealedPartitionCap)
 	}
 	outbox.CancelTimer(timerFlush)
+	key := b.newSegmentKey() // drawn here so the fact can name the segment
 	recordFact(outbox, "segment_sealed",
+		actor.Field{Key: "segment", Value: actor.StringValue(key)},
 		actor.Field{Key: "reason", Value: actor.StringValue(why)},
 		actor.Field{Key: "bytes", Value: actor.Int64Value(b.open.bytes)},
 		actor.Field{Key: "batches", Value: actor.Int64Value(len(bs))},
@@ -147,10 +149,10 @@ func (b *Broker) seal(why string, outbox *brokerOutbox) {
 		actor.Field{Key: "inflight", Value: actor.Int64Value(len(b.segs) + 1)},
 		actor.Field{Key: "buffered", Value: actor.Int64Value(b.bufBytes)})
 	b.open = openSegment{}
-	b.sealBatches(bs, outbox)
+	b.sealBatches(bs, key, outbox)
 }
 
-func (b *Broker) sealBatches(bs []*partitionBatch, outbox *brokerOutbox) {
+func (b *Broker) sealBatches(bs []*partitionBatch, key string, outbox *brokerOutbox) {
 	// Sort by topic and partition, so each partition's batches sit next to
 	// each other in the object. The sort is stable: batches of one partition
 	// keep their arrival order, and so do their offsets.
@@ -168,7 +170,7 @@ func (b *Broker) sealBatches(bs []*partitionBatch, outbox *brokerOutbox) {
 		return
 	}
 	s := &segment{id: b.id(), batches: bs, data: data,
-		key: b.newSegmentKey(), sealedAt: b.now}
+		key: key, sealedAt: b.now}
 	for i, pb := range bs {
 		pb.loc = entries[i].Ref(s.key)
 	}

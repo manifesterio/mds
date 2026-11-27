@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -224,12 +225,12 @@ func TestNodeTripAfterIOTimerAndFact(t *testing.T) {
 		c.Facts = func(f actor.Fact) { add("fact " + f.Name) }
 	}, func(msg core.EventData, o *actor.Outbox[core.EventData, core.IO]) {
 		if _, ok := msg.(core.NodeStarted); ok {
-			o.Do(core.PauseReads{Conn: 2})
+			o.Do(core.PauseReads{Conn: 2, Seq: 1})
 			o.Fact(actor.Fact{Name: "booted"})
 			o.After(actor.Millisecond, core.FlushDue{})
 		}
 		if _, ok := msg.(core.FlushDue); ok {
-			o.Do(core.ResumeReads{Conn: 2})
+			o.Do(core.ResumeReads{Conn: 2, Seq: 2})
 			o.Stop(actor.Trip, "x")
 		}
 	})
@@ -239,8 +240,15 @@ func TestNodeTripAfterIOTimerAndFact(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if got := strings.Join(seen, ","); got != "core.PauseReads,fact booted,core.ResumeReads" {
-		t.Fatalf("seen %s", got)
+	// OnIO reports socket IO in the order it is applied, so PauseReads comes
+	// before ResumeReads. The fact is told on the actor goroutine and nothing
+	// orders it against the pooled IO: it only has to be seen.
+	if !slices.Contains(seen, "fact booted") {
+		t.Fatalf("no fact in %v", seen)
+	}
+	io := slices.DeleteFunc(slices.Clone(seen), func(s string) bool { return s == "fact booted" })
+	if got := strings.Join(io, ","); got != "core.PauseReads,core.ResumeReads" {
+		t.Fatalf("seen %v", seen)
 	}
 }
 

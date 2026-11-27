@@ -104,13 +104,19 @@ func (*probe) StateHash() uint64 { return 0 }
 // Host stops when the test ends.
 func runProbe(t *testing.T, e *Executor, script ...core.IO) chan core.EventData {
 	t.Helper()
+	return runProbeExec(t, e.Exec, script...)
+}
+
+// runProbeExec is runProbe with any exec function.
+func runProbeExec(t *testing.T, exec func(*live.ExecCtx, core.IO) error, script ...core.IO) chan core.EventData {
+	t.Helper()
 	got := make(chan core.EventData, 16)
 	host := live.NewHost(live.HostConfig{Clock: live.RealClock()})
 	live.Spawn(host, actor.Props[core.EventData, core.IO]{
 		Name: "probe",
 		New:  func(actor.Env) actor.Actor[core.EventData, core.IO] { return &probe{script: script, got: got} },
 		Boot: func(self actor.Incarnation) core.EventData { return core.NodeStarted{Self: self} },
-	}, e.Exec)
+	}, exec)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() { _ = host.Run(ctx); close(done) }()
@@ -172,18 +178,26 @@ func TestExecutorAnswersOnceAndNeverBlocks(t *testing.T) {
 	}
 }
 
-// Socket IO goes to the connections, in record order, with no answer.
+// Socket IO goes to the connections, in Seq order per connection, with no answer.
 func TestExecutorSocketIO(t *testing.T) {
 	conns := &fakeConns{}
 	e := NewExecutor(t.Context(), ExecConfig{}, nil, nil, conns, Classifier{})
 	got := runProbe(t, e,
-		core.Send{Conn: 7, Data: []byte("x")}, core.PauseReads{Conn: 7}, core.ResumeReads{Conn: 7},
-		core.CloseConn{Conn: 7}, core.CloseConn{Conn: 8, Abort: true},
-		core.Connect{}) // answered, so the test knows the Do calls ran before it
+		core.Send{Conn: 7, Data: []byte("x"), Seq: 1}, core.PauseReads{Conn: 7, Seq: 2}, core.ResumeReads{Conn: 7, Seq: 3},
+		core.CloseConn{Conn: 7, Seq: 4}, core.CloseConn{Conn: 8, Abort: true, Seq: 1},
+		core.Connect{})
 	if _, ok := wait(t, got).(core.ConnectDone); !ok {
 		t.Fatal("no ConnectDone")
 	}
-	if s := strings.Join(conns.seen(), ","); s != "write x,pause,resume,close,abort" {
+	waitSeen(conns, 5, 2*time.Second) // the pool runs the Connect beside the socket IO
+	// Connection 7 is in Seq order. Connection 8 is a different connection:
+	// nothing orders its abort against the others.
+	seen := conns.seen()
+	if !slices.Contains(seen, "abort") {
+		t.Fatalf("no abort in %v", seen)
+	}
+	seen = slices.DeleteFunc(seen, func(s string) bool { return s == "abort" })
+	if s := strings.Join(seen, ","); s != "write x,pause,resume,close" {
 		t.Fatalf("connections saw %s", s)
 	}
 }
@@ -277,5 +291,94 @@ func TestControlPlaneCallOwnTimeout(t *testing.T) {
 				t.Errorf("own deadline: %+v, want OK", d.Done)
 			}
 		}
+	}
+}
+
+// Socket IO that arrives out of Seq order is applied in Seq order, once the
+// gap is filled; Exec never waits for the missing IO.
+func TestExecutorReordersSocketIO(t *testing.T) {
+	conns := &fakeConns{}
+	e := NewExecutor(t.Context(), ExecConfig{}, nil, nil, conns, Classifier{})
+	for _, io := range []core.IO{
+		core.Send{Conn: 7, Data: []byte("c"), Seq: 3},
+		core.Send{Conn: 7, Data: []byte("a"), Seq: 1},
+	} {
+		if err := e.Exec(nil, io); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Join(conns.seen(), ","); got != "write a" {
+		t.Fatalf("before the gap is filled: %s", got)
+	}
+	if err := e.Exec(nil, core.Send{Conn: 7, Data: []byte("b"), Seq: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(conns.seen(), ","); got != "write a,write b,write c" {
+		t.Fatalf("connections saw %s", got)
+	}
+}
+
+// Connections are ordered on their own: a gap on one holds nothing on another.
+func TestExecutorConnectionsOrderIndependently(t *testing.T) {
+	conns := &fakeConns{}
+	e := NewExecutor(t.Context(), ExecConfig{}, nil, nil, conns, Classifier{})
+	for _, io := range []core.IO{
+		core.Send{Conn: 1, Data: []byte("1b"), Seq: 2},
+		core.Send{Conn: 2, Data: []byte("2a"), Seq: 1},
+		core.Send{Conn: 2, Data: []byte("2b"), Seq: 2},
+	} {
+		if err := e.Exec(nil, io); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Join(conns.seen(), ","); got != "write 2a,write 2b" {
+		t.Fatalf("connection 1 is waiting for Seq 1, saw %s", got)
+	}
+	if err := e.Exec(nil, core.Send{Conn: 1, Data: []byte("1a"), Seq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(conns.seen(), ","); got != "write 2a,write 2b,write 1a,write 1b" {
+		t.Fatalf("connections saw %s", got)
+	}
+}
+
+// A connection's entry is dropped once its CloseConn is applied, so a later
+// connection with the same id starts again at Seq 1.
+func TestExecutorForgetsClosedConnection(t *testing.T) {
+	conns := &fakeConns{}
+	e := NewExecutor(t.Context(), ExecConfig{}, nil, nil, conns, Classifier{})
+	for _, io := range []core.IO{
+		core.CloseConn{Conn: 7, Seq: 2}, // held: not removed yet
+		core.Send{Conn: 7, Data: []byte("a"), Seq: 1},
+	} {
+		if err := e.Exec(nil, io); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.orderMu.Lock()
+	n := len(e.order)
+	e.orderMu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d connection entries after the close", n)
+	}
+	if err := e.Exec(nil, core.Send{Conn: 7, Data: []byte("again"), Seq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(conns.seen(), ","); got != "write a,close,write again" {
+		t.Fatalf("connections saw %s", got)
+	}
+}
+
+// The actor numbers socket IO from 1: Seq 0 is a bug, and ends the Host.
+func TestExecutorSeqZeroIsAnError(t *testing.T) {
+	conns := &fakeConns{}
+	e := NewExecutor(t.Context(), ExecConfig{}, nil, nil, conns, Classifier{})
+	for _, io := range []core.IO{core.Send{Conn: 7}, core.CloseConn{Conn: 7}, core.PauseReads{Conn: 7}, core.ResumeReads{Conn: 7}} {
+		if err := e.Exec(nil, io); err == nil || !strings.Contains(err.Error(), "Seq 0") {
+			t.Errorf("%T: err = %v", io, err)
+		}
+	}
+	if got := conns.seen(); len(got) != 0 {
+		t.Fatalf("connections saw %v", got)
 	}
 }

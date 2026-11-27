@@ -15,6 +15,10 @@ import (
 // (bytes, a close by the peer) comes back as unsolicited messages
 // (BytesReceived, ConnClosed), not as an answer.
 //
+// Each socket case carries Seq: the per-connection number the actor gives
+// socket IO, from 1; the executor applies socket IO of one connection in Seq
+// order.
+//
 // The other cases are requests with one answer each (//dst:answer), handed to
 // actor.Perform. A live incarnation always gets that answer: a lost response
 // comes back as ErrTimeout with MaybeApplied, never as silence.
@@ -34,22 +38,30 @@ type (
 	Send struct {
 		Conn ConnID
 		Data []byte
+		Seq  uint64
 	}
 
 	// CloseConn closes gracefully (FIN after queued bytes) or aborts (RST).
 	CloseConn struct {
 		Conn  ConnID
 		Abort bool
+		Seq   uint64
 	}
 
 	// PauseReads stops reading from a connection (admission control). Bytes
 	// already received are still delivered. In production the reader
 	// goroutine parks; in simulation the bytes stay in the sender's
 	// flow-control window.
-	PauseReads struct{ Conn ConnID }
+	PauseReads struct {
+		Conn ConnID
+		Seq  uint64
+	}
 
 	// ResumeReads undoes PauseReads.
-	ResumeReads struct{ Conn ConnID }
+	ResumeReads struct {
+		Conn ConnID
+		Seq  uint64
+	}
 )
 
 // Connect opens an outbound connection. Simulated clients use it; brokers

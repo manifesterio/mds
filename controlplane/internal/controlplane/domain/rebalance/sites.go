@@ -9,16 +9,16 @@ import (
 // valid machine fail: it only does what a slow host, a late timer or a
 // replayed message could do anyway. The names are stable plain strings, and each site is declared once here.
 var (
-	// SiteTimerLate: a timer fires up to 50 ms late, as a busy host can make it.
+	// SiteTimerLate a timer fires up to 50 ms late, as a busy host can make it.
 	SiteTimerLate = actor.NewSite("rebalance.timer.late") //determinismcheck:ok catalog handle, set once at start
-	// SiteDuplicateReply: an answer of the replica comes twice. The second
+	// SiteDuplicateReply an answer of the replica comes twice. The second
 	// copy is for a write, commit or read that is over, and is ignored.
 	SiteDuplicateReply = actor.NewSite("rebalance.reply.duplicate") //determinismcheck:ok catalog handle, set once at start
-	// SiteLateDrain: after a write, the queue of the group is taken in a later
+	// SiteLateDrain after a write, the queue of the group is taken in a later
 	// step. The group stays busy until then, so the order of its inputs is kept;
 	// inputs of other groups may go first.
 	SiteLateDrain = actor.NewSite("rebalance.queue.late-drain") //determinismcheck:ok catalog handle, set once at start
-	// SiteLoadRetry: a load read that came back OK is treated as refused and
+	// SiteLoadRetry a load read that came back OK is treated as refused and
 	// sent again after LoadRetry (rule 39).
 	SiteLoadRetry = actor.NewSite("rebalance.load.retry") //determinismcheck:ok catalog handle, set once at start
 )

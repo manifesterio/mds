@@ -57,8 +57,8 @@ func sampleEvents() map[string]EventData {
 // has one value per object store call.
 func sampleIO() map[string]IO {
 	return map[string]IO{
-		"Send": Send{Conn: 2, Data: []byte("s")}, "CloseConn": CloseConn{Conn: 2, Abort: true},
-		"PauseReads": PauseReads{Conn: 2}, "ResumeReads": ResumeReads{Conn: 3},
+		"Send": Send{Conn: 2, Data: []byte("s"), Seq: 5}, "CloseConn": CloseConn{Conn: 2, Abort: true, Seq: 6},
+		"PauseReads": PauseReads{Conn: 2, Seq: 7}, "ResumeReads": ResumeReads{Conn: 3, Seq: 8},
 		"Connect":      Connect{Addr: "a:1"},
 		"ObjectPut":    ObjectCall{Call: objectstore.Put{Key: "k", Data: []byte("v")}},
 		"ObjectGet":    ObjectCall{Call: objectstore.Get{Ref: sampleRef}},

@@ -43,9 +43,11 @@ type NodeConfig struct {
 	// Facts, if set, gets every fact the broker records, on the broker
 	// actor's goroutine (tracing and metrics).
 	Facts func(actor.Fact)
-	// OnIO, if set, sees every IO the broker issues, on the broker actor's
-	// goroutine, before it executes (used to pair segment keys with
-	// segment_sealed facts, see SegmentLog).
+	// OnIO, if set, sees every IO the broker issues, one call at a time, on
+	// a live worker. Socket IO is reported when the executor applies it, so
+	// in Seq order per connection; other IO is reported when a worker takes
+	// it, before it executes, in no fixed order (used to pair segment keys
+	// with segment_sealed facts, see SegmentLog).
 	OnIO func(core.IO)
 	Log  *slog.Logger
 }
@@ -91,6 +93,8 @@ func start(ctx context.Context, config NodeConfig, props actor.Props[core.EventD
 		Shutdown:  stop,
 		StopGrace: actor.Duration(config.StopGrace),
 		Facts:     factsHook(config.Facts),
+		// Each in-flight object store or control plane call holds a worker.
+		ExecWorkers: 100,
 	})
 	// The executor needs the connections, and the connections need the
 	// broker's handle, which Spawn gives. exec is set before the Host runs.
@@ -101,12 +105,7 @@ func start(ctx context.Context, config NodeConfig, props actor.Props[core.EventD
 	ex := NewExecutor(rctx, config.Exec, config.Objects, config.ControlPlane, n.net,
 		Classifier{Objects: config.ObjClassify, CP: config.CPClassify})
 	exec = ex.Exec
-	if config.OnIO != nil {
-		exec = func(c *live.ExecCtx, io core.IO) error {
-			config.OnIO(io)
-			return ex.Exec(c, io)
-		}
-	}
+	ex.onIO = config.OnIO
 	if config.Lease != nil {
 		go leaseLoop(rctx, in, config.Lease, self, config.LeaseInterval, config.Log)
 	}

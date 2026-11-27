@@ -541,6 +541,35 @@ func TestPeerCloseDuringProduce(t *testing.T) {
 	}
 }
 
+// Every connection the broker forgets ends with exactly one CloseConn, also
+// when the peer reset it, so the executor can forget the connection too.
+func TestPeerCloseRecordsCloseConn(t *testing.T) {
+	for _, abort := range []bool{true, false} {
+		h := startedHarness(t, DefaultConfig())
+		c := h.open(1)
+		h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
+		before := len(h.all)
+		h.do(core.ConnClosed{Conn: 1, Abort: abort})
+		h.do(core.ConnClosed{Conn: 1, Abort: abort}) // a repeat records nothing
+		var closes []core.CloseConn
+		for _, ef := range h.all[before:] {
+			if cc, ok := ef.Msg.(core.CloseConn); ok && ef.Kind == actor.EffectDo {
+				closes = append(closes, cc)
+			}
+		}
+		if len(closes) != 1 || closes[0].Conn != 1 || closes[0].Abort != abort || closes[0].Seq == 0 {
+			t.Fatalf("abort=%v: CloseConn records %+v", abort, closes)
+		}
+		h.flush()
+		for _, ef := range h.all[before:] {
+			if io, ok := ef.Msg.(core.IO); ok && ef.Kind == actor.EffectDo && io.(core.CloseConn).Seq == 0 {
+				t.Fatal("socket IO without Seq")
+			}
+		}
+		h.noViolations()
+	}
+}
+
 func TestStateHash(t *testing.T) {
 	run := func() []uint64 {
 		h := startedHarness(t, DefaultConfig())

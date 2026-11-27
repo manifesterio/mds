@@ -209,7 +209,7 @@ func echo(_ string, msg core.EventData, o *outbox) {
 			o.Do(core.PauseReads{Conn: m.Conn})
 			o.StartTimer(actor.TimerKey(fmt.Sprint(m.Conn)), 100*actor.Millisecond, core.OpDue{Op: uint64(m.Conn)})
 		}
-		o.Do(core.Send(m))
+		o.Do(core.Send{Conn: m.Conn, Data: m.Data}) // the sim ignores Seq
 	}
 	if m, ok := msg.(core.OpDue); ok {
 		o.Do(core.ResumeReads{Conn: core.ConnID(m.Op)})

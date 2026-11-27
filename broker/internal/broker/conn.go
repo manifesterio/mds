@@ -24,6 +24,13 @@ type connection struct {
 	abort   bool   // close with RST
 	closed  bool   // CloseConn issued or peer gone; answers are dropped
 	host    string // client host, from the peer address (JoinGroup's ClientHost)
+	seq     uint64 // Seq of the last socket IO recorded for this connection
+}
+
+// nextSeq is the Seq of the next socket IO of c (core.IO).
+func (c *connection) nextSeq() uint64 {
+	c.seq++
+	return c.seq
 }
 
 // slot is one request awaiting its response.
@@ -67,7 +74,17 @@ func (b *Broker) addConn(c *connection) { b.conns = append(b.conns, c) }
 
 func (b *Broker) onOpen(e core.ConnOpened, outbox *brokerOutbox) {
 	if b.stopping || b.findConn(e.Conn) != nil {
-		outbox.Do(core.CloseConn{Conn: e.Conn, Abort: true})
+		// A repeated open of a known connection closes it in its own Seq
+		// order. Otherwise the broker has no state for the connection and
+		// this close is the only socket IO it ever records for it: Seq 1.
+		seq := uint64(1)
+		if c := b.findConn(e.Conn); c != nil {
+			// The broker forgets the connection: this close is its last IO.
+			seq = c.nextSeq()
+			b.dropConn(c)
+			b.endParked(func(o *operation) bool { return o.s.conn == c })
+		}
+		outbox.Do(core.CloseConn{Conn: e.Conn, Abort: true, Seq: seq})
 		return
 	}
 	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.config.MaxFrame), host: peerHost(e.Peer)})
@@ -80,9 +97,9 @@ func (b *Broker) onClosed(e core.ConnClosed, outbox *brokerOutbox) {
 	}
 	b.dropConn(c)
 	b.endParked(func(o *operation) bool { return o.s.conn == c })
-	if !e.Abort {
-		outbox.Do(core.CloseConn{Conn: c.id})
-	}
+	// The close is recorded even when the peer reset: it is the last IO of
+	// the connection and lets the executor forget it.
+	outbox.Do(core.CloseConn{Conn: c.id, Abort: e.Abort, Seq: c.nextSeq()})
 }
 
 func (b *Broker) onBytes(e core.BytesReceived, outbox *brokerOutbox) {
@@ -209,10 +226,10 @@ func (b *Broker) drain(c *connection, outbox *brokerOutbox) {
 		for _, f := range s.facts {
 			outbox.Fact(f)
 		}
-		outbox.Do(core.Send{Conn: c.id, Data: data})
+		outbox.Do(core.Send{Conn: c.id, Data: data, Seq: c.nextSeq()})
 	}
 	if c.closing && !c.closed && (len(c.q) == 0 || c.abort) {
 		b.dropConn(c)
-		outbox.Do(core.CloseConn{Conn: c.id, Abort: c.abort})
+		outbox.Do(core.CloseConn{Conn: c.id, Abort: c.abort, Seq: c.nextSeq()})
 	}
 }

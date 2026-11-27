@@ -152,7 +152,6 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 		}
 		segLog.Observe(f)
 	}
-	config.OnIO = segLog.IO
 	mem, memSource := production.MemoryLimit()
 	err := f.tn.apply(&config.Broker, mem)
 	config.Shutdown = shutdown

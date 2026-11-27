@@ -6,10 +6,10 @@ import (
 	"github.com/manifesterio/mds/dst/live"
 )
 
-// runIO is the replica's exec function for live.Spawn: it starts io on a
-// goroutine and answers the actor when it is done.
+// runIO is the replica's exec function for live.Spawn: it runs io on the live
+// worker, blocking until it is done, and answers the actor.
 func runIO(e *executor.Executor, ctx *live.ExecCtx, io runtime.IO) error {
-	go answerIO(e, ctx, io)
+	answerIO(e, ctx, io)
 	return nil
 }
 

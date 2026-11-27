@@ -83,8 +83,15 @@ type Session struct {
 	State   State
 	Conn    core.ConnID
 	Dials   int
-	Fails   int  // consecutive dial/connection failures
-	Busy    bool // a request is outstanding
+	Fails   int    // consecutive dial/connection failures
+	Busy    bool   // a request is outstanding
+	seq     uint64 // Seq of the last socket IO on Conn (not hashed, like the broker's)
+}
+
+// nextSeq is the Seq of the next socket IO on Conn (core.IO).
+func (s *Session) nextSeq() uint64 {
+	s.seq++
+	return s.seq
 }
 
 // RetryWaitTime is the backoff after n consecutive failures.
@@ -112,7 +119,7 @@ func (s *Session) Receive(msg Msg, o *Outbox) Event {
 			s.backoff(o)
 			return Event{}
 		}
-		s.Conn, s.State = m.Done.Conn, Connected
+		s.Conn, s.State, s.seq = m.Done.Conn, Connected, 0
 		return Event{Kind: Ready}
 	case Net:
 		return s.onNet(m.Event, o)
@@ -151,7 +158,7 @@ func (s *Session) Wake(o *Outbox, d actor.Duration) { o.StartTimer(keyWake, d, W
 // Request sends data on the connection and starts its timeout.
 func (s *Session) Request(o *Outbox, data []byte, timeout actor.Duration) {
 	s.Busy = true
-	o.Do(core.Send{Conn: s.Conn, Data: data})
+	o.Do(core.Send{Conn: s.Conn, Data: data, Seq: s.nextSeq()})
 	o.StartTimer(keyRequest, timeout, RequestDue{})
 }
 
@@ -164,7 +171,7 @@ func (s *Session) Answered(o *Outbox) {
 // Abort drops the connection as unusable and schedules the reconnect. The
 // client settles its own protocol state.
 func (s *Session) Abort(o *Outbox) {
-	o.Do(core.CloseConn{Conn: s.Conn, Abort: true})
+	o.Do(core.CloseConn{Conn: s.Conn, Abort: true, Seq: s.nextSeq()})
 	s.lost(o)
 }
 

@@ -105,6 +105,7 @@ func (n *Node) Start(ctx context.Context) error {
 	ex := executor.New(runCtx, executor.Config{}, n.config.Log, n.config.Objects)
 	n.host = live.NewHost(live.HostConfig{
 		Clock: n.config.Clock, Shutdown: n.shutdown, StopGrace: n.config.StopGrace,
+		ExecWorkers: 100,
 	})
 	n.replica = live.Spawn(n.host, replica.Props(n.config.Machine, n.m.Store), func(ctx *live.ExecCtx, io runtime.IO) error {
 		return runIO(ex, ctx, io)

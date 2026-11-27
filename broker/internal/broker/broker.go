@@ -186,7 +186,7 @@ func (b *Broker) maybeExit(outbox *brokerOutbox) {
 	}
 	b.exited = true
 	for _, c := range b.conns {
-		outbox.Do(core.CloseConn{Conn: c.id})
+		outbox.Do(core.CloseConn{Conn: c.id, Seq: c.nextSeq()})
 	}
 	b.conns = nil
 	recordFact(outbox, "broker_exited")
@@ -223,9 +223,9 @@ func (b *Broker) syncReads(outbox *brokerOutbox) {
 		}
 		c.paused = want
 		if want {
-			outbox.Do(core.PauseReads{Conn: c.id})
+			outbox.Do(core.PauseReads{Conn: c.id, Seq: c.nextSeq()})
 		} else {
-			outbox.Do(core.ResumeReads{Conn: c.id})
+			outbox.Do(core.ResumeReads{Conn: c.id, Seq: c.nextSeq()})
 		}
 	}
 }
