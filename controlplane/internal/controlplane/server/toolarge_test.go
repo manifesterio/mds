@@ -9,11 +9,11 @@ import (
 
 	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 )
 
 func TestCommitTooLargeForOneLogEntry(t *testing.T) {
-	cli, _, stop := startNode(t, replica.Config{MaxEntryBytes: 2000})
+	cli, _, stop := startNode(t, core.NewConfig().WithMaxEntryBytes(2000))
 	defer stop()
 	request := &cpv1.CommitSegmentRequest{SegmentKey: "seg/big"}
 	for i := range 300 {

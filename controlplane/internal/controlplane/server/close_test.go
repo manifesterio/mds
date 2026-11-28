@@ -10,15 +10,15 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/dst/actor"
 )
 
 func newClosingNode() *server.Node {
 	return server.New(server.Config{
-		Machine: replica.Config{CatchUpEvery: actor.Duration(time.Millisecond)},
+		Machine: core.NewConfig().WithCatchUpEvery(actor.Duration(time.Millisecond)).Build(),
 		Log:     executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
 	})
 }
@@ -67,8 +67,11 @@ func TestCloseAfterStartStopsTheLoop(t *testing.T) {
 func TestCloseAnswersParkedGroupCall(t *testing.T) {
 	before := goruntime.NumGoroutine()
 	n := server.New(server.Config{
-		Machine: replica.Config{CatchUpEvery: actor.Duration(time.Millisecond), Heartbeat: actor.Duration(time.Second)},
-		Log:     executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
+		Machine: core.NewConfig().
+			WithCatchUpEvery(actor.Duration(time.Millisecond)).
+			WithHeartbeat(actor.Duration(time.Second)).
+			Build(),
+		Log: executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
 		GroupInitialRebalanceDelay: time.Hour,
 	})
 	if err := n.Start(t.Context()); err != nil {

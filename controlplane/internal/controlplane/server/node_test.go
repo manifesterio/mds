@@ -14,25 +14,25 @@ import (
 
 	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/dst/actor"
 )
 
-func startNode(t *testing.T, config replica.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+func startNode(t *testing.T, b *core.ConfigBuilder) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
-	return startNodeWithLease(t, config, 0)
+	return startNodeWithLease(t, b, 0)
 }
 
 // startNodeWithLease is startNode with a broker lease TTL. Zero keeps the default.
-func startNodeWithLease(t *testing.T, config replica.Config, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+func startNodeWithLease(t *testing.T, b *core.ConfigBuilder, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
-	if config.CatchUpEvery == 0 {
-		config.CatchUpEvery = actor.Duration(time.Millisecond)
+	if b.Build().CatchUpEvery == 0 {
+		b = b.WithCatchUpEvery(actor.Duration(time.Millisecond))
 	}
 	n := server.New(server.Config{
-		Machine:        config,
+		Machine:        b.Build(),
 		Log:            executor.NewMemoryLog(),
 		Objects:        executor.NewMemoryObjects(),
 		BrokerLeaseTTL: leaseTTL,
@@ -60,8 +60,12 @@ func startNodeWithLease(t *testing.T, config replica.Config, leaseTTL time.Durat
 	return cpv1.NewControlPlaneClient(conn), healthpb.NewHealthClient(conn), stop
 }
 
+func activeNode() *core.ConfigBuilder {
+	return core.NewConfig().WithRank(0).WithHeartbeat(actor.Duration(time.Second))
+}
+
 func TestHealthServingAfterReady(t *testing.T) {
-	_, hc, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: actor.Duration(time.Second)})
+	_, hc, stop := startNode(t, activeNode())
 	defer stop()
 	response, err := hc.Check(t.Context(), &healthpb.HealthCheckRequest{})
 	if err != nil {
@@ -73,7 +77,7 @@ func TestHealthServingAfterReady(t *testing.T) {
 }
 
 func TestCommitLookupRoundTrip(t *testing.T) {
-	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: actor.Duration(time.Second)})
+	cli, _, stop := startNode(t, activeNode())
 	defer stop()
 	_, err := cli.CreateTopic(t.Context(), &cpv1.CreateTopicRequest{Topic: "t", Partitions: 2})
 	if err != nil {
@@ -115,9 +119,8 @@ func TestCommitLookupRoundTrip(t *testing.T) {
 }
 
 func TestStandbyCommitUnavailable(t *testing.T) {
-	cli, _, stop := startNode(t, replica.Config{
-		Rank: 1, Heartbeat: actor.Duration(time.Second), TakeoverAfter: actor.Duration(time.Hour),
-	})
+	cli, _, stop := startNode(t, core.NewConfig().
+		WithRank(1).WithHeartbeat(actor.Duration(time.Second)).WithTakeoverAfter(actor.Duration(time.Hour)))
 	defer stop()
 	_, err := cli.CommitSegment(t.Context(), &cpv1.CommitSegmentRequest{
 		SegmentKey: "x",
@@ -133,7 +136,7 @@ func TestStandbyCommitUnavailable(t *testing.T) {
 
 func TestStartCanceledContext(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: replica.Config{CatchUpEvery: actor.Duration(time.Hour)},
+		Machine: core.NewConfig().WithCatchUpEvery(actor.Duration(time.Hour)).Build(),
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 	})
@@ -147,7 +150,7 @@ func TestStartCanceledContext(t *testing.T) {
 
 func TestStartCancelWhileWaiting(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: replica.Config{CatchUpEvery: actor.Duration(time.Hour)},
+		Machine: core.NewConfig().WithCatchUpEvery(actor.Duration(time.Hour)).Build(),
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 	})
@@ -165,7 +168,7 @@ func TestStartCancelWhileWaiting(t *testing.T) {
 // TestExclusiveCreateTopicOverGRPC: a create with fail_if_exists on a topic
 // that exists is AlreadyExists with ERR_CODE_TOPIC_EXISTS, and it changes nothing.
 func TestExclusiveCreateTopicOverGRPC(t *testing.T) {
-	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: actor.Duration(time.Second)})
+	cli, _, stop := startNode(t, activeNode())
 	defer stop()
 	ctx := t.Context()
 	if _, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{Topic: "x", Partitions: 2, FailIfExists: true}); err != nil {

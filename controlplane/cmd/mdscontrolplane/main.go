@@ -22,8 +22,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/controlplanemetrics"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/shared/httpconnections"
@@ -146,7 +146,7 @@ func serve(ctx context.Context, f cpFlags, fs *flag.FlagSet, stderr io.Writer) e
 
 func openNode(ctx context.Context, f cpFlags, m *controlplanemetrics.Metrics, log *slog.Logger) (*server.Node, func(), error) {
 	nop := func() {}
-	mcfg := machineConfig(f)
+	b := machineConfig(f)
 
 	var logStore executor.Log
 	var objs executor.ObjectStore
@@ -169,23 +169,22 @@ func openNode(ctx context.Context, f cpFlags, m *controlplanemetrics.Metrics, lo
 	}
 	if isLogStore(f.kind) {
 		if f.log.checkpointBucket != "" {
-			mcfg.CheckpointPrefix = "checkpoint/"
+			b = b.WithCheckpointPrefix("checkpoint/")
 		} else {
-			mcfg.CheckpointEvery = 0
-			mcfg.KeepSlots = 0
+			b = b.WithCheckpointEvery(0).WithKeepSlots(0)
 		}
 		state := &pebbleState{flagDir: f.log.pebbleDir}
 		if err := state.start(); err != nil {
 			closeStore()
 			return nil, nop, err
 		}
-		mcfg.OpenStore = state.openStore
+		b = b.WithOpenStore(state.openStore)
 		closeLog := closeStore
 		closeStore = func() { closeLog(); state.close() }
 	}
 
 	n := server.New(server.Config{
-		Machine:        mcfg,
+		Machine:        b.Build(),
 		Log:            logStore,
 		Objects:        objs,
 		BrokerLeaseTTL: f.brokerLeaseTTL,
@@ -206,24 +205,22 @@ func openNode(ctx context.Context, f cpFlags, m *controlplanemetrics.Metrics, lo
 const trimStride = 1024
 
 // machineConfig turns the flags into the control-plane machine's settings.
-func machineConfig(f cpFlags) replica.Config {
-	mcfg := replica.Config{
-		OnCheckpointDecision: logCheckpointDecision,
-		// Short catch-up period so Ready (and health Serving) arrives quickly;
-		// subsequent rounds keep the same cadence.
-		CatchUpEvery:       actor.Duration(5 * time.Millisecond),
-		Rank:               f.log.rank,
-		Heartbeat:          actor.Duration(f.log.heartbeat),
-		TakeoverAfter:      actor.Duration(f.log.takeoverAfter),
-		TakeoverRankStep:   actor.Duration(f.log.takeoverRankStep),
-		Writer:             nodeName(f.log),
-		CheckpointEvery:    actor.Duration(f.log.checkpointEvery),
-		CheckpointMinSlots: f.log.checkpointMinSlots,
-		KeepSlots:          f.log.windowSlots / 8,
-		WindowSlots:        f.log.windowSlots,
-		TrimStride:         trimStride,
-	}
-	return mcfg
+func machineConfig(f cpFlags) *core.ConfigBuilder {
+	// Short catch-up period so Ready (and health Serving) arrives quickly;
+	// subsequent rounds keep the same cadence.
+	return core.NewConfig().
+		WithOnCheckpointDecision(logCheckpointDecision).
+		WithCatchUpEvery(actor.Duration(5 * time.Millisecond)).
+		WithRank(f.log.rank).
+		WithHeartbeat(actor.Duration(f.log.heartbeat)).
+		WithTakeoverAfter(actor.Duration(f.log.takeoverAfter)).
+		WithTakeoverRankStep(actor.Duration(f.log.takeoverRankStep)).
+		WithWriter(nodeName(f.log)).
+		WithCheckpointEvery(actor.Duration(f.log.checkpointEvery)).
+		WithCheckpointMinSlots(f.log.checkpointMinSlots).
+		WithKeepSlots(f.log.windowSlots / 8).
+		WithWindowSlots(f.log.windowSlots).
+		WithTrimStride(trimStride)
 }
 
 func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*middleware.Stack) error) (*dynamodb.Client, error) {
@@ -247,7 +244,7 @@ func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*mid
 
 // logCheckpointDecision writes one log line each time the checkpoint timer
 // fires, so an operator can see why a checkpoint was or was not written.
-func logCheckpointDecision(d replica.CheckpointDecision) {
+func logCheckpointDecision(d core.CheckpointDecision) {
 	attrs := []any{
 		"event", "checkpoint_decision", "written", d.Written, "reason", d.Reason,
 		"applied", d.Applied, "goal_tail", d.GoalTail, "last_checkpoint", d.LastCheckpoint,

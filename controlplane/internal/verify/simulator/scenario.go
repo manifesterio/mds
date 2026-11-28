@@ -1,7 +1,7 @@
 package simulator
 
 import (
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/dst/actor"
 )
 
@@ -21,7 +21,7 @@ type Faults struct {
 	PartitionEvery actor.Duration // cut a node off from the log and the object store
 	TargetLeader   bool           // crash and partition aim at the node that holds the writer epoch
 
-	// Cooperative faults inside the replica (replica.Config StallProb and CrashProb).
+	// Cooperative faults inside the replica (core.Config StallProb and CrashProb).
 	SoftFault float64
 }
 
@@ -78,26 +78,25 @@ func ScenarioByName(name string) (Scenario, bool) {
 // machineConfig in cmd/mdscontrolplane, with the times scaled down so that a run
 // is short in virtual time: catch-up every 50 ms, a heartbeat every 250 ms, a
 // takeover after 1.5 s of silence, and a checkpoint with a log trim every second.
-func replicaConfig(idx int, f Faults, bug Bug) replica.Config {
-	cfg := replica.Config{
-		CatchUpEvery:       50 * actor.Millisecond,
-		Writer:             nodeWriter(idx),
-		Rank:               idx,
-		Heartbeat:          250 * actor.Millisecond,
-		TakeoverAfter:      1500 * actor.Millisecond,
-		TakeoverRankStep:   500 * actor.Millisecond,
-		CheckpointEvery:    1 * second,
-		CheckpointMinSlots: 4,
-		CheckpointPrefix:   "checkpoint/",
-		KeepSlots:          8,
-		MaxCmdsPerSlot:     4,
-	}
+func replicaConfig(idx int, f Faults, bug Bug) core.Config {
+	b := core.NewConfig().
+		WithCatchUpEvery(50 * actor.Millisecond).
+		WithWriter(nodeWriter(idx)).
+		WithRank(idx).
+		WithHeartbeat(250 * actor.Millisecond).
+		WithTakeoverAfter(1500 * actor.Millisecond).
+		WithTakeoverRankStep(500 * actor.Millisecond).
+		WithCheckpointEvery(1 * second).
+		WithCheckpointMinSlots(4).
+		WithCheckpointPrefix("checkpoint/").
+		WithKeepSlots(8).
+		WithMaxCmdsPerSlot(4)
 	if f.SoftFault > 0 {
-		cfg.StallProb, cfg.CrashProb = f.SoftFault, f.SoftFault
-		cfg.StallDur = [2]actor.Duration{100 * actor.Millisecond, 800 * actor.Millisecond}
-		cfg.DownDur = [2]actor.Duration{100 * actor.Millisecond, 800 * actor.Millisecond}
+		soft := [2]actor.Duration{100 * actor.Millisecond, 800 * actor.Millisecond}
+		b = b.WithStallProb(f.SoftFault).WithCrashProb(f.SoftFault).
+			WithStallDur(soft).WithDownDur(soft)
 	}
-	return cfg
+	return b.Build()
 }
 
 // startNemesis begins the node faults that the scenario asks for.

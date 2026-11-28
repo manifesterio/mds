@@ -40,6 +40,10 @@
 //     format, the checkpoint and the state hash.
 //   - metadb/engine: the ordered key-value interface under metadb.
 //     metadb/engine/memory and metadb/engine/pebble implement it.
+//   - core: the SMR entrypoint for outer packages (Config, Props, Entry,
+//     NewDB). It sits over replica and the materialization packages.
+//     localstore opens on-disk Engines for the binary; the simulator does not
+//     import it.
 //   - replica: one node's copy of the replicated log: writer or standby,
 //     catch-up, checkpoint and restore. A dst actor.
 //   - executor: runs the log and object-store calls that replica asks for. It
@@ -53,6 +57,19 @@
 //     dst/live (the production loop of a dst machine; it is in the dst module),
 //     spec (the independent model), internal/verify/simulator (the
 //     deterministic simulation, run by cmd/cpsim).
+//
+// # Layers
+//
+// The control plane is layered API -> Core -> Loglet:
+//
+//   - API: server, wire and the api/ protos. The gRPC edge and its codecs.
+//   - Core: package core is the SMR entrypoint (Config, Props, Replica, ...).
+//     metadb, domain/topic and domain/group are Core's materialization of logged
+//     state; outer packages use core rather than those packages directly.
+//   - Local store: metadb and metadb/engine (pebble and memory). Ordered KV
+//     holding Core's materialized state, rebuilt from the log and checkpoints.
+//   - Loglet: executor (and its dynamolog / sqllog adapters). Append and read of
+//     the replicated command log.
 //
 // # Mental model
 //
@@ -83,9 +100,11 @@
 //
 // # How they fit together, from the imports
 //
-//   - server imports live, replica, executor, metadb, domain/rebalance,
-//     domain/broker, wire and contract.
-//   - replica imports metadb. metadb imports domain/topic and domain/group.
+//   - server, cmd and the simulator import core, executor, wire,
+//     domain/rebalance and domain/broker. They do not import metadb, its
+//     engines, domain/topic or domain/group.
+//   - core imports replica and metadb. localstore opens Pebble for cmd only.
+//     replica imports metadb. metadb imports domain/topic and domain/group.
 //     domain/topic and domain/group import engine, and not each other or metadb.
 //   - executor imports only runtime. dynamolog and sqllog import executor.
 //   - domain/rebalance imports contract and runtime, and the dst packages. It

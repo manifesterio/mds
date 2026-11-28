@@ -6,6 +6,9 @@ import (
 	"github.com/manifesterio/mds/dst/actor"
 )
 
+// Engine is the ordered key-value store the fold keeps materialized state in.
+type Engine = engine.Engine
+
 // Config tunes the control-plane replica. Zero value keeps catch-up and the
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
 // timer-driven catch-up with slot-ordered apply (CP-DSM-4). The commit queue
@@ -67,7 +70,7 @@ type Config struct {
 	// in. It runs when the replica is built and again after a crash restart or
 	// a trimmed-slot restore, once the old store has been closed. Nil means an
 	// in-memory store. The replica itself never imports a database.
-	OpenStore func() (engine.Engine, error)
+	OpenStore func() (Engine, error)
 
 	// WindowSlots is the idempotency window length. Keys older than this many
 	// slots are forgotten at TrimStride boundaries. Zero skips.

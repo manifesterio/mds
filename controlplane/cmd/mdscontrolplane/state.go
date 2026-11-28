@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/pebble"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/localstore"
 )
 
 // pebbleState hands the control-plane machine its Pebble store. The store is
@@ -19,8 +19,8 @@ type pebbleState struct {
 
 	mu      sync.Mutex
 	dir     string
-	cur     *pebble.DB
-	waiting *pebble.DB // opened by start, handed out by the first openStore
+	cur     core.Engine
+	waiting core.Engine // opened by start, handed out by the first openStore
 }
 
 // start opens the first store now, so a bad directory fails the startup
@@ -36,8 +36,8 @@ func (p *pebbleState) start() error {
 	return nil
 }
 
-// openStore is replica.Config.OpenStore.
-func (p *pebbleState) openStore() (engine.Engine, error) {
+// openStore is core.Config.OpenStore.
+func (p *pebbleState) openStore() (core.Engine, error) {
 	p.mu.Lock()
 	if db := p.waiting; db != nil {
 		p.waiting = nil
@@ -49,7 +49,7 @@ func (p *pebbleState) openStore() (engine.Engine, error) {
 }
 
 // open wipes the state directory and opens an empty Pebble database in it.
-func (p *pebbleState) open() (*pebble.DB, error) {
+func (p *pebbleState) open() (core.Engine, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cur != nil {
@@ -69,7 +69,7 @@ func (p *pebbleState) open() (*pebble.DB, error) {
 	if err := wipeState(p.dir); err != nil {
 		return nil, err
 	}
-	db, err := pebble.Open(p.dir, pebble.Options{})
+	db, err := localstore.OpenPebble(p.dir)
 	if err != nil {
 		return nil, err
 	}

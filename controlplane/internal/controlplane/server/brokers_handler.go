@@ -19,8 +19,8 @@ import (
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/broker"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
@@ -38,7 +38,7 @@ func (n *Node) BrokerHeartbeat(ctx context.Context, request *cpv1.BrokerHeartbea
 		ok   bool
 	}
 	ch := make(chan result, 1)
-	err := n.onLoop(ctx, func(m *replica.Replica) {
+	err := n.onLoop(ctx, func(m *core.Replica) {
 		if !m.IsActive() || !m.Ready() {
 			ch <- result{}
 			return

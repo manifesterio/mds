@@ -6,8 +6,8 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/controlplane/spec"
@@ -230,7 +230,7 @@ func (o *oracle) verify() {
 	committed := map[string]contract.Done{}
 	logged := newGroupLog()
 	decode := func(entry []byte) ([]runtime.ControlPlaneOperation, error) {
-		cmds, err := replica.EntryCommands(entry)
+		cmds, err := core.EntryCommands(entry)
 		var ops []runtime.ControlPlaneOperation
 		for _, c := range cmds {
 			if c.Op != nil {
