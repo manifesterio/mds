@@ -11,7 +11,7 @@ func TestJoinCtxEndsWhileParked(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.run([]step{
 		{0, h.join(1, "g", ""), nil},
-		{0, CallAbandoned{Call: 1}, nil},
+		{0, gone("g", 1), nil},
 	})
 	h.check("parked", h.parked("g"), []string(nil))
 	h.check("members", h.members("g"), []string{"m1"})
@@ -24,7 +24,7 @@ func TestJoinCanceledThenRoundCompletes(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.run([]step{
 		{0, h.join(1, "g", ""), nil},
-		{0, CallAbandoned{Call: 1}, nil},
+		{0, gone("g", 1), nil},
 		{0, h.join(2, "g", ""), nil},
 		// The abandoned member did not rejoin, so the round waits for it until the rebalance timeout.
 		{delay, nil, nil},
@@ -46,7 +46,7 @@ func TestParkedSyncAbandoned(t *testing.T) {
 			"2 OK gen=1 proto=range leader=m1 id=m2",
 		}},
 		{delay, syncReq(3, "g", b, 1), nil},
-		{delay, CallAbandoned{Call: 3}, nil},
+		{delay, gone("g", 3), nil},
 	})
 	h.check("parked", h.parked("g"), []string(nil))
 	h.run([]step{

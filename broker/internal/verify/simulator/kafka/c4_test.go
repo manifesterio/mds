@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
-	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // C4 (speccheck/doc.go) is the at-least-once Kafka oracle against the broker
@@ -54,7 +54,7 @@ func TestC4OracleDoesNotImportSpecCheck(t *testing.T) {
 }
 
 // verdict runs a fresh oracle over the finished world: one Observe, AtEnd.
-func verdict(w *world) (failures, kernel.Rule) {
+func verdict(w *world) (failures, sim.Rule) {
 	w.as = failures{}
 	inv := kafka.NewOracle(w.opts, (*hist)(w), (*objView)(w), (*controlPlaneView)(w))
 	inv.Observe(w)
@@ -64,7 +64,7 @@ func verdict(w *world) (failures, kernel.Rule) {
 
 // sameAsSpec: the oracle's reconstructed log of every partition is exactly
 // what the broker spec holds.
-func sameAsSpec(t *testing.T, seed uint64, w *world, inv kernel.Rule) {
+func sameAsSpec(t *testing.T, seed uint64, w *world, inv sim.Rule) {
 	t.Helper()
 	for _, topicPartition := range w.tps {
 		recs, _ := w.parts[topicPartition].Read(0, 0)

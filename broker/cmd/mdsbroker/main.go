@@ -23,7 +23,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system/production"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
 	"github.com/manifesterio/mds/controlplane/client"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/shared/awsmetrics"
 	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
 	"github.com/manifesterio/mds/shared/runinfo"
@@ -132,10 +132,10 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	config.Broker.BrokerID = int32(f.brokerID)
 	config.Exec.ObjTimeout = f.objTimeout
 	if f.commitDeadline > 0 {
-		config.Broker.CommitDeadline = machine.Duration(f.commitDeadline)
+		config.Broker.CommitDeadline = actor.Duration(f.commitDeadline)
 	}
 	if f.fetchPollInterval > 0 {
-		config.Broker.FetchPollInterval = machine.Duration(f.fetchPollInterval)
+		config.Broker.FetchPollInterval = actor.Duration(f.fetchPollInterval)
 	}
 	var m *production.Metrics
 	if f.metricsAddr != "" {
@@ -146,13 +146,12 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	}
 	segLog := production.NewSegmentLog(log)
 	prev := config.Facts
-	config.Facts = func(f machine.Fact) {
+	config.Facts = func(f actor.Fact) {
 		if prev != nil {
 			prev(f)
 		}
 		segLog.Observe(f)
 	}
-	config.OnIO = segLog.IO
 	mem, memSource := production.MemoryLimit()
 	err := f.tn.apply(&config.Broker, mem)
 	config.Shutdown = shutdown
@@ -285,7 +284,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 		},
 	)
 	if err := n.Wait(); err != nil {
-		return err // live.ErrStoppedForRestart, live.ErrKilled, ...
+		return err // live.ErrTripped, live.ErrKilled, ...
 	}
 	log.Info("mdsbroker stopped")
 	return nil

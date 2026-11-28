@@ -1,293 +1,386 @@
 package cluster
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/sim/kit"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
-// stepRecord is what a stub machine saw in one Step.
-type stepRecord struct {
-	now machine.Now
-	in  core.EventData
+type outbox = actor.Outbox[core.EventData, core.IO]
+
+// seen is one message a stub actor received.
+type seen struct {
+	who string
+	at  sim.Time
+	msg core.EventData
 }
 
-// stubMachine is a core machine for tests. script gives the actions of a Step.
-type stubMachine struct {
-	seen   *[]stepRecord
-	script func(in core.EventData) []core.Action
+// stub is a broker or client for tests. script records the effects of a
+// Receive.
+type stub struct {
+	name   string
+	log    *[]seen
+	now    func() sim.Time
+	script func(msg core.EventData, o *outbox)
+	busy   bool
 }
 
-func (m *stubMachine) Step(ev core.Event) []core.Action {
-	*m.seen = append(*m.seen, stepRecord{now: machine.Now{Mono: ev.At, Wall: ev.Wall}, in: ev.Body})
-	if m.script == nil {
-		return nil
+func (s *stub) Receive(_ actor.Now, msg core.EventData, o *outbox) {
+	*s.log = append(*s.log, seen{who: s.name, at: s.now(), msg: msg})
+	if s.script != nil {
+		s.script(msg, o)
 	}
-	return m.script(ev.Body)
 }
 
-func (m *stubMachine) StateHash() uint64 { return uint64(len(*m.seen)) }
+func (s *stub) StateHash() uint64 { return uint64(len(*s.log)) }
 
-// stubWorkload is a Workload that counts the phases it heard.
-type stubWorkload struct {
-	stubMachine
-	phases    []kernel.Phase
-	quiescent bool
-}
-
-func (w *stubWorkload) OnPhase(p kernel.Phase) []core.Action {
-	w.phases = append(w.phases, p)
-	return nil
-}
-
-func (w *stubWorkload) Quiescent() bool { return w.quiescent }
+func (s *stub) Quiescent() bool { return !s.busy }
 
 func quickPlan(seed uint64) Plan {
 	return Plan{
 		Seed:         seed,
-		Phases:       kernel.Phases{Faults: 2 * machine.Second, Heal: machine.Second, Drain: machine.Second},
-		QuiesceEvery: 500 * machine.Millisecond,
-		Settings:     Settings{RecoveryDelay: [2]machine.Duration{100 * machine.Millisecond, 200 * machine.Millisecond}},
+		Phases:       kit.Phases{Faults: 2 * actor.Second, Heal: actor.Second, Drain: actor.Second},
+		QuiesceEvery: 500 * actor.Millisecond,
+		Settings: Settings{
+			RecoveryDelay: [2]actor.Duration{100 * actor.Millisecond, 200 * actor.Millisecond},
+			NetDelay:      [2]actor.Duration{actor.Millisecond, 3 * actor.Millisecond},
+		},
 	}
 }
 
-// The old Between left out the upper end, and with hi == lo+1 it still drew once.
-// rng.Between(lo, hi-1) would draw nothing there, and every later draw would move.
-func TestRestartDelayWithOneValueStillDrawsOnce(t *testing.T) {
-	p := quickPlan(1)
-	p.Settings.RecoveryDelay = [2]machine.Duration{5, 6}
-	c := New(p)
-	r := rng.New(9)
-	before := r.Calls()
-	d, ok := c.restart(machine.Exit, r)
-	if !ok || d != 5 {
-		t.Fatalf("restart delay %v ok=%v, want 5", d, ok)
-	}
-	if got := r.Calls() - before; got != 1 {
-		t.Fatalf("the delay drew %d times, want 1", got)
-	}
-}
-
-func TestOnContractPassesTheTimeInTheEvent(t *testing.T) {
-	var seen []stepRecord
-	a := core.OnContract(&stubMachine{seen: &seen})
-	now := machine.Now{Mono: 5, Wall: 7}
-	a.Step(now, core.NodeStarted{})
-	if len(seen) != 1 || seen[0].now != now {
-		t.Fatalf("saw %+v, want one Step at %+v", seen, now)
-	}
-	if a.StateHash() != 1 {
-		t.Fatalf("StateHash = %d", a.StateHash())
+// brokerProps is a stub broker. Every boot shares log.
+func brokerProps(c *Cluster, log *[]seen, script func(self string, msg core.EventData, o *outbox)) actor.Props[core.EventData, core.IO] {
+	return actor.Props[core.EventData, core.IO]{
+		New: func(env actor.Env) actor.Actor[core.EventData, core.IO] {
+			self := env.Self().Name
+			s := &stub{name: self, log: log, now: c.System.Now}
+			if script != nil {
+				s.script = func(msg core.EventData, o *outbox) { script(self, msg, o) }
+			}
+			return s
+		},
+		Boot:     func(self actor.Incarnation) core.EventData { return core.NodeStarted{Self: self} },
+		Priority: core.PriorityOf,
 	}
 }
 
-func TestAdaptFactoryKeepsNil(t *testing.T) {
-	f := adaptFactory(func(core.Environment, machine.NodeInstance) core.Machine { return nil })
-	if m := f(nil, machine.NodeInstance{}); m != nil {
-		t.Fatalf("a nil machine became %v", m)
-	}
-}
+// phaseKey is the ClientDue key that carries a phase change to a stub client.
+func phaseKey(p kit.Phase) string { return fmt.Sprintf("phase/%d", p) }
 
-func TestDriverAdapterRoutesPhaseChanges(t *testing.T) {
-	w := &stubWorkload{stubMachine: stubMachine{seen: new([]stepRecord)}}
-	d := driverAdapter{w}
-	ev, ok := phaseEvent(kernel.PhaseDrain)
-	if !ok {
-		t.Fatal("phaseEvent gave no input")
-	}
-	d.Step(machine.Now{}, ev)
-	d.Step(machine.Now{}, core.TimerFired{ID: 3, Gen: 1}) // a normal timer
-	if !slices.Equal(w.phases, []kernel.Phase{kernel.PhaseDrain}) {
-		t.Fatalf("phases = %v", w.phases)
-	}
-	if len(*w.seen) != 1 {
-		t.Fatalf("the normal timer was not a Step: %d Steps", len(*w.seen))
-	}
+// addStubClient adds a client whose messages are core.EventData.
+func addStubClient(c *Cluster, log *[]seen, busy bool, script func(msg core.EventData, o *outbox)) {
+	AddClient(c, ClientSpec[core.EventData]{
+		New: func(env actor.Env, _ []string) Client[core.EventData] {
+			return &stub{name: env.Self().Name, log: log, now: c.System.Now, script: script, busy: busy}
+		},
+		Boot:    func(self actor.Incarnation) core.EventData { return core.NodeStarted{Self: self} },
+		OnPhase: func(p kit.Phase) (core.EventData, bool) { return core.ClientDue{Key: phaseKey(p)}, true },
+		FromNet: func(ev core.EventData) core.EventData { return ev },
+	})
 }
 
 func TestRestartDelayIsInRecoveryDelay(t *testing.T) {
 	c := New(quickPlan(1))
-	r := rng.New(9)
+	r := sim.NewSystem(sim.Config{Seed: 9}).Env()
 	for range 200 {
-		d, ok := c.restart(machine.Crash, r)
-		if !ok || d < 100*machine.Millisecond || d >= 200*machine.Millisecond {
+		d, ok := c.restart(actor.Crash, r.Rand)
+		if !ok || d < 100*actor.Millisecond || d > 200*actor.Millisecond {
 			t.Fatalf("restart delay %v ok=%v", d, ok)
 		}
 	}
 }
 
-func TestRunBootsBrokersThenWorkloadAndTellsPhases(t *testing.T) {
-	var brokerSeen, workloadSeen []stepRecord
+func TestRunBootsBrokersThenClientsAndTellsPhases(t *testing.T) {
+	var log []seen
 	c := New(quickPlan(3))
-	c.AddBrokers(2, func(core.Environment, machine.NodeInstance) core.Machine {
-		return &stubMachine{seen: &brokerSeen}
-	})
-	var live *stubWorkload
-	c.AddWorkload(func(_ core.Environment, _ machine.NodeInstance, brokers []machine.NodeID) Workload {
-		if !slices.Equal(brokers, []machine.NodeID{"broker-0", "broker-1"}) {
-			t.Errorf("workload got brokers %v", brokers)
-		}
-		live = &stubWorkload{stubMachine: stubMachine{seen: &workloadSeen}, quiescent: true}
-		return live
-	})
+	c.AddBrokers(2, brokerProps(c, &log, nil))
+	addStubClient(c, &log, false, nil)
 	res := c.Run()
 	if !res.OK() {
 		t.Fatalf("failures: %+v", res.Failures)
 	}
-	if len(brokerSeen) != 2 {
-		t.Errorf("brokers took %d Steps, want 2 boot Steps", len(brokerSeen))
+	var order []string
+	var phases []string
+	for _, s := range log {
+		if _, ok := s.msg.(core.NodeStarted); ok {
+			order = append(order, s.who)
+		}
+		if m, ok := s.msg.(core.ClientDue); ok {
+			phases = append(phases, m.Key)
+		}
 	}
-	if len(workloadSeen) != 1 {
-		t.Errorf("workload took %d Steps, want 1 boot Step", len(workloadSeen))
+	if len(order) != 3 || order[2] != "client-0" {
+		t.Errorf("boot order %v", order)
 	}
-	if _, ok := workloadSeen[0].in.(core.NodeStarted); !ok {
-		t.Errorf("the first workload input was %T", workloadSeen[0].in)
+	if want := []string{phaseKey(kit.PhaseHeal), phaseKey(kit.PhaseDrain)}; !slices.Equal(phases, want) {
+		t.Errorf("client heard %v, want %v", phases, want)
 	}
-	if want := []kernel.Phase{kernel.PhaseHeal, kernel.PhaseDrain}; !slices.Equal(live.phases, want) {
-		t.Errorf("workload heard %v, want %v", live.phases, want)
-	}
-	quiet := c.World.Timeline().Snapshot("sim_quiesce")
+	quiet := c.System.Timeline().Snapshot("sim_quiesce")
 	if len(quiet) != 8 { // every 500 ms from 0.5 s to the end at 4 s
 		t.Errorf("%d quiesce facts", len(quiet))
 	}
 	for _, q := range quiet {
-		if v, _ := q.Fact.Field("quiescent").(machine.Bool); !bool(v) {
+		if v, _ := q.Fact.Field("quiescent").(actor.Bool); !bool(v) {
 			t.Errorf("a quiesce fact says not quiescent: %+v", q)
 		}
 	}
 }
 
-func TestQuiesceFactSaysWhenAWorkloadIsBusy(t *testing.T) {
+func TestQuiesceFactSaysWhenAClientIsBusy(t *testing.T) {
+	var log []seen
 	c := New(quickPlan(4))
-	c.AddBrokers(1, func(core.Environment, machine.NodeInstance) core.Machine {
-		return &stubMachine{seen: new([]stepRecord)}
-	})
-	c.AddWorkload(func(core.Environment, machine.NodeInstance, []machine.NodeID) Workload {
-		return &stubWorkload{stubMachine: stubMachine{seen: new([]stepRecord)}}
-	})
+	c.AddBrokers(1, brokerProps(c, &log, nil))
+	addStubClient(c, &log, true, nil)
 	c.Run()
-	for _, q := range c.World.Timeline().Snapshot("sim_quiesce") {
-		if v, _ := q.Fact.Field("quiescent").(machine.Bool); bool(v) {
-			t.Fatalf("a busy workload was reported quiescent: %+v", q)
+	for _, q := range c.System.Timeline().Snapshot("sim_quiesce") {
+		if v, _ := q.Fact.Field("quiescent").(actor.Bool); bool(v) {
+			t.Fatalf("a busy client was reported quiescent: %+v", q)
 		}
 	}
 }
 
-func TestRouteSendsTimersAndFactsAndEndsTheNode(t *testing.T) {
-	var seen []stepRecord
-	fired := 0
+// A broker that trips is booted again by the restart policy.
+func TestBrokerTripRestarts(t *testing.T) {
+	var log []seen
 	c := New(quickPlan(5))
-	c.AddBrokers(1, func(core.Environment, machine.NodeInstance) core.Machine {
-		return &stubMachine{seen: &seen, script: func(in core.EventData) []core.Action {
-			switch x := in.(type) {
-			case core.NodeStarted:
-				return []core.Action{
-					core.RecordFact{Fact: machine.Fact{Name: "hello"}},
-					core.SetTimer{ID: 1, Gen: 1, After: 10 * machine.Millisecond},
-					core.SetTimer{ID: 2, Gen: 1, After: 20 * machine.Millisecond},
-					core.CancelTimer{ID: 2},
-				}
-			case core.TimerFired:
-				fired++
-				if x.ID == 1 && fired == 1 {
-					return []core.Action{core.StopForRestart{Cause: "test"}}
-				}
+	boots := 0
+	c.AddBrokers(1, brokerProps(c, &log, func(_ string, msg core.EventData, o *outbox) {
+		if _, ok := msg.(core.NodeStarted); ok {
+			boots++
+			if boots == 1 {
+				o.Stop(actor.Trip, "test")
 			}
-			return nil
-		}}
-	})
+		}
+	}))
 	res := c.Run()
 	if !res.OK() {
 		t.Fatalf("failures: %+v", res.Failures)
 	}
-	if fired != 2 {
-		t.Errorf("%d timers fired, want 2 (one for each boot; timer 2 was cancelled)", fired)
-	}
-	if res.Trips != 1 {
-		t.Errorf("Trips = %d, want 1", res.Trips)
-	}
-	if n := len(c.World.Timeline().Snapshot("hello")); n != 2 { // the first boot and the restart
-		t.Errorf("%d hello facts, want 2", n)
-	}
-	if n := len(c.World.Timeline().Snapshot("sim_restarted")); n != 1 {
-		t.Errorf("%d restart facts, want 1", n)
+	if boots != 2 || res.Trips != 1 {
+		t.Errorf("boots=%d trips=%d, want 2 and 1", boots, res.Trips)
 	}
 }
 
-// Every action that goes to a service is routed to it, and the service answers.
-func TestRouteSendsEveryServiceAction(t *testing.T) {
-	var seen []stepRecord
+// The executor forwards the object store and control-plane calls to their
+// services, and the services answer.
+func TestExecutorForwardsServiceCalls(t *testing.T) {
+	var log []seen
 	c := New(quickPlan(7))
-	c.AddBrokers(2, func(_ core.Environment, self machine.NodeInstance) core.Machine {
-		return &stubMachine{seen: &seen, script: func(in core.EventData) []core.Action {
-			switch x := in.(type) {
-			case core.NodeStarted:
-				if self.Node != "broker-0" {
-					return nil
-				}
-				return []core.Action{
-					core.ObjectCall{Call: objectstore.Put{Req: 1, Key: "k", Data: []byte("v")}},
-					core.ControlPlaneCall{Req: 2, Op: contract.CommitSegment{SegmentKey: "k"}},
-					core.Connect{Req: 3, Addr: "broker-1"},
-				}
-			case core.ConnectDone:
-				if x.Err != core.OK {
-					return nil
-				}
-				return []core.Action{
-					core.PauseReads{Conn: x.Conn},
-					core.ResumeReads{Conn: x.Conn},
-					core.Send{Req: 4, Conn: x.Conn, Data: []byte("hello")},
-					core.CloseConn{Conn: x.Conn},
-				}
-			}
-			return nil
-		}}
-	})
-	res := c.Run()
-	if !res.OK() {
+	var got []string
+	c.AddBrokers(1, brokerProps(c, &log, func(_ string, msg core.EventData, o *outbox) {
+		if _, ok := msg.(core.NodeStarted); !ok {
+			return
+		}
+		actor.Perform(o, core.ObjectCall{Call: objectstore.Put{Key: "k", Data: []byte("v")}},
+			func(d core.ObjectDone) core.EventData {
+				got = append(got, fmt.Sprintf("object %v", d.Result.(objectstore.PutDone).Err))
+				return d
+			})
+		actor.Perform(o, core.ControlPlaneCall{Op: contract.DescribeTopics{}},
+			func(d core.ControlPlaneDone) core.EventData {
+				got = append(got, fmt.Sprintf("control plane %v", d.Err))
+				return d
+			})
+	}))
+	if res := c.Run(); !res.OK() {
 		t.Fatalf("failures: %+v", res.Failures)
 	}
-	got := map[string]bool{}
-	for _, s := range seen {
-		switch s.in.(type) {
-		case core.ObjectDone:
-			got["object"] = true
-		case core.ControlPlaneDone:
-			got["control plane"] = true
-		case core.ConnectDone:
-			got["connect"] = true
-		case core.SendDone:
-			got["send"] = true
-		case core.BytesReceived:
-			got["bytes"] = true
-		}
+	slices.Sort(got)
+	if want := []string{"control plane OK", "object OK"}; !slices.Equal(got, want) {
+		t.Fatalf("answers %v, want %v", got, want)
 	}
-	for _, want := range []string{"object", "control plane", "connect", "send", "bytes"} {
-		if !got[want] {
-			t.Errorf("no %s answer was delivered; saw %v", want, got)
+	if _, ok := c.Objects.Object("k"); !ok {
+		t.Fatal("the put did not land")
+	}
+}
+
+// echo is a broker that answers every frame with the same bytes, and pauses
+// reads on the frame "pause" and resumes them on its timer.
+func echo(_ string, msg core.EventData, o *outbox) {
+	if m, ok := msg.(core.BytesReceived); ok {
+		if string(m.Data) == "pause" {
+			o.Do(core.PauseReads{Conn: m.Conn})
+			o.StartTimer(actor.TimerKey(fmt.Sprint(m.Conn)), 100*actor.Millisecond, core.OpDue{Op: uint64(m.Conn)})
+		}
+		o.Do(core.Send{Conn: m.Conn, Data: m.Data}) // the sim ignores Seq
+	}
+	if m, ok := msg.(core.OpDue); ok {
+		o.Do(core.ResumeReads{Conn: core.ConnID(m.Op)})
+	}
+}
+
+// client dials broker-0 at boot and, once connected, writes frames.
+func dialAndWrite(frames ...string) func(msg core.EventData, o *outbox) {
+	return func(msg core.EventData, o *outbox) {
+		if _, ok := msg.(core.NodeStarted); ok {
+			actor.Perform(o, core.Connect{Addr: "broker-0"}, func(d core.ConnectDone) core.EventData { return d })
+		}
+		if m, ok := msg.(core.ConnectDone); ok && m.Err == core.OK {
+			for _, f := range frames {
+				o.Do(core.Send{Conn: m.Conn, Data: []byte(f)})
+			}
 		}
 	}
 }
 
-func TestRouteFailsAnActionThatHasNoService(t *testing.T) {
-	c := New(quickPlan(6))
-	c.AddBrokers(1, func(core.Environment, machine.NodeInstance) core.Machine {
-		return &stubMachine{seen: new([]stepRecord), script: func(in core.EventData) []core.Action {
-			if _, ok := in.(core.NodeStarted); ok {
-				return []core.Action{core.ControlPlaneReply{}}
+// frames lists what `who` received as BytesReceived, in order.
+func frames(log []seen, who string) []string {
+	var out []string
+	for _, s := range log {
+		if b, ok := s.msg.(core.BytesReceived); ok && s.who == who {
+			out = append(out, string(b.Data))
+		}
+	}
+	return out
+}
+
+// Frames arrive whole and in order both ways, ConnOpened comes before the
+// first frame, and a paused connection holds its frames until it resumes.
+func TestConnectionsDeliverWholeFramesInOrder(t *testing.T) {
+	var log []seen
+	c := New(quickPlan(11))
+	c.AddBrokers(1, brokerProps(c, &log, echo))
+	want := []string{"a", "bb", "pause", "ccc", "dddd"}
+	addStubClient(c, &log, false, func(msg core.EventData, o *outbox) {
+		dialAndWrite(want[:3]...)(msg, o)
+		if m, ok := msg.(core.BytesReceived); ok && string(m.Data) == "pause" {
+			for _, f := range want[3:] {
+				o.Do(core.Send{Conn: m.Conn, Data: []byte(f)})
 			}
-			return nil
-		}}
+		}
 	})
-	res := c.Run()
-	if len(res.Failures) == 0 || res.Failures[0].Property != "unrouted_action" || res.Failures[0].Kind != kernel.FailProtocol {
-		t.Fatalf("failures = %+v", res.Failures)
+	if res := c.Run(); !res.OK() {
+		t.Fatalf("failures: %+v", res.Failures)
+	}
+	if got := frames(log, "broker-0"); !slices.Equal(got, want) {
+		t.Fatalf("broker got %v, want %v", got, want)
+	}
+	if got := frames(log, "client-0"); !slices.Equal(got, want) {
+		t.Fatalf("client got %v, want %v", got, want)
+	}
+	var opened, paused, after sim.Time
+	for _, s := range log {
+		if _, ok := s.msg.(core.ConnOpened); ok {
+			opened = s.at
+		}
+		if m, ok := s.msg.(core.BytesReceived); ok && s.who == "broker-0" {
+			switch string(m.Data) {
+			case "pause":
+				paused = s.at
+			case "ccc":
+				after = s.at
+			}
+		}
+	}
+	if opened == 0 || opened > paused {
+		t.Fatalf("ConnOpened at %d, first frames at %d", opened, paused)
+	}
+	if after-paused < sim.Time(100*actor.Millisecond) {
+		t.Fatalf("a paused connection delivered after %d ns", after-paused)
+	}
+}
+
+// A dial to a broker that is not up fails with ErrConnClosed.
+func TestConnectToADownBrokerFails(t *testing.T) {
+	var log []seen
+	c := New(quickPlan(12))
+	addStubClient(c, &log, false, dialAndWrite("x"))
+	if res := c.Run(); !res.OK() {
+		t.Fatalf("failures: %+v", res.Failures)
+	}
+	for _, s := range log {
+		if d, ok := s.msg.(core.ConnectDone); ok && d.Err == core.ErrConnClosed {
+			return
+		}
+	}
+	t.Fatal("no failed dial")
+}
+
+// closedAt returns the ConnClosed that `who` got, if any.
+func closedAt(log []seen, who string) (core.ConnClosed, bool) {
+	for _, s := range log {
+		if m, ok := s.msg.(core.ConnClosed); ok && s.who == who {
+			return m, true
+		}
+	}
+	return core.ConnClosed{}, false
+}
+
+// A graceful close reaches the other end after the frames already sent; an
+// abort drops them.
+func TestCloseConn(t *testing.T) {
+	for _, abort := range []bool{false, true} {
+		var log []seen
+		c := New(quickPlan(13))
+		c.AddBrokers(1, brokerProps(c, &log, nil))
+		addStubClient(c, &log, false, func(msg core.EventData, o *outbox) {
+			dialAndWrite("a", "b")(msg, o)
+			if m, ok := msg.(core.ConnectDone); ok {
+				o.Do(core.CloseConn{Conn: m.Conn, Abort: abort})
+				o.Do(core.Send{Conn: m.Conn, Data: []byte("late")})
+			}
+		})
+		if res := c.Run(); !res.OK() {
+			t.Fatalf("failures: %+v", res.Failures)
+		}
+		m, ok := closedAt(log, "broker-0")
+		if !ok || m.Abort != abort {
+			t.Fatalf("abort=%v: broker got close %+v %v", abort, m, ok)
+		}
+		want := []string{"a", "b"}
+		if abort {
+			want = nil
+		}
+		if got := frames(log, "broker-0"); !slices.Equal(got, want) {
+			t.Fatalf("abort=%v: broker got %v, want %v", abort, got, want)
+		}
+	}
+}
+
+// When a broker crashes, its client gets ConnClosed{Abort: true}.
+func TestCrashResetsTheClient(t *testing.T) {
+	var log []seen
+	c := New(quickPlan(14))
+	c.AddBrokers(1, brokerProps(c, &log, nil))
+	addStubClient(c, &log, false, dialAndWrite("a"))
+	broker := c.net.ends["broker-0"].entity
+	c.System.After(500*actor.Millisecond, func() { c.System.Crash(broker, "test") })
+	if res := c.Run(); !res.OK() {
+		t.Fatalf("failures: %+v", res.Failures)
+	}
+	if m, ok := closedAt(log, "client-0"); !ok || !m.Abort {
+		t.Fatalf("client got close %+v %v", m, ok)
+	}
+}
+
+// With ConnResetProb 1, the first write resets the connection: both ends get
+// ConnClosed{Abort: true} and the frame is lost.
+func TestConnReset(t *testing.T) {
+	var log []seen
+	p := quickPlan(15)
+	p.Settings.ConnResetProb = 1
+	c := New(p)
+	c.AddBrokers(1, brokerProps(c, &log, nil))
+	addStubClient(c, &log, false, dialAndWrite("a"))
+	if res := c.Run(); !res.OK() {
+		t.Fatalf("failures: %+v", res.Failures)
+	}
+	for _, who := range []string{"broker-0", "client-0"} {
+		if m, ok := closedAt(log, who); !ok || !m.Abort {
+			t.Fatalf("%s got close %+v %v", who, m, ok)
+		}
+	}
+	if got := frames(log, "broker-0"); len(got) != 0 {
+		t.Fatalf("broker got %v", got)
+	}
+	if n := len(c.System.Timeline().Snapshot("sim_fault")); n != 1 {
+		t.Fatalf("%d faults recorded", n)
 	}
 }

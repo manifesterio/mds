@@ -11,7 +11,7 @@ const AllScenarios = "all"
 
 // RunOptions tell a scenario how to run one seed.
 type RunOptions struct {
-	Log         bool // keep every step line in Result.Log
+	Log         bool // keep every step line in Outcome.Log
 	HaltOnFirst bool // stop at the first failure (replay)
 }
 
@@ -21,7 +21,12 @@ type RunOptions struct {
 type Scenario struct {
 	Name   string
 	Detail string // one line for the usage text
-	Run    func(seed uint64, o RunOptions) Result
+	Run    func(seed uint64, o RunOptions) Outcome
+
+	// Reproduce is the replay command of a seed, as a format for the scenario
+	// name and the seed. When it is empty, the campaign makes the command
+	// from Options.Tool.
+	Reproduce string
 
 	// Owns, when it is set, says which names of the assertion catalog belong
 	// to this scenario. The catalog is the one of the whole program, so when

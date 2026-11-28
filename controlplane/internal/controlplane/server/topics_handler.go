@@ -8,7 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The topics RPCs: CommitSegment, FindSegments, DescribeTopics and CreateTopic. Each
@@ -32,12 +32,12 @@ func isCommand(operation runtime.ControlPlaneOperation) bool {
 // of OffsetFetch.
 func (n *Node) Exec(ctx context.Context, operation runtime.ControlPlaneOperation) (runtime.ControlPlaneDone, error) {
 	if _, logged := metadb.EntryOf(operation); logged {
-		return n.ask(ctx, true, func(request machine.RequestID) runtime.EventData {
-			return runtime.ControlPlaneDeliver{From: serverFrom, Req: request, Op: operation}
+		return n.ask(ctx, true, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+			return runtime.ControlPlaneDeliver{ReplyTo: to, Op: operation}
 		})
 	}
-	return n.ask(ctx, false, func(request machine.RequestID) runtime.EventData {
-		return runtime.LocalRead{From: serverFrom, Req: request, Op: operation}
+	return n.ask(ctx, false, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+		return runtime.LocalRead{ReplyTo: to, Op: operation}
 	})
 }
 

@@ -7,8 +7,8 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// Forbidden I/O and adapter imports for the replica package. It runs on a
-// machine.Clock and an engine only. The production adapters and the reference model stay out.
+// Forbidden I/O and adapter imports for the replica package. It runs on the
+// actor API and an engine only; the production adapters and the reference model stay out.
 var forbiddenImportPrefixes = []string{
 	"github.com/manifesterio/mds/controlplane/internal/system",
 	"github.com/manifesterio/mds/controlplane/cmd",
@@ -16,6 +16,7 @@ var forbiddenImportPrefixes = []string{
 	"net/http",
 	"github.com/cockroachdb/pebble",
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb",
+	"github.com/manifesterio/mds/dst/sim",
 }
 
 func TestImportBoundary(t *testing.T) {

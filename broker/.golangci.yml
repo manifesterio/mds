@@ -66,6 +66,20 @@ linters:
               desc: "the Kafka oracle must not import the control plane spec (decision 21)"
             - pkg: "github.com/manifesterio/mds/broker/internal/verify/speccheck"
               desc: "the Kafka oracle must not import speccheck, the checker or the spec bridge (decision 21)"
+        dst-layers:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/internal/verify/**"
+            - "!**/cmd/*sim*/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/sim"
+              desc: "production code may import dst/actor, dst/trace and dst/live only; sim, campaign and spectest are for tests and simulators (plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "production code may import dst/actor, dst/trace and dst/live only; sim, campaign and spectest are for tests and simulators (plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "production code may import dst/actor, dst/trace and dst/live only; sim, campaign and spectest are for tests and simulators (plan section 6)"
     gosec:
       excludes:
         - G115

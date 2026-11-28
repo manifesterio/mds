@@ -5,105 +5,81 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"slices"
 	"strings"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // groupMarker prefixes a multi-command commit entry so drain can tell it from a
 // single metadb.Encode payload (kinds 0..2).
 const groupMarker byte = 0xC5
 
-// ClientOperation is one client command for the commit queue. Prod injects via
-// controlplane/server; sim delivers runtime.ControlPlaneDeliver which becomes Offer here.
+// ClientOperation is one client command for the commit queue. A caller's
+// runtime.ControlPlaneDeliver of a logged operation becomes an Offer.
 type ClientOperation struct {
-	Req  machine.RequestID
-	Cmd  metadb.Entry         // ID is assigned when the group is built
-	From machine.NodeInstance // broker; empty skips ControlPlaneReply (unit tests)
-}
-
-// ReplyToClient is the apply-time result for one ClientOperation.Req. withReplies turns it
-// into a ControlPlaneReply for the broker in From.
-type ReplyToClient struct {
-	Req  machine.RequestID
-	From machine.NodeInstance
-	Done runtime.ControlPlaneDone
+	ReplyTo actor.ReplyTo[runtime.ControlPlaneDone] // answered once the command applies
+	Cmd     metadb.Entry                            // ID is assigned when the group is built
 }
 
 // waitingCommand is a queued or in-flight client command.
 type waitingCommand struct {
-	request machine.RequestID
-	from    machine.NodeInstance // broker; namespaces Req across brokers
+	replyTo caller
 	cmd     metadb.Entry
 }
 
-// inFlightAppend is one in-flight commit LogAppend (at most one).
+// inFlightAppend is the commit or heartbeat LogAppend in flight (at most one).
 type inFlightAppend struct {
-	request machine.RequestID
-	slot    runtime.LogPosition
-	id      string
-	data    []byte
-	cmds    []waitingCommand
+	slot runtime.LogPosition
+	id   string
+	data []byte
+	cmds []waitingCommand
 }
 
-// Offer enqueues a client command and flushes when an in-flight slot is free.
-// Answers are replied (ControlPlaneReply) only after the winning slot applies.
-// Standby or not-yet-Ready nodes refuse without emitting LogAppend.
+// Offer enqueues a client command and flushes when no append is in flight.
+// The caller is answered only after the winning slot applies. Standby or
+// not-yet-Ready nodes refuse without a LogAppend.
 //
 // A CommitSegment whose key is already in the fold is answered immediately
 // (no LogAppend). A retry for a key still queued or in flight retargets that
-// waiter to the new Req/From so a bridge timeout cannot orphan the apply
-// answer onto a dead broker RequestID.
-func (m *Replica) Offer(operation ClientOperation) []runtime.Action {
+// waiter to the new caller, so a caller that gave up cannot orphan the apply
+// answer.
+func (m *Replica) Offer(operation ClientOperation, o *outbox) {
 	if m.exited {
-		return nil
+		return
 	}
 	if !m.canCommit() {
-		m.answers = append(m.answers, ReplyToClient{
-			Req: operation.Req, From: operation.From,
-			Done: runtime.ControlPlaneDone{Req: operation.Req, Err: runtime.ErrUnavailable},
-		})
-		return nil
+		m.reply(o, operation.ReplyTo, runtime.ControlPlaneDone{Err: runtime.ErrUnavailable})
+		return
 	}
 	if commit, isCommit := operation.Cmd.CommitSegment(); isCommit {
 		if d, ok, err := m.meta.KnownCommit(commit); err == nil && ok {
-			d.Req = operation.Req
 			m.env.Reachable(replayedKeyAnsweredFromWindow)
-			m.answers = append(m.answers, ReplyToClient{Req: operation.Req, From: operation.From, Done: d})
-			return nil
+			m.reply(o, operation.ReplyTo, d)
+			return
 		}
 		if m.retargetCommit(operation) {
-			return nil
+			return
 		}
 	}
 	if !m.fitsAlone(operation.Cmd) {
-		m.answers = append(m.answers, ReplyToClient{
-			Req: operation.Req, From: operation.From,
-			Done: runtime.ControlPlaneDone{Req: operation.Req, Err: runtime.ErrTooLarge},
-		})
-		return nil
+		m.reply(o, operation.ReplyTo, runtime.ControlPlaneDone{Err: runtime.ErrTooLarge})
+		return
 	}
 	if len(m.queue) >= m.config.queueMax() {
-		m.answers = append(m.answers, ReplyToClient{
-			Req: operation.Req, From: operation.From,
-			Done: runtime.ControlPlaneDone{Req: operation.Req, Err: runtime.ErrUnavailable},
-		})
-		return nil
+		m.reply(o, operation.ReplyTo, runtime.ControlPlaneDone{Err: runtime.ErrUnavailable})
+		return
 	}
 	cmd := operation.Cmd
 	cmd.ID = ""
-	m.queue = append(m.queue, waitingCommand{request: operation.Req, from: operation.From, cmd: cmd})
-	return m.flushCommits()
+	m.queue = append(m.queue, waitingCommand{replyTo: operation.ReplyTo, cmd: cmd})
+	m.flushCommits(o)
 }
 
-// retargetCommit points an in-flight or queued waiter for the same SegmentKey
-// at this Offer. The prior broker Req timed out at the bridge; the apply must
-// answer the live one. In-flight ReqIDs are sorted so map walk order cannot
-// diverge two runs of the same seed.
+// retargetCommit points a queued or in-flight waiter for the same SegmentKey
+// at this Offer. The earlier caller gave up; the apply must answer the live
+// one. The earlier caller is never answered.
 func (m *Replica) retargetCommit(operation ClientOperation) bool {
 	wanted, _ := operation.Cmd.CommitSegment()
 	key := wanted.SegmentKey
@@ -111,7 +87,7 @@ func (m *Replica) retargetCommit(operation ClientOperation) bool {
 		if queued, ok := c.cmd.CommitSegment(); !ok || queued.SegmentKey != key {
 			return false
 		}
-		c.request, c.from = operation.Req, operation.From
+		c.replyTo = operation.ReplyTo
 		return true
 	}
 	for i := range m.queue {
@@ -119,13 +95,7 @@ func (m *Replica) retargetCommit(operation ClientOperation) bool {
 			return true
 		}
 	}
-	reqs := make([]machine.RequestID, 0, len(m.inFlightAppends))
-	for request := range m.inFlightAppends { //determinismcheck:ok keys are collected, then sorted before use
-		reqs = append(reqs, request)
-	}
-	slices.Sort(reqs)
-	for _, request := range reqs {
-		f := m.inFlightAppends[request]
+	if f := m.inFlight; f != nil {
 		for i := range f.cmds {
 			if retarget(&f.cmds[i]) {
 				return true
@@ -135,25 +105,23 @@ func (m *Replica) retargetCommit(operation ClientOperation) bool {
 	return false
 }
 
-func (m *Replica) flushCommits() []runtime.Action {
+func (m *Replica) flushCommits(o *outbox) {
 	if m.exited || m.booting {
-		return nil
+		return
 	}
 	// Demote still drains a non-empty queue; Offer already refused new work.
 	if !m.isAppender() && len(m.queue) == 0 {
-		return nil
+		return
 	}
-	var acts []runtime.Action
-	for len(m.inFlightAppends) == 0 && len(m.queue) > 0 {
-		acts = append(acts, m.emitCommitGroup()...)
+	if m.inFlight == nil && len(m.queue) > 0 {
+		m.emitCommitGroup(o)
 	}
-	return acts
 }
 
-func (m *Replica) emitCommitGroup() []runtime.Action {
+func (m *Replica) emitCommitGroup(o *outbox) {
 	limit := min(m.config.maxCmds(), len(m.queue))
 	if limit <= 0 {
-		return nil
+		return
 	}
 	m.seq++
 	id := fmt.Sprintf("%s/e%d/%d", m.config.writer(), m.epoch, m.seq)
@@ -186,14 +154,18 @@ func (m *Replica) emitCommitGroup() []runtime.Action {
 	data := wrap(m.epoch, m.config.writer(), inner)
 	slot := m.alloc()
 	m.env.Always(slot >= m.trimFloor, putNeverWinsBelowTrimFloor,
-		assert.Pair{Key: "slot", Value: slot})
+		actor.Pair{Key: "slot", Value: slot})
 	m.env.Always(len(data) <= m.config.maxEntryBytes() || n == 1, groupEntryUnderByteCap,
-		assert.Pair{Key: "bytes", Value: len(data)})
-	m.nextReq++
-	request := m.nextReq
-	m.inFlightAppends[request] = &inFlightAppend{request: request, slot: slot, id: id, data: data, cmds: cmds}
+		actor.Pair{Key: "bytes", Value: len(data)})
 	m.waiters[id] = cmds
-	return []runtime.Action{runtime.LogAppend{Req: request, Slot: slot, Data: data}}
+	m.emitAppend(o, &inFlightAppend{slot: slot, id: id, data: data, cmds: cmds})
+}
+
+// emitAppend makes f the append in flight and sends it.
+func (m *Replica) emitAppend(o *outbox, f *inFlightAppend) {
+	m.inFlight = f
+	actor.Perform(commitScope(o), runtime.LogAppend{Slot: f.slot, Data: f.data},
+		func(d runtime.LogAppendDone) runtime.EventData { return d })
 }
 
 // entryFixedBytes is the most bytes one entry adds around its commands: the
@@ -222,14 +194,15 @@ func (m *Replica) observeSlot(n runtime.LogPosition) {
 	m.high = max(m.high, n+1)
 }
 
-func (m *Replica) onCommitAppendDone(d runtime.LogAppendDone, f *inFlightAppend) []runtime.Action {
+func (m *Replica) onCommitAppendDone(d runtime.LogAppendDone, f *inFlightAppend, o *outbox) {
 	if isBelowFloor(d) {
 		// The slot is at or below the floor of the log: this node is far behind
 		// and the put is not a commit. Refuse the clients and restore.
 		m.env.Reachable(putRefusedBelowFloor)
-		return m.hitTrimmed()
+		m.hitTrimmed(o)
+		return
 	}
-	delete(m.inFlightAppends, d.Req)
+	m.inFlight = nil
 	if d.Err != runtime.OK || d.Outcome != runtime.Applied {
 		// Conditional put: NotApplied and MaybeApplied both retry the same
 		// slot. Allocating a later slot here would leave an empty slot, and
@@ -237,8 +210,9 @@ func (m *Replica) onCommitAppendDone(d runtime.LogAppendDone, f *inFlightAppend)
 		if d.Outcome == runtime.MaybeApplied {
 			m.env.Reachable(putNotAnsweredSameSlot)
 		}
-		acts := m.retrySameSlot(f)
-		return append(acts, m.flushCommits()...)
+		m.emitAppend(o, &inFlightAppend{slot: f.slot, id: f.id, data: f.data, cmds: f.cmds})
+		m.flushCommits(o)
+		return
 	}
 	m.observeSlot(f.slot)
 	data := f.data
@@ -250,39 +224,27 @@ func (m *Replica) onCommitAppendDone(d runtime.LogAppendDone, f *inFlightAppend)
 	if f.slot >= m.applied {
 		m.buf[f.slot] = data
 	}
-	if err := m.drain(); err != nil {
-		return m.trip(err)
+	if err := m.drain(o); err != nil {
+		m.trip(o, err)
+		return
 	}
-	var acts []runtime.Action
 	if m.fencedFlag {
-		acts = m.stepDown()
-		return append(acts, m.progress()...)
+		m.stepDown(o)
+		m.progress(o)
+		return
 	}
 	if lost {
-		acts = append(acts, m.retryInFlightAppend(f)...)
+		m.retryInFlightAppend(o, f)
 	}
-	acts = append(acts, m.progress()...)
-	acts = append(acts, m.flushCommits()...)
-	return acts
-}
-
-// retrySameSlot repeats the Put at f.slot (conditional append; slot still ours).
-func (m *Replica) retrySameSlot(f *inFlightAppend) []runtime.Action {
-	m.nextReq++
-	request := m.nextReq
-	m.inFlightAppends[request] = &inFlightAppend{request: request, slot: f.slot, id: f.id, data: f.data, cmds: f.cmds}
-	return []runtime.Action{runtime.LogAppend{Req: request, Slot: f.slot, Data: f.data}}
+	m.progress(o)
+	m.flushCommits(o)
 }
 
 // retryInFlightAppend appends the same entry (same id and cmds) at the next free slot
 // after another writer won f.slot.
-func (m *Replica) retryInFlightAppend(f *inFlightAppend) []runtime.Action {
+func (m *Replica) retryInFlightAppend(o *outbox, f *inFlightAppend) {
 	m.env.Reachable(lostSlotRetriedLaterSlot)
-	slot := m.alloc()
-	m.nextReq++
-	request := m.nextReq
-	m.inFlightAppends[request] = &inFlightAppend{request: request, slot: slot, id: f.id, data: f.data, cmds: f.cmds}
-	return []runtime.Action{runtime.LogAppend{Req: request, Slot: slot, Data: f.data}}
+	m.emitAppend(o, &inFlightAppend{slot: m.alloc(), id: f.id, data: f.data, cmds: f.cmds})
 }
 
 // encodeGroupParts packs commands that are already encoded.
@@ -350,7 +312,7 @@ func takeUvarint(b []byte) (uint64, []byte, bool) {
 	return v, b[n:], true
 }
 
-func (m *Replica) applySlot(slot runtime.LogPosition, data []byte) error {
+func (m *Replica) applySlot(slot runtime.LogPosition, data []byte, o *outbox) error {
 	epoch, writer, payload, ok := unwrap(data)
 	if !ok {
 		return fmt.Errorf("replica: truncated log envelope at slot %d", slot)
@@ -368,7 +330,7 @@ func (m *Replica) applySlot(slot runtime.LogPosition, data []byte) error {
 		for i, c := range cmds {
 			dones[i] = m.meta.Apply(int64(slot), c)
 		}
-		m.deliver(id, dones)
+		m.deliver(o, id, dones)
 		m.afterApply(slot)
 		return nil
 	}
@@ -378,7 +340,7 @@ func (m *Replica) applySlot(slot runtime.LogPosition, data []byte) error {
 	}
 	// Single-entry catch-up: deliver only if we were waiting on it.
 	if e, err := metadb.Decode(payload); err == nil {
-		m.deliver(e.ID, []runtime.ControlPlaneDone{d})
+		m.deliver(o, e.ID, []runtime.ControlPlaneDone{d})
 	}
 	m.afterApply(slot)
 	return nil
@@ -396,21 +358,20 @@ func (m *Replica) afterApply(slot runtime.LogPosition) {
 	}
 }
 
-func (m *Replica) deliver(id string, dones []runtime.ControlPlaneDone) {
+func (m *Replica) deliver(o *outbox, id string, dones []runtime.ControlPlaneDone) {
 	ps, ok := m.waiters[id]
 	if !ok {
 		return
 	}
 	delete(m.waiters, id)
 	for i, p := range ps {
-		d := runtime.ControlPlaneDone{Req: p.request, Err: runtime.ErrInvalid}
+		d := runtime.ControlPlaneDone{Err: runtime.ErrInvalid}
 		if i < len(dones) {
 			d = dones[i]
-			d.Req = p.request
 			if d.Err == runtime.OK && d.Outcome == runtime.Applied && !m.isAppender() {
 				m.env.Reachable(idempotentReplayAfterTakeover)
 			}
 		}
-		m.answers = append(m.answers, ReplyToClient{Req: p.request, From: p.from, Done: d})
+		m.reply(o, p.replyTo, d)
 	}
 }

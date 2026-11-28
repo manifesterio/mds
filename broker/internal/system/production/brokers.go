@@ -10,10 +10,9 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/dst/machine"
 )
 
-// LeaseClient is the control plane call behind a broker's heartbeat (Q4). It
+// LeaseClient is the control plane call behind a broker's heartbeat. It
 // renews the lease of self and returns the live broker set.
 type LeaseClient interface {
 	BrokerHeartbeat(ctx context.Context, self core.BrokerAddr) ([]core.BrokerAddr, error)
@@ -25,10 +24,10 @@ type LeaseClient interface {
 const staleBeats = 3
 
 // leaseLoop beats every interval and gives each live set to the broker as a
-// LiveBrokers event. When no beat has worked for staleBeats intervals, it
+// LiveBrokers message. When no beat has worked for staleBeats intervals, it
 // sends an empty set, so Metadata answers with the broker itself only. It runs
 // until ctx is done.
-func leaseLoop(ctx context.Context, in system.InboxWriter, lease LeaseClient, self core.BrokerAddr,
+func leaseLoop(ctx context.Context, in system.Inbox, lease LeaseClient, self core.BrokerAddr,
 	every time.Duration, log *slog.Logger) {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
@@ -46,7 +45,7 @@ func leaseLoop(ctx context.Context, in system.InboxWriter, lease LeaseClient, se
 				log.Info("lease: heartbeat works again")
 			}
 			failing, stale, last = false, false, time.Now()
-			in.Deliver(machine.Control, core.LiveBrokers{Brokers: live})
+			_ = in.Tell(core.LiveBrokers{Brokers: live})
 		} else {
 			if !failing {
 				log.Warn("lease: heartbeat failed", "err", err)
@@ -54,7 +53,7 @@ func leaseLoop(ctx context.Context, in system.InboxWriter, lease LeaseClient, se
 			failing = true
 			if !stale && time.Since(last) > staleBeats*every {
 				stale = true
-				in.Deliver(machine.Control, core.LiveBrokers{})
+				_ = in.Tell(core.LiveBrokers{})
 			}
 		}
 		select {

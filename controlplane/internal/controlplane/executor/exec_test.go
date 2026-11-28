@@ -9,7 +9,6 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/live"
 )
 
 func TestMemLogRoundTrip(t *testing.T) {
@@ -122,29 +121,19 @@ func (timeoutError) Timeout() bool { return true }
 func (timeoutError) Temporary() bool { return true }
 
 func TestExecutorIOResults(t *testing.T) {
-	ctx := t.Context()
-	in := live.NewInbox[runtime.EventData](0)
-	ex := executor.New(ctx, executor.Config{LogTimeout: time.Second, ObjTimeout: time.Second}, executor.NewMemoryLog(), executor.NewMemoryObjects(), in)
-	ex.Execute(runtime.LogAppend{Req: 1, Slot: 0, Data: []byte("a")})
-	ex.Execute(runtime.ObjectPut{Req: 2, Key: "k", Data: []byte("v")})
-	ex.Execute(runtime.LogGetEnd{Req: 3})
-	ex.Execute(runtime.LogRead{Req: 4, From: 0, Limit: 1})
-	ex.Execute(runtime.ObjectGet{Req: 5, Ref: runtime.SegmentRef{Key: "k", Len: 1}})
-	ex.Execute(runtime.ObjectList{Req: 6, Prefix: "k"})
-	ex.Execute(runtime.LogDeleteOld{Req: 7, Through: 0})
-	ex.Execute(runtime.ObjectDelete{Req: 8, Key: "k"})
-	deadline := time.Now().Add(2 * time.Second)
-	got := 0
-	for got < 8 && time.Now().Before(deadline) {
-		if b, ok := in.Pop(); ok {
-			if _, ok := b.(runtime.IOResult); ok {
-				got++
-			}
-			continue
+	ex := executor.New(t.Context(), executor.Config{LogTimeout: time.Second, ObjTimeout: time.Second}, executor.NewMemoryLog(), executor.NewMemoryObjects())
+	for _, io := range []runtime.IO{
+		runtime.LogAppend{Slot: 0, Data: []byte("a")},
+		runtime.ObjectPut{Key: "k", Data: []byte("v")},
+		runtime.LogGetEnd{},
+		runtime.LogRead{From: 0, Limit: 1},
+		runtime.ObjectGet{Ref: runtime.SegmentRef{Key: "k", Len: 1}},
+		runtime.ObjectList{Prefix: "k"},
+		runtime.LogDeleteOld{Through: 0},
+		runtime.ObjectDelete{Key: "k"},
+	} {
+		if ex.Do(io) == nil {
+			t.Fatalf("%T: no answer", io)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	if got < 8 {
-		t.Fatalf("completions=%d", got)
 	}
 }

@@ -2,7 +2,7 @@ package replica
 
 import "encoding/binary"
 
-// envelopeMarker prefixes machine-emitted log payloads with the writer epoch and
+// envelopeMarker prefixes replica-written log payloads with the writer epoch and
 // the writer name. A reader can tell which writer wrote an entry, and in which
 // epoch, without changing the metadata codecs.
 const envelopeMarker byte = 0xC8
@@ -17,7 +17,7 @@ func wrap(epoch uint64, writer string, payload []byte) []byte {
 	return append(b, payload...)
 }
 
-// unwrap strips a machine envelope when present. The ok flag is false when the
+// unwrap strips an envelope when present. The ok flag is false when the
 // bytes look like a truncated envelope.
 func unwrap(data []byte) (uint64, string, []byte, bool) {
 	if len(data) == 0 || data[0] != envelopeMarker {

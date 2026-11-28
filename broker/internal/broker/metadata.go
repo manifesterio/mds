@@ -12,7 +12,7 @@ import (
 
 // metadata answers Metadata. This broker is the leader of every partition.
 // Topics come from the control plane and are never auto-created.
-func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
+func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest, outbox *brokerOutbox) {
 	var names []string
 	for _, t := range r.Topics {
 		if t.Topic != nil {
@@ -23,11 +23,11 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 	if r.Topics != nil {
 		if len(names) == 0 { // nothing to ask: no topics, or only unusable ids
 			b.metaResp(o, nil, errNone)
-			return nil
+			return
 		}
 		o.names = names
 	}
-	return b.startOp(o)
+	b.startOp(o, outbox)
 }
 
 // metaResp builds the Metadata response of o from the control plane's topics.
@@ -107,17 +107,15 @@ func (b *Broker) metaTopic(name string, infos []contract.TopicInfo, code kafkaEr
 
 // listOffsets serves earliest (always 0, no retention) and latest (the end
 // offset). Other timestamps are unsupported.
-func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action {
+func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest, outbox *brokerOutbox) {
 	response := listOffsetsSkeleton(r)
 	s.response = response
-	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &response.Topics[i].Partitions[j]
-			acts = append(acts, b.listOne(s, contract.NewTopicPartition(t.Topic, p.Partition), p.Timestamp, rp)...)
+			b.listOne(s, contract.NewTopicPartition(t.Topic, p.Partition), p.Timestamp, rp, outbox)
 		}
 	}
-	return acts
 }
 
 func listOffsetsSkeleton(r *kmsg.ListOffsetsRequest) *kmsg.ListOffsetsResponse {
@@ -135,16 +133,15 @@ func listOffsetsSkeleton(r *kmsg.ListOffsetsRequest) *kmsg.ListOffsetsResponse {
 	return response
 }
 
-func (b *Broker) listOne(s *slot, topicPartition core.TopicPartition, ts int64, rp *kmsg.ListOffsetsResponseTopicPartition) []core.Action {
+func (b *Broker) listOne(s *slot, topicPartition core.TopicPartition, ts int64, rp *kmsg.ListOffsetsResponseTopicPartition, outbox *brokerOutbox) {
 	switch {
 	case !b.knows(topicPartition):
 		rp.ErrorCode = int16(errUnknownTopicOrPart)
 	case ts == -2:
 		rp.Offset = 0
 	case ts == -1:
-		return b.startOp(&operation{kind: opList, s: s, topicPartition: topicPartition, lpart: rp})
+		b.startOp(&operation{kind: opList, s: s, topicPartition: topicPartition, lpart: rp}, outbox)
 	default:
 		rp.ErrorCode = int16(errUnsupportedForFormat)
 	}
-	return nil
 }

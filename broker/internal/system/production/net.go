@@ -13,7 +13,6 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ErrNoConn reports a Write or Close on a connection that is gone.
@@ -39,13 +38,13 @@ func (c NetConfig) withDefaults() NetConfig {
 	return c
 }
 
-// Net is the TCP side of a broker: an accept loop that delivers ConnOpened,
-// one reader goroutine per connection (BytesReceived / ConnClosed to the data
-// inbox, parked by PauseReads) and one writer goroutine per connection
+// Net is the TCP side of a broker: an accept loop that tells the broker
+// ConnOpened, one reader goroutine per connection (BytesReceived and
+// ConnClosed, parked by PauseReads) and one writer goroutine per connection
 // (writes in call order). It implements system.Connections.
 type Net struct {
 	config NetConfig
-	sink   system.InboxWriter
+	sink   system.Inbox
 	ln     net.Listener
 	next   atomic.Uint64
 	wg     sync.WaitGroup
@@ -58,7 +57,7 @@ type Net struct {
 var _ system.Connections = (*Net)(nil)
 
 // NewNet starts accepting on ln. ConnIDs are unique per process and start at 1.
-func NewNet(ln net.Listener, sink system.InboxWriter, config NetConfig) *Net {
+func NewNet(ln net.Listener, sink system.Inbox, config NetConfig) *Net {
 	n := &Net{config: config.withDefaults(), sink: sink, ln: ln, conns: map[core.ConnID]*conn{}}
 	n.wg.Go(n.accept)
 	return n
@@ -92,14 +91,11 @@ func (n *Net) accept() {
 		}
 		n.conns[c.id] = c
 		n.mu.Unlock()
-		select {
-		case <-n.sink.Closed():
-			c.abort(true)
+		if err := n.sink.Tell(core.ConnOpened{Conn: c.id, Peer: nc.RemoteAddr().String()}); err != nil {
+			c.abort(true) // the broker has stopped
 			n.forget(c)
 			continue
-		default:
 		}
-		n.sink.Deliver(machine.Data, core.ConnOpened{Conn: c.id, Peer: nc.RemoteAddr().String()})
 		n.wg.Go(c.readLoop)
 		n.wg.Go(c.writeLoop)
 	}
@@ -250,7 +246,7 @@ func (c *conn) report(abort bool) {
 	c.told = true
 	c.mu.Unlock()
 	if !skip {
-		c.n.sink.Deliver(machine.Data, core.ConnClosed{Conn: c.id, Abort: abort})
+		_ = c.n.sink.Tell(core.ConnClosed{Conn: c.id, Abort: abort}) // dropped once the broker has stopped
 	}
 }
 
@@ -303,7 +299,7 @@ func (c *conn) readLoop() {
 			local := c.local
 			c.mu.Unlock()
 			if !local {
-				c.n.sink.Deliver(machine.Data, core.BytesReceived{Conn: c.id, Data: buf[:k:k]})
+				_ = c.n.sink.Tell(core.BytesReceived{Conn: c.id, Data: buf[:k:k]}) // dropped once the broker has stopped
 			}
 		}
 		if err != nil {

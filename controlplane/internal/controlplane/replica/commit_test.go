@@ -8,7 +8,6 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
 )
 
 func commitCmd(key string, records int64) metadb.Entry {
@@ -23,95 +22,83 @@ func commitCmd(key string, records int64) metadb.Entry {
 	}
 }
 
-func onlyAppend(t *testing.T, acts []runtime.Action) runtime.LogAppend {
-	t.Helper()
-	if len(acts) != 1 {
-		t.Fatalf("actions = %v, want one LogAppend", acts)
-	}
-	ap, ok := acts[0].(runtime.LogAppend)
-	if !ok {
-		t.Fatalf("action = %T, want LogAppend", acts[0])
-	}
-	return ap
+// applied answers an append as written.
+func applied(ap runtime.LogAppend) runtime.LogAppendDone {
+	return runtime.LogAppendDone{Slot: ap.Slot, Err: runtime.OK, Outcome: runtime.Applied}
 }
 
 func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
-	m := newMachine(t, replica.Config{MaxCmdsPerSlot: 3, Writer: "w"})
+	h := newHarness(t, replica.Config{MaxCmdsPerSlot: 3, Writer: "w"})
 	// First Offer flushes alone (low load). Further Offers queue while in flight;
 	// the next flush packs up to MaxCmdsPerSlot, matching logcp flusher take().
-	first := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: commitCmd("g0", 1)}))
+	first, firstEffect := only[runtime.LogAppend](t, h.offer(1, replica.ClientOperation{Cmd: commitCmd("g0", 1)}))
 	for i := 2; i <= 6; i++ {
-		if acts := m.Offer(replica.ClientOperation{
-			Req: machine.RequestID(i),
+		if effects := h.offer(uint64(i), replica.ClientOperation{
 			Cmd: commitCmd("g"+string(rune('0'+i-1)), 1),
-		}); len(acts) != 0 {
-			t.Fatalf("Offer while in-flight returned %v", acts)
+		}); len(effects) != 0 {
+			t.Fatalf("Offer while in-flight returned %v", describe(effects))
 		}
 	}
-	if m.QueueDepth() != 5 {
-		t.Fatalf("queue depth = %d, want 5", m.QueueDepth())
+	if h.m.QueueDepth() != 5 {
+		t.Fatalf("queue depth = %d, want 5", h.m.QueueDepth())
 	}
-	acts := step(m, runtime.LogAppendDone{Req: first.Req, Slot: first.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-	_ = m.TakeAnswers() // answer for g0
-	packed := onlyAppend(t, acts)
+	effects := h.answer(firstEffect, applied(first)) // also answers g0
+	packed, packedEffect := only[runtime.LogAppend](t, effects)
 	id, cmds, ok := replica.DecodeGroup(packed.Data)
 	if !ok || len(cmds) != 3 {
 		t.Fatalf("packed group id=%q cmds=%d ok=%v, want 3 cmds", id, len(cmds), ok)
 	}
-	if m.QueueDepth() != 2 {
-		t.Fatalf("queue depth = %d, want 2 left after packing 3", m.QueueDepth())
+	if h.m.QueueDepth() != 2 {
+		t.Fatalf("queue depth = %d, want 2 left after packing 3", h.m.QueueDepth())
 	}
-	step(m, runtime.LogAppendDone{Req: packed.Req, Slot: packed.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-	ans := m.TakeAnswers()
+	ans := replies(t, h.answer(packedEffect, applied(packed)))
 	if len(ans) != 3 {
 		t.Fatalf("packed answers = %d, want 3", len(ans))
 	}
 	for i, a := range ans {
-		if a.Req != machine.RequestID(i+2) || a.Done.Err != runtime.OK {
+		if a.n != uint64(i+2) || a.done.Err != runtime.OK {
 			t.Fatalf("answer[%d] = %+v", i, a)
 		}
 	}
-	d, err := m.Metadata().Read(contract.FindSegments{TopicPartition: contract.NewTopicPartition("t", 0)})
+	d, err := h.m.Metadata().Read(contract.FindSegments{TopicPartition: contract.NewTopicPartition("t", 0)})
 	if end := runtime.ResponseAs[contract.FindSegmentsResp](d).End; err != nil || end != 4 { // g0 + 3 packed
 		t.Fatalf("end = %d (err %v), want 4", end, err)
 	}
 }
 
 func TestOfferKnownCommitSkipsAppend(t *testing.T) {
-	m := newMachine(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w"})
-	first := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: commitCmd("known", 2)}))
-	step(m, runtime.LogAppendDone{Req: first.Req, Slot: first.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-	if ans := m.TakeAnswers(); len(ans) != 1 || ans[0].Done.Err != runtime.OK {
+	h := newHarness(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w"})
+	first, firstEffect := only[runtime.LogAppend](t, h.offer(1, replica.ClientOperation{Cmd: commitCmd("known", 2)}))
+	if ans := replies(t, h.answer(firstEffect, applied(first))); len(ans) != 1 || ans[0].done.Err != runtime.OK {
 		t.Fatalf("first answers = %+v", ans)
 	}
-	acts := m.Offer(replica.ClientOperation{Req: 2, Cmd: commitCmd("known", 2)})
-	if len(acts) != 0 {
-		t.Fatalf("known Offer returned %v, want immediate answer", acts)
+	effects := h.offer(2, replica.ClientOperation{Cmd: commitCmd("known", 2)})
+	if len(performs(effects)) != 0 {
+		t.Fatalf("known Offer returned %v, want immediate answer", describe(effects))
 	}
-	ans := m.TakeAnswers()
-	if len(ans) != 1 || ans[0].Req != 2 || ans[0].Done.Err != runtime.OK {
+	ans := replies(t, effects)
+	if len(ans) != 1 || ans[0].n != 2 || ans[0].done.Err != runtime.OK {
 		t.Fatalf("known answers = %+v", ans)
 	}
-	response, ok := ans[0].Done.Resp.(contract.CommitSegmentResp)
+	response, ok := ans[0].done.Resp.(contract.CommitSegmentResp)
 	if !ok || len(response.Assigned) != 1 || response.Assigned[0].Count != 2 {
-		t.Fatalf("known resp = %+v", ans[0].Done.Resp)
+		t.Fatalf("known resp = %+v", ans[0].done.Resp)
 	}
 }
 
 func TestOfferRetargetsInFlightCommit(t *testing.T) {
-	m := newMachine(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w"})
-	first := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: commitCmd("retry", 1)}))
-	acts := m.Offer(replica.ClientOperation{Req: 2, Cmd: commitCmd("retry", 1)})
-	if len(acts) != 0 {
-		t.Fatalf("retarget Offer returned %v", acts)
+	h := newHarness(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w"})
+	first, firstEffect := only[runtime.LogAppend](t, h.offer(1, replica.ClientOperation{Cmd: commitCmd("retry", 1)}))
+	effects := h.offer(2, replica.ClientOperation{Cmd: commitCmd("retry", 1)})
+	if len(effects) != 0 {
+		t.Fatalf("retarget Offer returned %v", describe(effects))
 	}
-	if m.QueueDepth() != 0 {
-		t.Fatalf("queue depth = %d, want 0 (coalesced)", m.QueueDepth())
+	if h.m.QueueDepth() != 0 {
+		t.Fatalf("queue depth = %d, want 0 (coalesced)", h.m.QueueDepth())
 	}
-	step(m, runtime.LogAppendDone{Req: first.Req, Slot: first.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-	ans := m.TakeAnswers()
-	if len(ans) != 1 || ans[0].Req != 2 || ans[0].Done.Err != runtime.OK {
-		t.Fatalf("answers = %+v, want Req 2", ans)
+	ans := replies(t, h.answer(firstEffect, applied(first)))
+	if len(ans) != 1 || ans[0].n != 2 || ans[0].done.Err != runtime.OK {
+		t.Fatalf("answers = %+v, want only the newer caller 2", ans)
 	}
 }
 
@@ -120,26 +107,24 @@ func TestOfferRetargetsInFlightCommit(t *testing.T) {
 // that forgets on its own clock lets a replay
 // commit again as a new segment, with new offsets.
 func TestWindowForgetsKeysOnlyOnLogStride(t *testing.T) {
-	m := newMachine(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w", WindowSlots: 4, TrimStride: 8})
+	h := newHarness(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w", WindowSlots: 4, TrimStride: 8})
 	var last runtime.LogPosition
-	req := machine.RequestID(0)
+	n := uint64(0)
 	commit := func(key string) {
-		req++
-		ap := onlyAppend(t, m.Offer(replica.ClientOperation{Req: req, Cmd: commitCmd(key, 1)}))
-		step(m, runtime.LogAppendDone{Req: ap.Req, Slot: ap.Slot, Err: runtime.OK, Outcome: runtime.Applied})
-		m.TakeAnswers()
+		n++
+		ap, apEffect := only[runtime.LogAppend](t, h.offer(n, replica.ClientOperation{Cmd: commitCmd(key, 1)}))
+		h.answer(apEffect, applied(ap))
 		last = ap.Slot
 	}
 	commit("first") // slot 0
 	for last < 7 {
 		commit(fmt.Sprintf("filler%d", last))
 	}
-	req++
-	if acts := m.Offer(replica.ClientOperation{Req: req, Cmd: commitCmd("first", 1)}); len(acts) != 0 {
-		t.Fatalf("at slot %d the key is forgotten, but the window keeps it until slot 8: %v", last, acts)
+	n++
+	if effects := h.offer(n, replica.ClientOperation{Cmd: commitCmd("first", 1)}); len(performs(effects)) != 0 {
+		t.Fatalf("at slot %d the key is forgotten, but the window keeps it until slot 8: %v", last, describe(effects))
 	}
-	m.TakeAnswers()
 	commit("filler8") // slot 8 is a stride slot, so the keys below slot 4 go
-	req++
-	onlyAppend(t, m.Offer(replica.ClientOperation{Req: req, Cmd: commitCmd("first", 1)}))
+	n++
+	only[runtime.LogAppend](t, h.offer(n, replica.ClientOperation{Cmd: commitCmd("first", 1)}))
 }

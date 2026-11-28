@@ -9,7 +9,7 @@ import (
 )
 
 // Classify maps an executor error for a into ErrCode and Outcome.
-func Classify(a runtime.IOCall, err error) (runtime.ErrCode, runtime.Outcome) {
+func Classify(a runtime.IO, err error) (runtime.ErrCode, runtime.Outcome) {
 	if err == nil {
 		return runtime.OK, runtime.Applied
 	}
@@ -32,10 +32,12 @@ func Classify(a runtime.IOCall, err error) (runtime.ErrCode, runtime.Outcome) {
 	return runtime.ErrIO, maybe
 }
 
-func changesData(a runtime.IOCall) bool {
+func changesData(a runtime.IO) bool {
 	switch a.(type) {
 	case runtime.LogAppend, runtime.LogDeleteOld, runtime.LogClaimEpoch, runtime.ObjectPut, runtime.ObjectDelete:
 		return true
+	case runtime.LogRead, runtime.LogGetEnd, runtime.ObjectGet, runtime.ObjectList:
+		return false
 	}
 	return false
 }

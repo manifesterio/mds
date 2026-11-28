@@ -38,15 +38,14 @@ func (n *Node) BrokerHeartbeat(ctx context.Context, request *cpv1.BrokerHeartbea
 		ok   bool
 	}
 	ch := make(chan result, 1)
-	err := n.onLoop(ctx, func(m *replica.Replica) []runtime.Action {
+	err := n.onLoop(ctx, func(m *replica.Replica) {
 		if !m.IsActive() || !m.Ready() {
 			ch <- result{}
-			return nil
+			return
 		}
 		now := n.config.Clock.Mono()
 		n.leases.Renew(b, now)
 		ch <- result{live: n.leases.Live(now), ok: true}
-		return nil
 	})
 	if err != nil {
 		return nil, wire.ToRPCError(runtime.ErrIO, runtime.NotApplied)

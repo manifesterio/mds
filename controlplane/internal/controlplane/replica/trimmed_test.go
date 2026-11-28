@@ -11,23 +11,24 @@ import (
 // commit. The node must not apply or answer it: it refuses the clients and
 // restores from the checkpoint.
 func TestBelowFloorAppendRestoresFromCheckpoint(t *testing.T) {
-	m := newMachine(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w", CheckpointPrefix: "checkpoint/t/"})
-	ap := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: commitCmd("a", 1)}))
-	acts := step(m, runtime.LogAppendDone{
-		Req: ap.Req, Slot: ap.Slot, Taken: true, Existing: nil,
+	h := newHarness(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w", CheckpointPrefix: "checkpoint/t/"})
+	ap, apEffect := only[runtime.LogAppend](t, h.offer(1, replica.ClientOperation{Cmd: commitCmd("a", 1)}))
+	effects := h.answer(apEffect, runtime.LogAppendDone{
+		Slot: ap.Slot, Taken: true, Existing: nil,
 		Err: runtime.ErrConflict, Outcome: runtime.NotApplied,
 	})
-	if !m.Booting() {
+	if !h.m.Booting() {
 		t.Fatal("want booting after an append was refused below the floor")
 	}
-	if m.Applied() != 0 {
-		t.Fatalf("Applied = %d, the refused put must not be applied", m.Applied())
+	if h.m.Applied() != 0 {
+		t.Fatalf("Applied = %d, the refused put must not be applied", h.m.Applied())
 	}
-	ans := m.TakeAnswers()
-	if len(ans) != 1 || ans[0].Req != 1 || ans[0].Done.Err != runtime.ErrUnavailable {
+	ans := replies(t, effects)
+	if len(ans) != 1 || ans[0].n != 1 || ans[0].done.Err != runtime.ErrUnavailable {
 		t.Fatalf("answers = %+v, want one ErrUnavailable for request 1", ans)
 	}
-	if list, ok := acts[len(acts)-1].(runtime.ObjectList); !ok || list.Prefix != "checkpoint/t/" {
-		t.Fatalf("acts = %#v, want a final ObjectList checkpoint/t/", acts)
+	ps := performs(effects)
+	if list, ok := ps[len(ps)-1].Msg.(runtime.ObjectList); !ok || list.Prefix != "checkpoint/t/" {
+		t.Fatalf("effects = %v, want a final ObjectList checkpoint/t/", describe(effects))
 	}
 }

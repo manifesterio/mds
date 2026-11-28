@@ -6,20 +6,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/catalog"
 )
 
 // TestOwnsLimitsTheExpectedNamesToTheScenariosThatRun: two scenarios share one
 // catalog. A campaign of one scenario must not name the paths and the Always
 // properties of the other as missing.
 func TestOwnsLimitsTheExpectedNamesToTheScenariosThatRun(t *testing.T) {
-	cat := catalog{asserts: []assert.Declared{
-		{Name: "shared: path", Kind: assert.KindReachable},
-		{Name: "a: path", Kind: assert.KindReachable},
-		{Name: "a: maybe", Kind: assert.KindSometimes},
-		{Name: "a: rule", Kind: assert.KindAlways},
-		{Name: "b: path", Kind: assert.KindReachable},
-		{Name: "b: rule", Kind: assert.KindAlways},
+	cat := catalogSet{asserts: []catalog.Declared{
+		{Name: "shared: path", Kind: actor.KindReachable},
+		{Name: "a: path", Kind: actor.KindReachable},
+		{Name: "a: maybe", Kind: actor.KindSometimes},
+		{Name: "a: rule", Kind: actor.KindAlways},
+		{Name: "b: path", Kind: actor.KindReachable},
+		{Name: "b: rule", Kind: actor.KindAlways},
 	}}
 	owns := func(prefix string) func(string) bool {
 		return func(name string) bool { return strings.HasPrefix(name, "shared: ") || strings.HasPrefix(name, prefix) }
@@ -51,9 +52,9 @@ func TestOwnsLimitsTheExpectedNamesToTheScenariosThatRun(t *testing.T) {
 // TestScenarioWithoutOwnsOwnsEveryName: one scenario without an Owns function
 // makes the whole catalog count.
 func TestScenarioWithoutOwnsOwnsEveryName(t *testing.T) {
-	cat := catalog{asserts: []assert.Declared{
-		{Name: "a: path", Kind: assert.KindReachable},
-		{Name: "b: path", Kind: assert.KindReachable},
+	cat := catalogSet{asserts: []catalog.Declared{
+		{Name: "a: path", Kind: actor.KindReachable},
+		{Name: "b: path", Kind: actor.KindReachable},
 	}}
 	a := pass("a")
 	a.Owns = func(name string) bool { return strings.HasPrefix(name, "a: ") }

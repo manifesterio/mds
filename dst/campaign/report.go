@@ -8,9 +8,38 @@ import (
 	"strings"
 	"time"
 
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/catalog"
+	"github.com/manifesterio/mds/dst/sim"
 )
+
+// KindNotRepeatable is the failure kind of a seed whose second run gave
+// another result than the first (see Options.CheckEvery).
+const KindNotRepeatable = "nondeterminism"
+
+// kindNames are the words that name a kind of failure of a sim run.
+var kindNames = map[sim.FailKind]string{
+	sim.FailViolation:     "violation",
+	sim.FailProtocol:      "protocol",
+	sim.FailPanic:         "panic",
+	sim.FailMaxSteps:      "max_steps",
+	sim.FailNotRepeatable: KindNotRepeatable,
+}
+
+func kindName(k sim.FailKind) string {
+	if n, ok := kindNames[k]; ok {
+		return n
+	}
+	return fmt.Sprintf("kind(%d)", k)
+}
+
+// atMs is a virtual time cut to whole milliseconds.
+func atMs(t sim.Time) time.Duration { return time.Duration(t).Truncate(time.Millisecond) }
+
+// logLine formats a step line as "step time text".
+func logLine(l sim.LogEntry) string {
+	return fmt.Sprintf("%6d %12v  %s", l.Step, time.Duration(l.At), l.Text)
+}
 
 // Report is the end-of-campaign picture: what ran, what failed, which
 // assertions held, and whether more seeds still find new assertions.
@@ -41,10 +70,37 @@ type Report struct {
 
 // FailedRun is a run that broke a property, with the command that replays it.
 type FailedRun struct {
-	Scenario string    `json:"scenario"`
-	Seed     uint64    `json:"seed"`
-	Replay   string    `json:"replay"`
-	Failures []Failure `json:"failures,omitempty"`
+	Scenario string `json:"scenario"`
+	Seed     uint64 `json:"seed"`
+	Replay   string `json:"replay"`
+	Failures []sim.Failure
+}
+
+// failureRow is the JSON of one failure.
+type failureRow struct {
+	Kind     string `json:"kind"`
+	Property string `json:"property"`
+	Detail   string `json:"detail"`
+	Step     uint64 `json:"step"`
+	AtMs     int64  `json:"at_ms"` // virtual time of the failure, in milliseconds
+	Repeats  int    `json:"repeats,omitempty"`
+}
+
+// MarshalJSON writes the failures as failureRow lines.
+func (f FailedRun) MarshalJSON() ([]byte, error) {
+	var rows []failureRow
+	for _, x := range f.Failures {
+		rows = append(rows, failureRow{
+			Kind: kindName(x.Kind), Property: x.Property, Detail: x.Detail, Step: x.Step,
+			AtMs: atMs(x.At).Milliseconds(), Repeats: x.Repeats,
+		})
+	}
+	return json.Marshal(struct {
+		Scenario string       `json:"scenario"`
+		Seed     uint64       `json:"seed"`
+		Replay   string       `json:"replay"`
+		Failures []failureRow `json:"failures,omitempty"`
+	}{f.Scenario, f.Seed, f.Replay, rows})
 }
 
 // AssertRow is the count of one assertion over the whole campaign.
@@ -78,23 +134,23 @@ type StableResult struct {
 	HitLimit    bool `json:"hit_limit"` // the limit came first: the campaign was not stable yet
 }
 
-// catalog is the list of declared assertions and buggify sites that a report
+// catalogSet is the list of declared assertions and buggify sites that a report
 // compares the campaign with. A real campaign uses the catalog of the
-// program (assert.Catalog and fault.Sites). A test can give its own.
-type catalog struct {
-	asserts []assert.Declared
+// program (catalog.Asserts and catalog.Sites). A test can give its own.
+type catalogSet struct {
+	asserts []catalog.Declared
 	sites   []string
 }
 
-func declaredCatalog() catalog {
-	return catalog{asserts: assert.Catalog(), sites: fault.Sites()}
+func declaredCatalog() catalogSet {
+	return catalogSet{asserts: catalog.Asserts(), sites: catalog.Sites()}
 }
 
 // forScenarios keeps the declared assertions that belong to at least one of
 // the scenarios in names (see Scenario.Owns). A scenario without an Owns
 // function owns every name, so then nothing is left out. The buggify sites are
 // not filtered.
-func (c catalog) forScenarios(reg *Registry, names []string) catalog {
+func (c catalogSet) forScenarios(reg *Registry, names []string) catalogSet {
 	owners := make([]func(string) bool, 0, len(names))
 	for _, n := range names {
 		sc, _ := reg.Get(n)
@@ -103,7 +159,7 @@ func (c catalog) forScenarios(reg *Registry, names []string) catalog {
 		}
 		owners = append(owners, sc.Owns)
 	}
-	out := catalog{sites: c.sites}
+	out := catalogSet{sites: c.sites}
 	for _, a := range c.asserts {
 		if slices.ContainsFunc(owners, func(owns func(string) bool) bool { return owns(a.Name) }) {
 			out.asserts = append(out.asserts, a)
@@ -124,7 +180,7 @@ type campaignData struct {
 }
 
 // buildReport folds the campaign data and the catalog into a Report.
-func buildReport(d campaignData, cat catalog) Report {
+func buildReport(d campaignData, cat catalogSet) Report {
 	r := Report{
 		Seeds: len(d.seen), Runs: d.runs, Failed: len(d.failed), Passed: d.runs - len(d.failed),
 		FailedRuns: d.failed, Nondeterminism: d.nondet, minGapSeeds: d.minGapSeeds,
@@ -140,7 +196,7 @@ func buildReport(d campaignData, cat catalog) Report {
 	r.NeverReached = neverReached(d.total.Coverage, cat.asserts)
 	r.NeverChecked = neverChecked(d.total.Coverage, cat.asserts)
 	for _, a := range cat.asserts {
-		if (a.Kind == assert.KindSometimes || a.Kind == assert.KindReachable) && !a.NotExpected {
+		if (a.Kind == actor.KindSometimes || a.Kind == actor.KindReachable) && !a.NotExpected {
 			r.expectedPaths++
 		}
 	}
@@ -148,7 +204,7 @@ func buildReport(d campaignData, cat catalog) Report {
 	return r
 }
 
-func assertRows(cov map[string]Coverage) []AssertRow {
+func assertRows(cov map[string]sim.Coverage) []AssertRow {
 	names := make([]string, 0, len(cov))
 	for n := range cov {
 		names = append(names, n)
@@ -157,7 +213,7 @@ func assertRows(cov map[string]Coverage) []AssertRow {
 	rows := []AssertRow{}
 	for _, n := range names {
 		c := cov[n]
-		rows = append(rows, AssertRow{Name: n, Kind: c.Kind, Checks: c.Checks, Passes: c.Passes})
+		rows = append(rows, AssertRow{Name: n, Kind: string(c.Kind), Checks: c.Checks, Passes: c.Passes})
 	}
 	return rows
 }
@@ -166,15 +222,15 @@ func assertRows(cov map[string]Coverage) []AssertRow {
 // has no coverage entry at all, so the declared catalog is the only thing
 // that can name it. A path declared as not expected (Declared.NotExpected) is
 // left out.
-func neverReached(cov map[string]Coverage, declared []assert.Declared) []string {
+func neverReached(cov map[string]sim.Coverage, declared []catalog.Declared) []string {
 	out := []string{}
 	for n, c := range cov {
-		if c.Kind == string(assert.KindSometimes) && c.Passes == 0 {
+		if c.Kind == actor.KindSometimes && c.Passes == 0 {
 			out = append(out, n)
 		}
 	}
 	for _, d := range declared {
-		isPath := d.Kind == assert.KindSometimes || d.Kind == assert.KindReachable
+		isPath := d.Kind == actor.KindSometimes || d.Kind == actor.KindReachable
 		if isPath && !d.NotExpected && cov[d.Name].Passes == 0 && !slices.Contains(out, d.Name) {
 			out = append(out, d.Name)
 		}
@@ -185,10 +241,10 @@ func neverReached(cov map[string]Coverage, declared []assert.Declared) []string 
 
 // neverChecked lists the declared Always properties that no seed checked. An
 // Always that is recorded only on failure (Declared.FailureOnly) is left out.
-func neverChecked(cov map[string]Coverage, declared []assert.Declared) []string {
+func neverChecked(cov map[string]sim.Coverage, declared []catalog.Declared) []string {
 	var out []string
 	for _, d := range declared {
-		if d.Kind == assert.KindAlways && !d.FailureOnly && cov[d.Name].Checks == 0 {
+		if d.Kind == actor.KindAlways && !d.FailureOnly && cov[d.Name].Checks == 0 {
 			out = append(out, d.Name)
 		}
 	}
@@ -318,7 +374,7 @@ func writeList(p func(string, ...any), title string, names []string, always bool
 
 // writeFailure prints the details of one failed seed: one line for each
 // failure, the replay command, and the last step lines of the run.
-func writeFailure(w io.Writer, scenario string, r Result) {
+func writeFailure(w io.Writer, scenario, replay string, r Outcome) {
 	if r.Text != "" {
 		_, _ = fmt.Fprintln(w, r.Text)
 		return
@@ -329,13 +385,13 @@ func writeFailure(w io.Writer, scenario string, r Result) {
 			more = fmt.Sprintf(" (and %d more times)", f.Repeats)
 		}
 		_, _ = fmt.Fprintf(w, "FAIL %s seed %d: %s (%s) step=%d at=%v: %s%s\n", scenario, r.Seed,
-			f.Kind, f.Property, f.Step, time.Duration(f.AtMs)*time.Millisecond, f.Detail, more)
+			kindName(f.Kind), f.Property, f.Step, atMs(f.At), f.Detail, more)
 	}
-	_, _ = fmt.Fprintf(w, "  repro: %s\n", r.Reproduce)
+	_, _ = fmt.Fprintf(w, "  repro: %s\n", replay)
 	if len(r.Tail) > 0 {
 		_, _ = fmt.Fprintln(w, "  last steps:")
 		for _, l := range r.Tail {
-			_, _ = fmt.Fprintf(w, "    %s\n", l)
+			_, _ = fmt.Fprintf(w, "    %s\n", logLine(l))
 		}
 	}
 }

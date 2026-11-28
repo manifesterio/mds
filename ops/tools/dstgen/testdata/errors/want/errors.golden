@@ -1,0 +1,23 @@
+errors.go:9: noDecl: a //dst:sum also needs //sumtype:decl (for the exhaustive switch linter), or use //dst:sum open
+errors.go:16: noFold: a //dst:sum must embed actor.Payload: it has no Fold(*trace.Hash)
+errors.go:20: noMarker: a //dst:sum needs the marker method isNoMarker()
+errors.go:23: notIface: //dst:sum needs an interface
+errors.go:34: ptr: cannot fold a *int
+errors.go:35: fn: cannot fold a func()
+errors.go:36: ch: cannot fold a chan int
+errors.go:37: badMap: map keys must be ordered (string, integer or float) to fold in sorted order
+errors.go:38: plain: interface interface{M()} has no Fold(*trace.Hash)
+errors.go:42: handTag.Tag is written by dstgen: delete the hand-written method
+errors.go:45: unknownSum: //dst:cases missing: missing is not a //dst:sum of this package
+errors.go:49: both: a type is either //dst:cases or //dst:payload
+errors.go:53: answerNoSum: //dst:answer needs exactly one sum (the IO sum)
+errors.go:53: answerNoSum: //dst:answer nothing: no such type in this package
+errors.go:57: askBad: //dst:answer notPayload: the answer must be a payload (it has no Fold)
+errors.go:63: manualMissing: //dst:fold manual but there is no hand-written Fold
+errors.go:69: manualWrongTag.Fold (//dst:fold manual) must start with h.Uint64(12) or h.Uint64(x.Tag())
+errors.go:71: unknownNote: unknown annotation //dst:frobnicate
+errors.go:74: extraArg: //dst:payload takes 0 argument(s), got 1
+errors.go:78: generic: dstgen annotations on a generic type are not supported
+errors.go:81: stateNotStruct: //dst:state needs a struct
+errors.go:85: openWithDecl: //dst:sum open means no exhaustiveness check: remove //sumtype:decl
+errors.go:90: sumBadArg: //dst:sum takes no argument or open, got "closed"

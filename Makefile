@@ -40,9 +40,12 @@ test-deps-guard:
 check-modules-standalone:
 	bash ops/scripts/check-modules-standalone.sh
 
-# Only the control plane generates Go (the proto lives in controlplane/api). The broker imports it.
+# Proto (controlplane) and dstgen sum-type files (dst, controlplane, broker). None of the
+# generated Go is in git; run this after clone (module builds also run generate first).
 generate:
+	$(MAKE) -C dst generate
 	$(MAKE) -C controlplane generate
+	$(MAKE) -C broker generate
 
 test:
 	$(MAKE) -C dst test

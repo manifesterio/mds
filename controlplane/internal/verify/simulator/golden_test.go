@@ -4,23 +4,21 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/golden"
+	"github.com/manifesterio/mds/dst/spectest"
 )
 
 // goldenHashes pins named scenario/seed traces. An accidental determinism
 // change fails this test in review; bump a pin only after intentional review.
 var goldenHashes = map[string]uint64{
-	"basic/17": 0x337ae38013d6ceff,
-	"chaos/42": 0x7d8e4e6f2cc72b2f,
+	"basic/17": 0x2b4c182054e51c2d,
+	"chaos/42": 0xb16808383471a2d,
 }
 
-// goldenWithoutGroups are the pins of the same seeds with the rebalance machines
-// and the consumers left out (the run of before the consumer groups were added,
-// T6.5). They moved once, with the others, when the host code moved to the dst
-// kernel (T1.11c).
+// goldenWithoutGroups are the pins of the same seeds with the rebalance actors
+// and the consumers left out.
 var goldenWithoutGroups = map[string]uint64{
-	"basic/17": 0x798ef51af00c8c5f,
-	"chaos/42": 0xef9a9a341d46a6ca,
+	"basic/17": 0x253b9820ce5efc6a,
+	"chaos/42": 0xf9140b51b5c0be1,
 }
 
 // TestGoldenWithoutGroups pins the run with the consumer groups left out.
@@ -34,7 +32,7 @@ func TestGoldenWithoutGroups(t *testing.T) {
 		if !r.OK() {
 			t.Fatal(Report(r))
 		}
-		golden.Assert(t, name, r.Hash, goldenWithoutGroups)
+		spectest.AssertHash(t, name, r.Hash, goldenWithoutGroups)
 	}
 }
 
@@ -54,6 +52,6 @@ func TestGoldenTraceHashes(t *testing.T) {
 		if !r.OK() {
 			t.Fatal(Report(r))
 		}
-		golden.Assert(t, name, r.Hash, goldenHashes)
+		spectest.AssertHash(t, name, r.Hash, goldenHashes)
 	}
 }

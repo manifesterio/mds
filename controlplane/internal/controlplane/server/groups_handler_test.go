@@ -9,14 +9,14 @@ import (
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // A standby control plane serves no group call: every one answers Unavailable,
 // so the client tries the next address (same rule as BrokerHeartbeat).
 func TestStandbyGroupCallsUnavailable(t *testing.T) {
 	cli, _, stop := startNode(t, replica.Config{
-		Rank: 1, Heartbeat: machine.Duration(time.Second), TakeoverAfter: machine.Duration(time.Hour),
+		Rank: 1, Heartbeat: actor.Duration(time.Second), TakeoverAfter: actor.Duration(time.Hour),
 	})
 	defer stop()
 	ctx := t.Context()

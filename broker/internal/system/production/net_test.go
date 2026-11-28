@@ -10,23 +10,22 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/live"
 )
 
-func newTestNet(t *testing.T) (*Net, *live.Inbox[core.EventData]) {
+func newTestNet(t *testing.T) (*Net, *fakeInbox) {
 	t.Helper()
 	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := live.NewInbox[core.EventData](64)
+	in := &fakeInbox{}
 	n := NewNet(ln, in, NetConfig{LingerRead: 200 * time.Millisecond})
 	t.Cleanup(func() { n.Shutdown(time.Second); in.Close() })
 	return n, in
 }
 
 // next pops the next data event, waiting up to a second.
-func next(t *testing.T, in *live.Inbox[core.EventData]) core.EventData {
+func next(t *testing.T, in *fakeInbox) core.EventData {
 	t.Helper()
 	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(time.Millisecond) {
 		if b, ok := in.Pop(); ok {
@@ -131,5 +130,25 @@ func TestNetAbortResetsAndGracefulFlushes(t *testing.T) {
 	_ = c2.SetReadDeadline(time.Now().Add(time.Second))
 	if _, err := c2.Read(make([]byte, 1)); err == nil || errors.Is(err, io.EOF) {
 		t.Fatalf("abort should reset, got %v", err)
+	}
+}
+
+// A connection accepted after the broker stopped is reset, not reported.
+func TestNetResetsConnWhenBrokerStopped(t *testing.T) {
+	n, in := newTestNet(t)
+	in.Close()
+	// The reset may come so fast that the dial itself sees it: that is the
+	// outcome this test wants too.
+	if c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String()); err == nil {
+		defer func() { _ = c.Close() }()
+		_ = c.SetReadDeadline(time.Now().Add(time.Second))
+		if _, err := c.Read(make([]byte, 1)); err == nil {
+			t.Fatal("connection stayed open")
+		}
+	}
+	for end := time.Now().Add(time.Second); n.OpenConns() != 0 && time.Now().Before(end); time.Sleep(time.Millisecond) {
+	}
+	if n.OpenConns() != 0 || in.Len() != 0 {
+		t.Fatalf("open %d, told %d", n.OpenConns(), in.Len())
 	}
 }

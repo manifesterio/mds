@@ -1,0 +1,35 @@
+# dst.tags: written by dstgen. Append-only: never change a number, never reuse one.
+# <tag> <TypeName>; a retired line has the name -
+102 -
+112 -
+18 ControlPlaneDeliver
+13 ControlPlaneDone
+120 -
+21 LocalRead
+116 LogAppend
+14 LogAppendDone
+121 LogClaimEpoch
+20 LogClaimEpochDone
+119 LogDeleteOld
+17 LogDeleteOldDone
+118 LogGetEnd
+16 LogGetEndDone
+117 LogRead
+15 LogReadDone
+1 NodeStarted
+110 ObjectDelete
+11 ObjectDeleteDone
+109 ObjectGet
+10 ObjectGetDone
+111 ObjectList
+12 ObjectListDone
+108 ObjectPut
+9 ObjectPutDone
+101 -
+115 -
+114 -
+2 StopRequest
+8 -
+22 CatchUpDue
+23 RoleDue
+24 CheckpointDue

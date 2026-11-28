@@ -12,7 +12,6 @@ require (
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0
 	golang.org/x/sys v0.49.0
 	google.golang.org/grpc v1.69.2
-	pgregory.net/rapid v1.3.0
 )
 
 replace github.com/manifesterio/mds/controlplane => ../controlplane
@@ -107,4 +106,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241015192408-796eee8c2d53 // indirect
 	google.golang.org/protobuf v1.35.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	pgregory.net/rapid v1.3.0 // indirect
 )

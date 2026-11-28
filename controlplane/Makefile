@@ -14,9 +14,9 @@ PROTO_GRPC_VER  ?= v1.5.1
 SIM_SEEDS       ?= 300
 
 .PHONY: it build compile test proto proto-tools fmt-check vet lint modernize-check modernize \
-	ascii-check determinism sim sim-campaign spec-long test-race generate mutants fuzz
+	ascii-check determinism sim sim-campaign test-race generate gen-check fuzz
 
-build: generate fmt-check ascii-check vet lint modernize-check compile test determinism sim sim-campaign it
+build: generate fmt-check ascii-check gen-check vet lint modernize-check compile test determinism sim sim-campaign it
 
 # Generate Go from api/**/*.proto (shared, service, log, options):
 # the *.pb.go files next to them, and, by the plugin ops/tools/protoc-gen-mdswire
@@ -44,6 +44,13 @@ determinism:
 # files. One buf run writes all of them (see make proto). None of it is in git,
 # and the module does not compile without it.
 generate: proto
+	go run github.com/manifesterio/mds/ops/tools/dstgen ./...
+
+# The sum-type code that dstgen writes (zz_dst_gen*.go, dst.tags) must match the
+# annotations, and dst.tags must not have lost or renumbered a line since DSTGEN_BASE.
+DSTGEN_BASE ?= mainline
+gen-check:
+	go run github.com/manifesterio/mds/ops/tools/dstgen -check -base $(DSTGEN_BASE) ./...
 
 compile:
 	go build ./...
@@ -88,22 +95,6 @@ sim:
 sim-campaign:
 	go run ./cmd/cpsim -seeds $(SIM_SEEDS) -scenario all
 
-# The conformance tests (test/conformance: the metadb, the replica with
-# crashes and failure injection, the gRPC stack) and the test doubles, with 2000
-# checks each (rapid default is 100). Not part of build. To replay one failure,
-# see spec/README.md.
-spec-long:
-	go test ./test/conformance -count=1 -timeout 60m -rapid.checks=2000
-
-# Plant each bug of ../ops/controlplane/mutants.txt in a copy of the tree and run its test
-# command. A bug the tests do not see fails the target, and so does a mutant whose
-# old text is no longer in the code exactly once. Not part of build.
-# One mutant: make mutants MUTANT=writer-offsets
-# The mutate tool is in ops/tools/mutate in this module.
-MUTANT ?=
-mutants:
-	go run ./ops/tools/mutate -file ../ops/controlplane/mutants.txt $(if $(MUTANT),-only $(MUTANT))
-
 # Integration tests: only Podman-backed packages (not ordinary unit tests). Real DynamoDB
 # Local, PostgreSQL and SeaweedFS (S3) via shared/testinfra. test/integration builds
 # mdscontrolplane once and runs it as child processes. Also runs shared/testinfra smoke
@@ -113,7 +104,6 @@ it:
 	$(MAKE) -C ../shared it
 	go test -tags integration -count=1 -timeout 15m -v \
 		./test/integration/... \
-		./test/s3store/... \
 		./internal/controlplane/executor/dynamolog/... \
 		./internal/controlplane/executor/sqllog/...
 

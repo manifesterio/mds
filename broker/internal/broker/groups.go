@@ -7,7 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Group APIs. The broker keeps no group state. Each call is one control plane
@@ -19,61 +19,62 @@ import (
 
 // groupCallMargin is added to a rebalance timeout for the control plane deadline,
 // so the control plane answers (with its own timeout) before the broker gives up.
-const groupCallMargin = 10 * machine.Second
+const groupCallMargin = 10 * actor.Second
 
 // syncWait is the wait a SyncGroup allows for the leader. The broker keeps no
 // group state, so it does not know the group's rebalance timeout and uses this.
-const syncWait = 60 * machine.Second
+const syncWait = 60 * actor.Second
 
 // dispatchGroup routes the group APIs. It reports false for other requests.
-func (b *Broker) dispatchGroup(s *slot, request core.Request) ([]core.Action, bool) {
+func (b *Broker) dispatchGroup(s *slot, request core.Request, outbox *brokerOutbox) bool {
 	switch r := request.(type) {
 	case *kmsg.FindCoordinatorRequest:
-		return b.findCoordinator(s, r), true
+		b.findCoordinator(s, r)
 	case *kmsg.JoinGroupRequest:
-		return b.joinGroup(s, r), true
+		b.joinGroup(s, r, outbox)
 	case *kmsg.SyncGroupRequest:
-		return b.syncGroup(s, r), true
+		b.syncGroup(s, r, outbox)
 	case *kmsg.HeartbeatRequest:
-		return b.heartbeat(s, r), true
+		b.heartbeat(s, r, outbox)
 	case *kmsg.LeaveGroupRequest:
-		return b.leaveGroup(s, r), true
+		b.leaveGroup(s, r, outbox)
 	case *kmsg.OffsetCommitRequest:
-		return b.offsetCommit(s, r), true
+		b.offsetCommit(s, r, outbox)
 	case *kmsg.OffsetFetchRequest:
-		return b.offsetFetch(s, r), true
+		b.offsetFetch(s, r, outbox)
 	case *kmsg.DescribeGroupsRequest:
-		return b.describeGroups(s, r), true
+		b.describeGroups(s, r, outbox)
 	case *kmsg.ListGroupsRequest:
-		return b.listGroups(s, r), true
+		b.listGroups(s, r, outbox)
+	default:
+		return false
 	}
-	return nil, false
+	return true
 }
 
 // groupCall starts one group call as a part of slot s. fill writes the answer
 // into the response when the control plane replies. timeout 0 takes the default.
-func (b *Broker) groupCall(s *slot, controlPlaneOperation contract.Operation, timeout machine.Duration, fill func(core.ControlPlaneDone)) []core.Action {
-	return b.startOp(&operation{kind: opGroup, s: s, gop: controlPlaneOperation, gtimeout: timeout, gfill: fill})
+func (b *Broker) groupCall(s *slot, controlPlaneOperation contract.Operation, timeout actor.Duration,
+	fill func(core.ControlPlaneDone), outbox *brokerOutbox) {
+	b.startOp(&operation{kind: opGroup, s: s, gop: controlPlaneOperation, gtimeout: timeout, gfill: fill}, outbox)
 }
 
 // onGroupControlPlane answers a group call that the control plane replied to.
-func (b *Broker) onGroupControlPlane(o *operation, e core.ControlPlaneDone) []core.Action {
+func (b *Broker) onGroupControlPlane(o *operation, e core.ControlPlaneDone) {
 	o.gfill(e)
-	return b.endOp(o)
+	b.endOp(o)
 }
 
 // failGroupCalls answers the group calls still at the control plane when the
 // broker stops, as if the control plane were down. The late answers are then
 // ignored: the operations are gone, so findOp finds nothing.
-func (b *Broker) failGroupCalls() []core.Action {
-	var acts []core.Action
+func (b *Broker) failGroupCalls() {
 	for _, o := range slices.Clone(b.ops) {
 		if o.kind == opGroup && o.state == opControlPlane {
 			o.gfill(core.ControlPlaneDone{Err: core.ErrUnavailable})
-			acts = append(acts, b.endOp(o)...)
+			b.endOp(o)
 		}
 	}
-	return acts
 }
 
 // groupErrCode maps the control plane code of a group call to a Kafka code.
@@ -102,12 +103,12 @@ func groupErrCode(c core.ErrCode) kafkaErrorCode {
 // joinGroup answers JoinGroup (key 11). The call waits for the join round to
 // end, so it gets the rebalance timeout as its deadline, plus a margin. Version
 // 0 has no rebalance timeout, so the session timeout is used.
-func (b *Broker) joinGroup(s *slot, r *kmsg.JoinGroupRequest) []core.Action {
+func (b *Broker) joinGroup(s *slot, r *kmsg.JoinGroupRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrJoinGroupResponse()
 	s.response = response
 	if r.Group == "" {
 		response.ErrorCode = int16(errInvalidGroupID)
-		return nil
+		return
 	}
 	rebalance := r.RebalanceTimeoutMillis
 	if r.Version == 0 {
@@ -134,18 +135,18 @@ func (b *Broker) joinGroup(s *slot, r *kmsg.JoinGroupRequest) []core.Action {
 				MemberID: m.MemberID, InstanceID: optStr(m.GroupInstanceID), ProtocolMetadata: m.Metadata})
 		}
 	}
-	return b.groupCall(s, call, millisDuration(rebalance)+groupCallMargin, fill)
+	b.groupCall(s, call, millisDuration(rebalance)+groupCallMargin, fill, outbox)
 }
 
 // syncGroup answers SyncGroup (key 14). The leader's call stores the
 // assignments. A follower's call waits for the leader, so it gets syncWait as
 // its deadline, plus a margin.
-func (b *Broker) syncGroup(s *slot, r *kmsg.SyncGroupRequest) []core.Action {
+func (b *Broker) syncGroup(s *slot, r *kmsg.SyncGroupRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrSyncGroupResponse()
 	s.response = response
 	if r.Group == "" {
 		response.ErrorCode = int16(errInvalidGroupID)
-		return nil
+		return
 	}
 	call := contract.GroupSync{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
 	for _, a := range r.GroupAssignment {
@@ -158,31 +159,31 @@ func (b *Broker) syncGroup(s *slot, r *kmsg.SyncGroupRequest) []core.Action {
 			response.ProtocolType, response.Protocol = r.ProtocolType, r.Protocol
 		}
 	}
-	return b.groupCall(s, call, syncWait+groupCallMargin, fill)
+	b.groupCall(s, call, syncWait+groupCallMargin, fill, outbox)
 }
 
 // heartbeat answers Heartbeat (key 12). A rebalance answers REBALANCE_IN_PROGRESS,
 // which tells the member to rejoin.
-func (b *Broker) heartbeat(s *slot, r *kmsg.HeartbeatRequest) []core.Action {
+func (b *Broker) heartbeat(s *slot, r *kmsg.HeartbeatRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrHeartbeatResponse()
 	s.response = response
 	if r.Group == "" {
 		response.ErrorCode = int16(errInvalidGroupID)
-		return nil
+		return
 	}
 	call := contract.GroupHeartbeat{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
 	fill := func(e core.ControlPlaneDone) { response.ErrorCode = int16(groupErrCode(e.Err)) }
-	return b.groupCall(s, call, 0, fill)
+	b.groupCall(s, call, 0, fill, outbox)
 }
 
 // leaveGroup answers LeaveGroup (key 13). Version 0 to 2 name one member
 // (MemberID). Version 3 and up name a list, and each member gets its own code.
-func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
+func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrLeaveGroupResponse()
 	s.response = response
 	if r.Group == "" {
 		response.ErrorCode = int16(errInvalidGroupID)
-		return nil
+		return
 	}
 	oneCode := r.Version < 3 // version 0 to 2 has one top level code
 	var names []string
@@ -195,7 +196,7 @@ func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
 		names = append(names, m.MemberID)
 	}
 	if len(names) == 0 {
-		return nil
+		return
 	}
 	call := contract.GroupLeave{Group: r.Group, Members: names}
 	fill := func(e core.ControlPlaneDone) {
@@ -207,7 +208,7 @@ func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
 			response.ErrorCode = response.Members[0].ErrorCode
 		}
 	}
-	return b.groupCall(s, call, 0, fill)
+	b.groupCall(s, call, 0, fill, outbox)
 }
 
 // leaveCode is the code of member i: the group failure, else the member's code.
@@ -237,6 +238,6 @@ func optStr(s string) *string {
 	return new(s)
 }
 
-func millisDuration(milliseconds int32) machine.Duration {
-	return machine.Duration(milliseconds) * machine.Millisecond
+func millisDuration(milliseconds int32) actor.Duration {
+	return actor.Duration(milliseconds) * actor.Millisecond
 }

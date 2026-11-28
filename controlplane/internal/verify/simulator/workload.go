@@ -5,7 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The client work is made from a few topics and groups, so that operations meet
@@ -23,7 +23,7 @@ func groupName(i int) string { return fmt.Sprintf("g%d", i) }
 // generation and leader that clients have seen, so that most group operations
 // are valid. A wrong guess is fine: the spec says what the right answer is.
 type workload struct {
-	rand    *rng.Rand
+	rand    *actor.Rand
 	nextSeg int
 	nextMem int
 	nextOff int64

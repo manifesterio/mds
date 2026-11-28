@@ -10,6 +10,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/manifesterio/mds/dst/internal/seedenv"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // batchSize is how many seed numbers a batched campaign (until-stable, or
@@ -21,7 +24,7 @@ type runner struct {
 	reg      *Registry
 	o        Options
 	names    []string
-	cat      catalog
+	cat      catalogSet
 	now      func() time.Time
 	deadline time.Time
 }
@@ -48,7 +51,7 @@ func RunCampaign(reg *Registry, o Options) (Report, error) {
 	return runCampaign(reg, o, declaredCatalog(), time.Now)
 }
 
-func runCampaign(reg *Registry, o Options, cat catalog, now func() time.Time) (Report, error) {
+func runCampaign(reg *Registry, o Options, cat catalogSet, now func() time.Time) (Report, error) {
 	names, err := reg.Resolve(o.Scenarios)
 	if err != nil {
 		return Report{}, err
@@ -122,10 +125,10 @@ func (c *runner) runBatch(st *state, first uint64, n int) {
 					union[i][k] = true
 				}
 			}
-			if r.OK {
+			if r.OK() {
 				continue
 			}
-			fr := FailedRun{Scenario: name, Seed: r.Seed, Replay: r.Reproduce, Failures: r.Failures}
+			fr := FailedRun{Scenario: name, Seed: r.Seed, Replay: c.replayCommand(name, r.Seed), Failures: r.Failures}
 			st.failed = append(st.failed, fr)
 			if isNotRepeatable(r) {
 				st.nondet = append(st.nondet, fr)
@@ -144,17 +147,29 @@ func (c *runner) runBatch(st *state, first uint64, n int) {
 	}
 }
 
-func isNotRepeatable(r Result) bool {
-	return slices.ContainsFunc(r.Failures, func(f Failure) bool { return f.Kind == KindNotRepeatable })
+func isNotRepeatable(r Outcome) bool {
+	return slices.ContainsFunc(r.Failures, func(f sim.Failure) bool { return f.Kind == sim.FailNotRepeatable })
+}
+
+// replayCommand is the command that runs one seed of a scenario again.
+func (c *runner) replayCommand(name string, seed uint64) string {
+	sc, _ := c.reg.Get(name)
+	switch {
+	case sc.Reproduce != "":
+		return fmt.Sprintf(sc.Reproduce, name, seed)
+	case c.o.Tool != "":
+		return fmt.Sprintf("go run ./cmd/%s -scenario %s -seed %d", c.o.Tool, name, seed)
+	}
+	return ""
 }
 
 // runScenario runs seeds first .. first+n-1 of one scenario on several
 // goroutines. Each run is single threaded inside. It returns the results in
 // seed order, and their fold.
-func (c *runner) runScenario(name string, first uint64, n int) ([]Result, Summary) {
+func (c *runner) runScenario(name string, first uint64, n int) ([]Outcome, Summary) {
 	sc, _ := c.reg.Get(name)
-	results := make([]Result, max(n, 0))
-	sum := RunSeeds(first, n, c.o.Workers, func(seed uint64) Result {
+	results := make([]Outcome, max(n, 0))
+	sum := RunSeeds(first, n, c.o.Workers, func(seed uint64) Outcome {
 		r := c.runSeed(sc, seed)
 		results[int(seed-first)] = r
 		return r
@@ -163,21 +178,17 @@ func (c *runner) runScenario(name string, first uint64, n int) ([]Result, Summar
 }
 
 // runSeed runs one seed, and the determinism re-run when the seed is due.
-func (c *runner) runSeed(sc Scenario, seed uint64) Result {
+func (c *runner) runSeed(sc Scenario, seed uint64) Outcome {
 	r := sc.Run(seed, RunOptions{})
 	r.Seed = seed
-	if r.Reproduce == "" && c.o.Tool != "" {
-		r.Reproduce = fmt.Sprintf("go run ./cmd/%s -scenario %s -seed %d", c.o.Tool, sc.Name, seed)
-	}
 	every := c.o.CheckEvery
 	if every <= 0 || (seed-c.o.First)%uint64(every) != 0 {
 		return r
 	}
 	again := sc.Run(seed, RunOptions{Log: true})
 	if again.Hash != r.Hash || again.RandCalls != r.RandCalls || again.Steps != r.Steps {
-		r.OK = false
-		r.Failures = append(slices.Clone(r.Failures), Failure{
-			Kind: KindNotRepeatable, Property: "determinism", Step: r.Steps,
+		r.Failures = append(slices.Clone(r.Failures), sim.Failure{
+			Kind: sim.FailNotRepeatable, Property: "determinism", Step: r.Steps,
 			Detail: "second run of the seed diverged",
 		})
 	}
@@ -186,7 +197,7 @@ func (c *runner) runSeed(sc Scenario, seed uint64) Result {
 
 // print writes the progress text of one scenario and batch: the per-seed
 // lines (verbose), the summary line, and the details of each failed seed.
-func (c *runner) print(name string, n int, results []Result, sum Summary) {
+func (c *runner) print(name string, n int, results []Outcome, sum Summary) {
 	w := c.o.Out
 	if w == nil {
 		return
@@ -201,8 +212,8 @@ func (c *runner) print(name string, n int, results []Result, sum Summary) {
 		_, _ = fmt.Fprintln(w, summaryLine(name, n, sum, c.o.SummaryCounters))
 	}
 	for _, r := range results {
-		if !r.OK {
-			writeFailure(w, name, r)
+		if !r.OK() {
+			writeFailure(w, name, c.replayCommand(name, r.Seed), r)
 		}
 	}
 }
@@ -250,21 +261,21 @@ func Replay(reg *Registry, scenario string, seed uint64, w io.Writer) int {
 	}
 	r := sc.Run(seed, RunOptions{Log: true, HaltOnFirst: true})
 	for _, l := range r.Log {
-		_, _ = fmt.Fprintln(w, l)
+		_, _ = fmt.Fprintln(w, logLine(l))
 	}
 	if r.Text != "" {
 		_, _ = fmt.Fprintln(w, r.Text)
-		if !r.OK {
+		if !r.OK() {
 			return 1
 		}
 		return 0
 	}
 	_, _ = fmt.Fprintf(w, "seed %d: steps=%d rand=%d hash=%016x\n", seed, r.Steps, r.RandCalls, r.Hash)
 	for _, f := range r.Failures {
-		_, _ = fmt.Fprintf(w, "FAIL %s (%s) step=%d at=%v: %s\n", f.Kind, f.Property, f.Step,
-			time.Duration(f.AtMs)*time.Millisecond, f.Detail)
+		_, _ = fmt.Fprintf(w, "FAIL %s (%s) step=%d at=%v: %s\n", kindName(f.Kind), f.Property, f.Step,
+			atMs(f.At), f.Detail)
 	}
-	if !r.OK {
+	if !r.OK() {
 		return 1
 	}
 	return 0
@@ -286,7 +297,7 @@ func mainWith(c Config, reg *Registry, args []string, getenv func(string) string
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		if _, isEnv := errors.AsType[envError](err); isEnv { // the flag package has printed its own errors
+		if _, isEnv := errors.AsType[seedenv.Error](err); isEnv { // the flag package has printed its own errors
 			_, _ = fmt.Fprintf(stderr, "%s: %v\n", c.Tool, err)
 		}
 		return 2

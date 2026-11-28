@@ -14,7 +14,7 @@ package contract
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Offset is a partition log offset.
@@ -44,7 +44,7 @@ type Operation interface {
 	isOperation()
 	// Tag is the frozen number of the case in the trace hash.
 	Tag() uint64
-	machine.Message
+	actor.Payload
 }
 
 // Response is the answer to an Operation. The cases are the plain data types in
@@ -53,7 +53,7 @@ type Response interface {
 	isResponse()
 	// Tag is the frozen number of the case in the trace hash.
 	Tag() uint64
-	machine.Message
+	actor.Payload
 }
 
 // Done is the full answer of the control plane to one operation: the response

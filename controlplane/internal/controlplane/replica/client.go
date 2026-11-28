@@ -3,20 +3,25 @@ package replica
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
-// onControlPlaneDeliver handles one simulator-bridge ControlPlaneDeliver: reads wait for a fresh tail and answer from the fold when
-// Ready; commits and creates go through Offer and ControlPlaneReply after apply.
-func (m *Replica) onControlPlaneDeliver(o runtime.ControlPlaneDeliver) []runtime.Action {
-	operation := o.Op
+// caller is the handle of a caller waiting for a control-plane answer.
+type caller = actor.ReplyTo[runtime.ControlPlaneDone]
+
+// onControlPlaneDeliver handles one control-plane operation from a caller:
+// reads wait for a fresh tail and answer from the fold when Ready; commits
+// and creates go through Offer and are answered after apply.
+func (m *Replica) onControlPlaneDeliver(d runtime.ControlPlaneDeliver, o *outbox) {
+	operation := d.Op
 	switch m.meta.Mode(operation) {
 	case metadb.Logged:
 		cmd, _ := metadb.EntryOf(operation)
-		return m.withReplies(m.Offer(ClientOperation{Req: o.Req, From: o.From, Cmd: cmd}))
+		m.Offer(ClientOperation{ReplyTo: d.ReplyTo, Cmd: cmd}, o)
 	case metadb.ReadOnly:
-		return m.offerRead(o, func() (runtime.ControlPlaneDone, error) { return m.meta.Read(operation) })
+		m.offerRead(d.ReplyTo, func() (runtime.ControlPlaneDone, error) { return m.meta.Read(operation) }, o)
 	default:
-		return []runtime.Action{runtime.ControlPlaneReply{To: o.From, Done: runtime.ControlPlaneDone{Req: o.Req, Err: runtime.ErrInvalid}}}
+		m.reply(o, d.ReplyTo, runtime.ControlPlaneDone{Err: runtime.ErrInvalid})
 	}
 }
 
@@ -24,45 +29,38 @@ func (m *Replica) onControlPlaneDeliver(o runtime.ControlPlaneDeliver) []runtime
 // is Ready. It does not wait for a fresh tail, so it is as fast as a local
 // lookup and can be a little behind the log. A node that is not Ready refuses
 // at once so the caller can try another node.
-func (m *Replica) onLocalRead(o runtime.LocalRead) []runtime.Action {
-	reply := func(d runtime.ControlPlaneDone) []runtime.Action {
-		d.Req = o.Req
-		return []runtime.Action{runtime.ControlPlaneReply{To: o.From, Done: d}}
-	}
+func (m *Replica) onLocalRead(r runtime.LocalRead, o *outbox) {
 	if !m.Ready() {
-		return reply(runtime.ControlPlaneDone{Err: runtime.ErrUnavailable})
+		m.reply(o, r.ReplyTo, runtime.ControlPlaneDone{Err: runtime.ErrUnavailable})
+		return
 	}
-	if m.meta.Mode(o.Op) != metadb.ReadOnly {
-		return reply(runtime.ControlPlaneDone{Err: runtime.ErrInvalid})
+	if m.meta.Mode(r.Op) != metadb.ReadOnly {
+		m.reply(o, r.ReplyTo, runtime.ControlPlaneDone{Err: runtime.ErrInvalid})
+		return
 	}
-	d, err := m.meta.Read(o.Op)
+	d, err := m.meta.Read(r.Op)
 	if err != nil {
-		return reply(runtime.ControlPlaneDone{Err: runtime.ErrIO, Outcome: runtime.NotApplied})
+		m.reply(o, r.ReplyTo, runtime.ControlPlaneDone{Err: runtime.ErrIO, Outcome: runtime.NotApplied})
+		return
 	}
-	return reply(d)
+	m.reply(o, r.ReplyTo, d)
 }
 
 // offerRead queues a read behind a fresh tail check. A node that is not Ready
-// refuses at once so the bridge tries the other replica.
-func (m *Replica) offerRead(o runtime.ControlPlaneDeliver, read func() (runtime.ControlPlaneDone, error)) []runtime.Action {
+// refuses at once so the caller tries the other replica.
+func (m *Replica) offerRead(to caller, read func() (runtime.ControlPlaneDone, error), o *outbox) {
 	if !m.Ready() {
-		return []runtime.Action{runtime.ControlPlaneReply{To: o.From, Done: runtime.ControlPlaneDone{Req: o.Req, Err: runtime.ErrUnavailable}}}
+		m.reply(o, to, runtime.ControlPlaneDone{Err: runtime.ErrUnavailable})
+		return
 	}
-	m.queueRead(o.Req, o.From, read)
-	return nil
+	m.queueRead(to, read)
 }
 
-// withReplies turns answers that have a broker From into ControlPlaneReply actions.
-// Unit-test Offers without From stay in m.answers (the tests read them with TakeAnswers).
-func (m *Replica) withReplies(acts []runtime.Action) []runtime.Action {
-	var kept []ReplyToClient
-	for _, a := range m.answers {
-		if a.From.Node == "" {
-			kept = append(kept, a)
-			continue
-		}
-		acts = append(acts, runtime.ControlPlaneReply{To: a.From, Done: a.Done})
+// reply answers a caller. Nothing is recorded once the actor stopped: Stop
+// is the last effect of a Receive.
+func (m *Replica) reply(o *outbox, to caller, d runtime.ControlPlaneDone) {
+	if m.exited {
+		return
 	}
-	m.answers = kept
-	return acts
+	actor.Reply(o, to, d)
 }

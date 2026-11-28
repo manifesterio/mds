@@ -2,7 +2,7 @@ package simulator
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Faults are the probabilities and rates of one scenario. A zero value means no
@@ -16,10 +16,10 @@ type Faults struct {
 	Corrupt float64 // object reads only: one byte of the data is changed
 
 	// Mean gap between node faults. Zero switches the fault off.
-	CrashEvery     machine.Duration // kill a node, restart it later with a fresh boot number
-	PauseEvery     machine.Duration // stop a node for a while
-	PartitionEvery machine.Duration // cut a node off from the log and the object store
-	TargetLeader   bool             // crash and partition aim at the node that holds the writer epoch
+	CrashEvery     actor.Duration // kill a node, restart it later with a fresh boot number
+	PauseEvery     actor.Duration // stop a node for a while
+	PartitionEvery actor.Duration // cut a node off from the log and the object store
+	TargetLeader   bool           // crash and partition aim at the node that holds the writer epoch
 
 	// Cooperative faults inside the replica (replica.Config StallProb and CrashProb).
 	SoftFault float64
@@ -34,7 +34,7 @@ type Scenario struct {
 	Consumers int
 }
 
-const second = machine.Second
+const second = actor.Second
 
 func allScenarios() []Scenario {
 	return []Scenario{
@@ -80,12 +80,12 @@ func ScenarioByName(name string) (Scenario, bool) {
 // takeover after 1.5 s of silence, and a checkpoint with a log trim every second.
 func replicaConfig(idx int, f Faults, bug Bug) replica.Config {
 	cfg := replica.Config{
-		CatchUpEvery:       50 * machine.Millisecond,
+		CatchUpEvery:       50 * actor.Millisecond,
 		Writer:             nodeWriter(idx),
 		Rank:               idx,
-		Heartbeat:          250 * machine.Millisecond,
-		TakeoverAfter:      1500 * machine.Millisecond,
-		TakeoverRankStep:   500 * machine.Millisecond,
+		Heartbeat:          250 * actor.Millisecond,
+		TakeoverAfter:      1500 * actor.Millisecond,
+		TakeoverRankStep:   500 * actor.Millisecond,
 		CheckpointEvery:    1 * second,
 		CheckpointMinSlots: 4,
 		CheckpointPrefix:   "checkpoint/",
@@ -94,39 +94,19 @@ func replicaConfig(idx int, f Faults, bug Bug) replica.Config {
 	}
 	if f.SoftFault > 0 {
 		cfg.StallProb, cfg.CrashProb = f.SoftFault, f.SoftFault
-		cfg.StallDur = [2]machine.Duration{100 * machine.Millisecond, 800 * machine.Millisecond}
-		cfg.DownDur = [2]machine.Duration{100 * machine.Millisecond, 800 * machine.Millisecond}
+		cfg.StallDur = [2]actor.Duration{100 * actor.Millisecond, 800 * actor.Millisecond}
+		cfg.DownDur = [2]actor.Duration{100 * actor.Millisecond, 800 * actor.Millisecond}
 	}
 	return cfg
-}
-
-// gap draws a random gap around mean.
-func (s *sim) gap(mean machine.Duration) machine.Duration {
-	return machine.Duration(s.rand.Between(int64(mean)/2, int64(mean)*3/2))
 }
 
 // startNemesis begins the node faults that the scenario asks for.
 func (s *sim) startNemesis() {
 	f := s.faults
-	s.every(f.CrashEvery, s.crashOne)
-	s.every(f.PauseEvery, s.pauseOne)
-	s.every(f.PartitionEvery, s.partitionOne)
-}
-
-// every runs fn about every mean, until the quiet tail starts.
-func (s *sim) every(mean machine.Duration, fn func()) {
-	if mean <= 0 {
-		return
-	}
-	var tick func()
-	tick = func() {
-		if s.quiet {
-			return
-		}
-		fn()
-		s.after(s.gap(mean), tick)
-	}
-	s.after(s.gap(mean), tick)
+	still := func() bool { return !s.quiet }
+	everyWhile(s.w, f.CrashEvery, still, s.crashOne)
+	everyWhile(s.w, f.PauseEvery, still, s.pauseOne)
+	everyWhile(s.w, f.PartitionEvery, still, s.partitionOne)
 }
 
 // victim picks the node for a fault: the writer if the scenario aims at it and
@@ -147,7 +127,7 @@ func (s *sim) crashOne() {
 	if !n.up() {
 		return
 	}
-	n.crash("nemesis", machine.Duration(s.rand.Between(int64(200*machine.Millisecond), int64(3*second))))
+	n.crash("nemesis", actor.Duration(s.rand.Between(int64(200*actor.Millisecond), int64(3*second))))
 }
 
 func (s *sim) pauseOne() {
@@ -157,7 +137,7 @@ func (s *sim) pauseOne() {
 	}
 	n.pause()
 	s.tracef("%s paused", n.name())
-	s.after(machine.Duration(s.rand.Between(int64(100*machine.Millisecond), int64(2*second))), n.resume)
+	s.after(actor.Duration(s.rand.Between(int64(100*actor.Millisecond), int64(2*second))), n.resume)
 }
 
 func (s *sim) partitionOne() {
@@ -168,5 +148,5 @@ func (s *sim) partitionOne() {
 	n.cut = true
 	s.stats.Partitions++
 	s.tracef("%s is cut off from storage", n.name())
-	s.after(machine.Duration(s.rand.Between(int64(2*second), int64(5*second))), func() { n.cut = false })
+	s.after(actor.Duration(s.rand.Between(int64(2*second), int64(5*second))), func() { n.cut = false })
 }

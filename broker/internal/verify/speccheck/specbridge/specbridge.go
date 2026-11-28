@@ -1,6 +1,6 @@
-// Package specbridge lets the broker kernel talk to the one control plane
-// spec (controlplane/spec). The kernel sends core.IOCall values and waits for
-// core.IOResult values; the spec takes a contract.Operation and gives a
+// Package specbridge lets the broker talk to the one control plane spec
+// (controlplane/spec). The broker performs core.ControlPlaneCall and waits for
+// core.ControlPlaneDone; the spec takes a contract.Operation and gives a
 // contract.Done. This package only converts between the two. It has no rule of
 // its own: every answer comes from the spec.
 package specbridge
@@ -19,14 +19,9 @@ type ControlPlane struct{ *spec.ControlPlane }
 func New() *ControlPlane { return &ControlPlane{spec.New()} }
 
 // Exec runs one core.ControlPlaneCall and returns its core.ControlPlaneDone.
-// It panics on any other call: that is a bug in the test or the simulator.
-func (c *ControlPlane) Exec(a core.IOCall) core.IOResult {
-	call, ok := a.(core.ControlPlaneCall)
-	if !ok {
-		panic("specbridge.ControlPlane: not a ControlPlaneCall")
-	}
+func (c *ControlPlane) Exec(call core.ControlPlaneCall) core.ControlPlaneDone {
 	done := c.Apply(call.Op)
-	return core.ControlPlaneDone{Req: call.Req, Resp: done.Resp, Err: done.Err, Outcome: done.Outcome}
+	return core.ControlPlaneDone{Resp: done.Resp, Err: done.Err, Outcome: done.Outcome}
 }
 
 // CreateTopic makes a topic (or grows it) and returns the error code.

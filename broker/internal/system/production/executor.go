@@ -2,23 +2,15 @@ package production
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
+	"sync"
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/live"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
-
-// AsyncConnections is the connection set the Executor writes to: system.Connections plus a
-// write that reports when the bytes left (Net implements it).
-type AsyncConnections interface {
-	system.Connections
-	WriteAsync(conn core.ConnID, data []byte, done func(error)) error
-}
 
 // ExecConfig bounds each kind of I/O. Zero fields take the defaults.
 type ExecConfig struct {
@@ -49,69 +41,145 @@ func (c ExecConfig) withDefaults() ExecConfig {
 	return c
 }
 
-// Executor is the production system.Executor: each IOCall runs on its own
-// goroutine under a timeout and yields exactly one IOResult on the InboxWriter.
-// Sends go through the connection's ordered writer queue instead.
+// Executor carries out the broker's IO: it is the exec function of the
+// broker actor on the live Host. Socket IO (Send, CloseConn, PauseReads,
+// ResumeReads) goes to the connections. The live Host runs IO on a pool, in
+// any order, so the executor puts the socket IO of one connection back in
+// Seq order before it applies it (see connOrder). Each object store and
+// control plane call blocks its live worker under a timeout and is answered
+// exactly once with live.Answer.
 type Executor struct {
 	ctx    context.Context
 	config ExecConfig
 	objs   system.ObjectStore
 	cp     system.ControlPlane
-	conns  AsyncConnections
+	conns  system.Connections
 	class  system.ErrorClassifier
-	sink   system.InboxWriter
+
+	// onIO, if set, sees every IO (NodeConfig.OnIO), one call at a time:
+	// socket IO when it is applied, other IO when a worker takes it.
+	onIO   func(core.IO)
+	hookMu sync.Mutex
+
+	orderMu sync.Mutex
+	order   map[core.ConnID]*connOrder
 }
 
-var _ system.Executor = (*Executor)(nil)
+// connOrder is the reorder buffer of one connection: the socket IO the actor
+// recorded is numbered from 1 (core.IO), and next is the Seq to apply next.
+// IO that arrives early waits in held.
+type connOrder struct {
+	next uint64
+	held map[uint64]core.IO
+}
 
 // NewExecutor builds an Executor; cancelling ctx aborts calls in flight.
 func NewExecutor(ctx context.Context, config ExecConfig, objs system.ObjectStore, cp system.ControlPlane,
-	conns AsyncConnections, class system.ErrorClassifier, sink system.InboxWriter) *Executor {
-	return &Executor{ctx: ctx, config: config.withDefaults(), objs: objs, cp: cp, conns: conns, class: class, sink: sink}
+	conns system.Connections, class system.ErrorClassifier) *Executor {
+	return &Executor{ctx: ctx, config: config.withDefaults(), objs: objs, cp: cp, conns: conns, class: class,
+		order: map[core.ConnID]*connOrder{}}
 }
 
-func (e *Executor) deliver(c core.IOResult) {
-	select {
-	case <-e.sink.Closed():
-		return
-	default:
-	}
-	e.sink.Deliver(machine.Control, c)
-}
-
-// Execute never blocks: it queues a write or starts a goroutine.
-func (e *Executor) Execute(a core.IOCall) {
-	switch a := a.(type) {
+// Exec is the exec function of live.Spawn. It runs on a live worker, so it
+// may block: it does the IO and answers before it returns. An IO case it does
+// not know is an error, which ends the Host. So is a socket IO with Seq 0: the
+// actor numbers them from 1.
+//
+// Socket IO that arrives before its turn is held and Exec returns at once:
+// the IO that fills the gap applies it. Nothing waits for another IO.
+func (e *Executor) Exec(ctx *live.ExecCtx, io core.IO) error {
+	switch a := io.(type) {
 	case core.Send:
-		e.send(a)
+		return e.socket(a.Conn, a.Seq, io)
+	case core.CloseConn:
+		return e.socket(a.Conn, a.Seq, io)
+	case core.PauseReads:
+		return e.socket(a.Conn, a.Seq, io)
+	case core.ResumeReads:
+		return e.socket(a.Conn, a.Seq, io)
 	case core.Connect:
-		go e.deliver(core.ConnectDone{Req: a.Req, Err: core.ErrInvalid}) // brokers reach the CP through ControlPlaneCall
+		e.hook(io)
+		// Brokers reach the control plane through ControlPlaneCall, not raw dials.
+		live.Answer(ctx, a, core.ConnectDone{Err: core.ErrInvalid})
 	case core.ObjectCall:
-		go func() { e.deliver(core.ObjectDone{Result: e.object(a)}) }()
+		e.hook(io)
+		live.Answer(ctx, a, core.ObjectDone{Result: e.object(a)})
 	case core.ControlPlaneCall:
-		go func() { e.deliver(e.control(a)) }()
+		e.hook(io)
+		live.Answer(ctx, a, e.control(a))
 	default:
-		//nolint:forbidigo // impossible: machine emits only known IOCall types
-		panic(fmt.Sprintf("prod: unknown IOCall %T", a))
+		return fmt.Errorf("production: unknown IO %T", io)
 	}
+	return nil
 }
 
-func (e *Executor) send(a core.Send) {
-	done := func(err error) { e.deliver(core.SendDone{Req: a.Req, Conn: a.Conn, Err: sendErr(err)}) }
-	if err := e.conns.WriteAsync(a.Conn, a.Data, done); err != nil {
-		go done(err)
+// hook reports io to onIO.
+func (e *Executor) hook(io core.IO) {
+	if e.onIO == nil {
+		return
 	}
+	e.hookMu.Lock()
+	defer e.hookMu.Unlock()
+	e.onIO(io)
 }
 
-func sendErr(err error) core.ErrCode {
-	ne, isNet := errors.AsType[net.Error](err)
-	switch {
-	case err == nil:
-		return core.OK
-	case isNet && ne.Timeout():
-		return core.ErrTimeout
+// socket applies a socket IO of conn in Seq order, or holds it until its
+// turn. The applying runs under orderMu: Connections only enqueues a write or
+// sets a flag, it never blocks, so holding the lock is cheap and keeps the
+// order between workers.
+func (e *Executor) socket(conn core.ConnID, seq uint64, io core.IO) error {
+	if seq == 0 {
+		return fmt.Errorf("production: %T for connection %d has Seq 0", io, conn)
 	}
-	return core.ErrConnClosed
+	e.orderMu.Lock()
+	defer e.orderMu.Unlock()
+	o := e.order[conn]
+	if o == nil {
+		o = &connOrder{next: 1, held: map[uint64]core.IO{}}
+		e.order[conn] = o
+	}
+	if seq < o.next || o.held[seq] != nil {
+		return fmt.Errorf("production: %T for connection %d repeats Seq %d", io, conn, seq)
+	}
+	if seq != o.next {
+		o.held[seq] = io
+		return nil
+	}
+	closed := false
+	for {
+		closed = e.apply(io) || closed
+		o.next++
+		next, ok := o.held[o.next]
+		if !ok {
+			break
+		}
+		delete(o.held, o.next)
+		io = next
+	}
+	if closed && len(o.held) == 0 {
+		delete(e.order, conn)
+	}
+	return nil
+}
+
+// apply carries out one socket IO and says whether it was a CloseConn. A
+// write to a connection that is gone counts as applied: it is dropped, and
+// the reader reports the close.
+func (e *Executor) apply(io core.IO) bool {
+	e.hook(io)
+	switch a := io.(type) {
+	case core.Send:
+		_ = e.conns.Write(a.Conn, a.Data)
+	case core.CloseConn:
+		_ = e.conns.Close(a.Conn, a.Abort)
+		return true
+	case core.PauseReads:
+		e.conns.PauseReads(a.Conn)
+	case core.ResumeReads:
+		e.conns.ResumeReads(a.Conn)
+	case core.Connect, core.ObjectCall, core.ControlPlaneCall: // not socket IO
+	}
+	return false
 }
 
 func mutateOutcome(err error, fail func(error) (core.ErrCode, core.Outcome)) (core.ErrCode, core.Outcome) {
@@ -146,29 +214,29 @@ func (e *Executor) object(a core.ObjectCall) objectstore.Result {
 	switch c := a.Call.(type) {
 	case objectstore.Put:
 		code, outcome := mutateOutcome(e.objs.Put(ctx, c.Key, c.Data), fail)
-		return objectstore.PutDone{Req: c.Req, Key: c.Key, Err: code, Outcome: outcome}
+		return objectstore.PutDone{Key: c.Key, Err: code, Outcome: outcome}
 	case objectstore.Get:
 		data, err := e.objs.Get(ctx, c.Ref)
 		if code, bad := failCode(err, fail); bad {
-			return objectstore.GetDone{Req: c.Req, Err: code}
+			return objectstore.GetDone{Err: code}
 		}
-		return objectstore.GetDone{Req: c.Req, Data: data}
+		return objectstore.GetDone{Data: data}
 	case objectstore.Delete:
 		code, outcome := mutateOutcome(e.objs.Delete(ctx, c.Key), fail)
-		return objectstore.DeleteDone{Req: c.Req, Err: code, Outcome: outcome}
+		return objectstore.DeleteDone{Err: code, Outcome: outcome}
 	case objectstore.List:
 		keys, err := e.objs.List(ctx, c.Prefix)
 		code, bad := failCode(err, fail)
 		if !bad {
-			return objectstore.ListDone{Req: c.Req, Keys: keys}
+			return objectstore.ListDone{Keys: keys}
 		}
-		return objectstore.ListDone{Req: c.Req, Err: code}
+		return objectstore.ListDone{Err: code}
 	}
 	//nolint:forbidigo // impossible: Call is a sealed sum and the switch lists every case
 	panic("production: unknown object store call")
 }
 
-func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {
+func (e *Executor) control(a core.ControlPlaneCall) core.ControlPlaneDone {
 	limit := e.config.CPTimeout
 	if a.Timeout > 0 { // group joins and syncs wait for a rebalance (core.ControlPlaneCall)
 		limit = time.Duration(a.Timeout)
@@ -178,7 +246,7 @@ func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {
 	response, err := e.cp.Call(ctx, a.Op)
 	if err != nil {
 		c, o := e.class.Classify(a, err)
-		return core.ControlPlaneDone{Req: a.Req, Err: c, Outcome: o}
+		return core.ControlPlaneDone{Err: c, Outcome: o}
 	}
-	return core.ControlPlaneDone{Req: a.Req, Resp: response, Outcome: core.Applied}
+	return core.ControlPlaneDone{Resp: response, Outcome: core.Applied}
 }

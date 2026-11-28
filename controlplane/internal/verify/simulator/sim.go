@@ -4,11 +4,9 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/check"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/controlplane/internal/verify/check"
+	"github.com/manifesterio/mds/dst/actor"
+	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
 // Config is one run.
@@ -26,7 +24,7 @@ type Config struct {
 	// groups are the only change to the trace.
 	noGroups bool
 
-	// verifyHashes makes the kernel check every step that a cached state hash
+	// verifyHashes makes the System check every step that a cached state hash
 	// is still right (a test turns it on).
 	verifyHashes bool
 }
@@ -44,11 +42,11 @@ type Stats struct {
 	GroupCalls, GroupOK                            int // tries of consumer calls, and the ones answered OK
 }
 
-// Result is the outcome of one run: the result of the kernel (hash, steps,
+// Result is the outcome of one run: the result of the System (hash, steps,
 // failures, coverage, buggify sites, the last step lines of a failed run) and
 // the numbers of the product.
 type Result struct {
-	kernel.Result
+	dstsim.Result
 	Scenario string
 	EndMs    int64
 	Stats    Stats
@@ -65,14 +63,12 @@ func nodeWriter(idx int) string { return fmt.Sprintf("cp-%d", idx) }
 type sim struct {
 	cfg       Config
 	scenario  Scenario
-	w         *kernel.World // the nodes, the storage service, the queue and the hash
-	env       machine.Env   // the Env of the world: the random stream, buggify and assertions
-	rand      *rng.Rand
-	lanes     *kernel.Lanes[groupLane]
+	w         *dstsim.System // the actors, the queue and the hash
+	env       actor.Env      // the Env of the System: the random stream, buggify and assertions
+	rand      *actor.Rand
 	store     *storage
-	storeAddr kernel.ServiceAddr[runtime.IOCall, runtime.EventData]
 	nodes     []*simNode
-	byName    map[machine.NodeID]*simNode
+	byName    map[string]*simNode // by actor name of the replica (cp-<idx>)
 	clients   *clientPool
 	consumers *consumerPool // nil in a run with no consumer groups
 	oracle    *oracle
@@ -113,25 +109,24 @@ func newSim(cfg Config) (*sim, error) {
 	s := &sim{
 		cfg: cfg, scenario: sc, faults: sc.Faults, bug: cfg.Bug,
 		applied: make([]runtime.LogPosition, cfg.Nodes), fresh: make([]bool, cfg.Nodes),
-		byName: map[machine.NodeID]*simNode{},
+		byName: map[string]*simNode{},
 	}
-	s.w = kernel.New(kernel.Config{
-		Seed: cfg.Seed, WallStart: machine.RealTime(wallStart), MaxSteps: maxSteps + 1,
+	// Start before the nodes are spawned: Start boots actors it finds, and
+	// here every node boots later at a random time (run.go boot).
+	s.w = dstsim.NewSystem(dstsim.Config{
+		Seed: cfg.Seed, WallStart: actor.Wall(wallStart), MaxSteps: maxSteps + 1,
 		Log: cfg.Log, Tail: traceRing, HaltOnFirst: cfg.HaltOnFirst, VerifyHashes: cfg.verifyHashes,
 	})
-	s.env, s.rand = s.w.Env(), s.w.Rand()
-	// Start before the nodes are spawned: Start boots the nodes it finds, and
-	// here every node boots at a random time (run.go boot).
 	s.w.Start()
-	s.lanes = kernel.NewLanes[groupLane](s.w)
+	s.env = s.w.Env()
+	s.rand = s.env.Rand
 	s.store = newStorage(s)
-	s.storeAddr = kernel.AddService[runtime.IOCall, runtime.EventData](s.w, s.store)
 	s.oracle = newOracle(s)
 	s.clients = newClientPool(s, 3)
 	for i := range cfg.Nodes {
-		n := newNode(s, i, replicaFactory(i, sc.Faults, cfg.Bug))
+		n := newNode(s, i, replicaConfig(i, sc.Faults, cfg.Bug))
 		s.nodes = append(s.nodes, n)
-		s.byName[n.id] = n
+		s.byName[n.name()] = n
 	}
 	if sc.Consumers > 0 && !cfg.noGroups {
 		for _, n := range s.nodes {
@@ -143,35 +138,21 @@ func newSim(cfg Config) (*sim, error) {
 }
 
 // wallStart is the virtual UTC time at the start of every run (2026-01-01).
-const wallStart = int64(1767225600) * int64(machine.Second)
+const wallStart = int64(1767225600) * int64(actor.Second)
 
-// Time moves only when the kernel takes an event from the queue.
+// Time moves only when the System takes an event from the queue.
 
-func (s *sim) mono() machine.NodeTime { return machine.NodeTime(s.w.Now()) }
-func (s *sim) now() int64             { return int64(s.w.Now()) }
-func (s *sim) steps() int             { return int(s.w.Steps()) }
+func (s *sim) mono() actor.Mono { return actor.Mono(s.w.Now()) }
+func (s *sim) now() int64       { return int64(s.w.Now()) }
+func (s *sim) steps() int       { return int(s.w.Steps()) }
 
 // after runs run as a host task d from now. A negative d counts as zero.
-func (s *sim) after(d machine.Duration, run func()) { s.w.After(d, run) }
+func (s *sim) after(d actor.Duration, run func()) { s.w.After(d, run) }
 
-// violation records a broken property. The run goes on.
-func (s *sim) violation(property assert.Always, format string, args ...any) {
-	s.env.Always(false, property, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
-}
-
-// check returns the checker of dst/check. It records its own verdicts (a log with
-// no hole, log entries that decode) as "sim: ..." properties.
-func (s *sim) check() check.Checker { return check.Checker{Log: s.w.Assert(), Prefix: "sim: "} }
-
-// verdict records a check. It returns ok, so the caller can skip work after a failure.
-// Callers on a hot path test the condition first and call violation themselves.
-func (s *sim) verdict(ok bool, property assert.Always, format string, args ...any) bool {
-	if ok {
-		s.env.Always(true, property)
-		return true
-	}
-	s.env.Always(false, property, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
-	return false
+// check returns the checker of controlplane/internal/verify/check. Hole and Decode are the catalog
+// handles for the built-in log checks.
+func (s *sim) check() check.Checker {
+	return check.Checker{Rec: s.env, Hole: logHasNoHole, Decode: logEntriesDecode}
 }
 
 func (s *sim) noteBoot(n *simNode) {
@@ -182,7 +163,7 @@ func (s *sim) noteBoot(n *simNode) {
 
 // checkNode checks the epoch and the state of one node. An epoch has one
 // holder. After the same number of applied slots, all nodes have the same state.
-// The node calls it after each Step.
+// The node calls it after each Receive of its replica.
 func (s *sim) checkNode(n *simNode) {
 	r := n.m
 	if r == nil {
@@ -190,7 +171,7 @@ func (s *sim) checkNode(n *simNode) {
 	}
 	if e := r.Epoch(); e > 0 {
 		if first, ok := s.holders.Note(e, n.idx); !ok {
-			s.violation(oneWriterPerEpoch, "epoch %d is held by cp-%d and by cp-%d", e, first, n.idx)
+			check.Violation(s.env, oneWriterPerEpoch, "epoch %d is held by cp-%d and by cp-%d", e, first, n.idx)
 		}
 	}
 	applied := r.Applied()
@@ -200,15 +181,15 @@ func (s *sim) checkNode(n *simNode) {
 	s.applied[n.idx], s.fresh[n.idx] = applied, false
 	h := r.Metadata().StateHash()
 	if prevHash, prevNode, ok := s.prefixes.Note(check.Slot(applied), h, n.idx); !ok {
-		s.violation(replicasAgreeEverySlot, "after %d slots, cp-%d has state %x but cp-%d had %x", applied, n.idx, h, prevNode, prevHash)
+		check.Violation(s.env, replicasAgreeEverySlot, "after %d slots, cp-%d has state %x but cp-%d had %x", applied, n.idx, h, prevNode, prevHash)
 	}
 }
 
-// logLines formats step lines of the kernel for a person.
-func logLines(in []kernel.LogEntry) []string {
+// logLines formats step lines of the System for a person.
+func logLines(in []dstsim.LogEntry) []string {
 	out := make([]string, 0, len(in))
 	for _, l := range in {
-		out = append(out, fmt.Sprintf("#%d t=%dms %s", l.Step, int64(l.At)/int64(machine.Millisecond), l.Text))
+		out = append(out, fmt.Sprintf("#%d t=%dms %s", l.Step, int64(l.At)/int64(actor.Millisecond), l.Text))
 	}
 	return out
 }

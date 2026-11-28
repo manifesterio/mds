@@ -14,7 +14,7 @@ import (
 // offsetCommit answers OffsetCommit. Version 0 has no generation or member, so
 // it is a manual commit (generation -1, no member), as is generation -1 at
 // any version.
-func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Action {
+func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrOffsetCommitResponse()
 	s.response = response
 	call := contract.OffsetCommit{Group: r.Group, Generation: -1}
@@ -35,10 +35,10 @@ func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Actio
 	parts := commitParts(response)
 	if r.Group == "" {
 		setCommitCodes(parts, errInvalidGroupID)
-		return nil
+		return
 	}
 	if len(call.Offsets) == 0 {
-		return nil
+		return
 	}
 	fill := func(e core.ControlPlaneDone) {
 		if e.Err != core.OK {
@@ -54,7 +54,7 @@ func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Actio
 			p.ErrorCode = int16(groupErrCode(code))
 		}
 	}
-	return b.groupCall(s, call, 0, fill)
+	b.groupCall(s, call, 0, fill, outbox)
 }
 
 // leaderEpochOf is the leader epoch of a commit. Versions before 6 have none.
@@ -118,7 +118,7 @@ type fetchRow struct {
 
 // offsetFetch answers OffsetFetch. Version 8 asks for several groups, one
 // control plane call each. Version 0 to 7 ask for one group.
-func (b *Broker) offsetFetch(s *slot, r *kmsg.OffsetFetchRequest) []core.Action {
+func (b *Broker) offsetFetch(s *slot, r *kmsg.OffsetFetchRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrOffsetFetchResponse()
 	s.response = response
 	var asks []fetchAsk
@@ -146,11 +146,9 @@ func (b *Broker) offsetFetch(s *slot, r *kmsg.OffsetFetchRequest) []core.Action 
 			setTopicRows(response, rows, code)
 		}
 	}
-	var acts []core.Action
 	for i, a := range asks {
-		acts = append(acts, b.fetchGroup(s, set, i, a)...)
+		b.fetchGroup(s, set, i, a, outbox)
 	}
-	return acts
 }
 
 // rowSetter writes the rows and the code of group idx into the response.
@@ -159,14 +157,14 @@ type rowSetter func(idx int, rows []fetchRow, code kafkaErrorCode)
 
 // fetchGroup answers one group of an OffsetFetch. Its answer goes to group idx
 // (version 8) or to the whole response (earlier versions).
-func (b *Broker) fetchGroup(s *slot, set rowSetter, idx int, a fetchAsk) []core.Action {
+func (b *Broker) fetchGroup(s *slot, set rowSetter, idx int, a fetchAsk, outbox *brokerOutbox) {
 	switch {
 	case a.name == "":
 		set(idx, errRows(a, errInvalidGroupID), errInvalidGroupID)
-		return nil
+		return
 	case !a.all && len(a.want) == 0: // nothing asked
 		set(idx, nil, errNone)
-		return nil
+		return
 	}
 	fill := func(e core.ControlPlaneDone) {
 		if e.Err != core.OK {
@@ -176,7 +174,7 @@ func (b *Broker) fetchGroup(s *slot, set rowSetter, idx int, a fetchAsk) []core.
 		}
 		set(idx, fetchRows(a, core.ResponseAs[contract.OffsetFetchResp](e).Offsets), errNone)
 	}
-	return b.groupCall(s, contract.OffsetFetch{Group: a.name, Partitions: a.want}, 0, fill)
+	b.groupCall(s, contract.OffsetFetch{Group: a.name, Partitions: a.want}, 0, fill, outbox)
 }
 
 // errRows lists the partitions of a failed answer with the code. An "all"

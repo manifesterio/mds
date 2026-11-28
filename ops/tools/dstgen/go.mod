@@ -1,0 +1,13 @@
+module github.com/manifesterio/mds/ops/tools/dstgen
+
+go 1.26.0
+
+require golang.org/x/tools v0.52.0
+
+require (
+	github.com/google/go-cmp v0.7.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+)
+
+replace github.com/manifesterio/mds/dst => ../../../dst

@@ -60,6 +60,95 @@ linters:
               desc: "dst must not import controlplane (order: dst <- shared <- controlplane <- broker)"
             - pkg: "github.com/manifesterio/mds/broker"
               desc: "dst must not import broker (order: dst <- shared <- controlplane <- broker)"
+        actor:
+          list-mode: lax
+          files:
+            - "**/dst/actor/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/sim"
+              desc: "actor is production-safe: it must not import sim (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/live"
+              desc: "actor is production-safe: it must not import live (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "actor is production-safe: it must not import campaign (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "actor is production-safe: it must not import spectest (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "actor is production-safe: it must not import examples (layer rule, plan section 6)"
+        trace:
+          list-mode: lax
+          files:
+            - "**/dst/trace/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/sim"
+              desc: "trace is production-safe: it must not import sim (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/live"
+              desc: "trace is production-safe: it must not import live (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "trace is production-safe: it must not import campaign (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "trace is production-safe: it must not import spectest (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "trace is production-safe: it must not import examples (layer rule, plan section 6)"
+        sim:
+          list-mode: lax
+          files:
+            - "**/dst/sim/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/live"
+              desc: "sim is the simulator: it must not import live (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "sim is the simulator: it must not import campaign (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "sim is the simulator: it must not import spectest (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "sim is the simulator: it must not import examples (layer rule, plan section 6)"
+        kit:
+          list-mode: lax
+          files:
+            - "**/dst/sim/kit/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/live"
+              desc: "kit is simulation policy over sim: it must not import live (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "kit is simulation policy over sim: it must not import campaign (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "kit is simulation policy over sim: it must not import spectest (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "kit is simulation policy over sim: it must not import examples (layer rule, plan section 6)"
+        live:
+          list-mode: lax
+          files:
+            - "**/dst/live/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/sim"
+              desc: "live is the production loop: it must not import sim (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/campaign"
+              desc: "live is the production loop: it must not import campaign (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "live is the production loop: it must not import spectest (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "live is the production loop: it must not import examples (layer rule, plan section 6)"
+        campaign:
+          list-mode: lax
+          files:
+            - "**/dst/campaign/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/live"
+              desc: "campaign runs scenarios over sim: it must not import live (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/spectest"
+              desc: "campaign runs scenarios over sim: it must not import spectest (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "campaign runs scenarios over sim: it must not import examples (layer rule, plan section 6)"
+        spectest:
+          list-mode: lax
+          files:
+            - "**/dst/spectest/**"
+          deny:
+            - pkg: "github.com/manifesterio/mds/dst/live"
+              desc: "spectest is test-side: it must not import live (layer rule, plan section 6)"
+            - pkg: "github.com/manifesterio/mds/dst/examples"
+              desc: "spectest is test-side: it must not import examples (layer rule, plan section 6)"
     gosec:
       excludes:
         - G115

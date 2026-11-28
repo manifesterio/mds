@@ -3,16 +3,13 @@ package production
 import (
 	"log/slog"
 
-	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/shared/objectstore"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // SegmentLog writes one structured log line per segment lifecycle event, built
-// from the broker's facts so the broker core stays free of logging. The
-// segment_sealed fact carries no segment key. The executor sees the key on the
-// first ObjectPut for it, right after the fact and in the same loop goroutine,
-// so IO pairs them and the sealed line can name the segment.
+// from the broker's facts so the broker core stays free of logging. Every
+// segment fact names its segment by object key (field "segment"), so lines
+// pair by key and not by order.
 //
 // Events (field "event"): segment_sealed, segment_put_done, segment_committed,
 // segment_failed, backpressure_on, backpressure_off. Every segment line has
@@ -21,11 +18,10 @@ import (
 // second) this is a few hundred lines a second at most; raise -log-level to
 // warn to keep only failures.
 //
-// Observe and IO must be called from one goroutine (the broker loop).
+// Observe must be called from one goroutine (the Facts hook).
 type SegmentLog struct {
-	log     *slog.Logger
-	pending []*segmentInfo
-	segs    map[string]*segmentInfo
+	log  *slog.Logger
+	segs map[string]*segmentInfo
 }
 
 type segmentInfo struct {
@@ -42,51 +38,33 @@ func NewSegmentLog(log *slog.Logger) *SegmentLog {
 
 func ms(nanoseconds int64) float64 { return float64(nanoseconds/10_000) / 100 } // 10 us resolution
 
-func fi(f machine.Fact, k string) int64 {
+func fi(f actor.Fact, k string) int64 {
 	switch x := f.Field(k).(type) {
-	case machine.Int64Value:
+	case actor.Int64Value:
 		return int64(x)
-	case machine.Uint64Value:
+	case actor.Uint64Value:
 		return int64(x)
-	case machine.StringValue, machine.Bool, machine.Bytes:
+	case actor.StringValue, actor.Bool, actor.Bytes:
 		return 0 // not a number
 	}
 	return 0
 }
 
-func fs(f machine.Fact, k string) string {
-	s, _ := f.Field(k).(machine.StringValue)
+func fs(f actor.Fact, k string) string {
+	s, _ := f.Field(k).(actor.StringValue)
 	return string(s)
 }
 
-// IO notes an action the broker issued (wire to NodeConfig.OnIO).
-func (s *SegmentLog) IO(a core.IOCall) {
-	call, ok := a.(core.ObjectCall)
-	if !ok || len(s.pending) == 0 {
-		return
-	}
-	p, ok := call.Call.(objectstore.Put)
-	if !ok {
-		return
-	}
-	if _, seen := s.segs[p.Key]; seen { // a retry of the same PUT
-		return
-	}
-	si := s.pending[0]
-	s.pending = s.pending[1:]
-	s.segs[p.Key] = si
-	s.log.Info("segment sealed", "event", "segment_sealed", "segment", p.Key, "reason", si.reason, "bytes", si.bytes,
-		"batches", si.batches, "partitions", si.parts, "open_age_ms", ms(si.age))
-}
-
 // Observe consumes one broker fact.
-func (s *SegmentLog) Observe(f machine.Fact) {
+func (s *SegmentLog) Observe(f actor.Fact) {
 	switch f.Name {
 	case "segment_sealed":
-		if len(s.pending) < 4096 {
-			s.pending = append(s.pending, &segmentInfo{reason: fs(f, "reason"), bytes: fi(f, "bytes"),
-				batches: fi(f, "batches"), parts: fi(f, "parts"), age: fi(f, "age")})
-		}
+		key := fs(f, "segment")
+		si := &segmentInfo{reason: fs(f, "reason"), bytes: fi(f, "bytes"),
+			batches: fi(f, "batches"), parts: fi(f, "parts"), age: fi(f, "age")}
+		s.segs[key] = si
+		s.log.Info("segment sealed", "event", "segment_sealed", "segment", key, "reason", si.reason, "bytes", si.bytes,
+			"batches", si.batches, "partitions", si.parts, "open_age_ms", ms(si.age))
 	case "segment_put_done":
 		key := fs(f, "segment")
 		si := s.segs[key]

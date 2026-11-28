@@ -6,14 +6,13 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
-	"github.com/manifesterio/mds/dst/assert"
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // timerExtraTime is how late a flush may fire past its window: a node busy with a
 // paused Step (CostParams.Pause, up to 100 ms) runs its timer late.
-const timerExtraTime = 150 * machine.Millisecond
+const timerExtraTime = 150 * actor.Millisecond
 
 // segmentCaps checks every sealed segment (the broker's segment_sealed fact)
 // against this seed's flush rule. At most MaxSegmentBatches batches and
@@ -29,7 +28,7 @@ type segmentCaps struct {
 	config broker.Config
 	tps    []core.TopicPartition
 	items  int // the store's commit item limit; 0 = unbounded (the log store)
-	seal   kernel.Cursor
+	seal   sim.Cursor
 	cp     truth.ControlPlane // what the control plane really committed
 }
 
@@ -45,7 +44,7 @@ func (*segmentCaps) Name() string { return "SegmentCaps" }
 
 // AtEnd checks every committed segment: at most MaxSegmentBatches batches and
 // MaxSegmentPartitions distinct partitions, so at most 1 + partitions items.
-func (i *segmentCaps) AtEnd(v kernel.View) {
+func (i *segmentCaps) AtEnd(v sim.View) {
 	type use struct {
 		batches int
 		parts   []int
@@ -69,31 +68,31 @@ func (i *segmentCaps) AtEnd(v kernel.View) {
 	a := v.Assert()
 	for _, k := range keys {
 		u := segments[k]
-		d := assert.Pair{Key: "segment", Value: k}
+		d := actor.Pair{Key: "segment", Value: k}
 		a.Always(u.batches <= i.config.MaxSegmentBatches, committedSegmentWithinBatchCap,
-			d, assert.Pair{Key: "batches", Value: u.batches}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentBatches})
+			d, actor.Pair{Key: "batches", Value: u.batches}, actor.Pair{Key: "cap", Value: i.config.MaxSegmentBatches})
 		a.Always(len(u.parts) <= i.config.MaxSegmentPartitions, committedSegmentWithinPartitionCap,
-			d, assert.Pair{Key: "parts", Value: len(u.parts)}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentPartitions})
+			d, actor.Pair{Key: "parts", Value: len(u.parts)}, actor.Pair{Key: "cap", Value: i.config.MaxSegmentPartitions})
 		a.Always(i.fits(int64(len(u.parts))), committedSegmentCommitCostFits,
-			d, assert.Pair{Key: "parts", Value: len(u.parts)})
+			d, actor.Pair{Key: "parts", Value: len(u.parts)})
 	}
 }
 
-func (i *segmentCaps) Observe(v kernel.View) {
+func (i *segmentCaps) Observe(v sim.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
-		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(machine.Int64Value); return int64(x) }
+		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(actor.Int64Value); return int64(x) }
 		a := v.Assert()
-		why, _ := tf.Fact.Field("reason").(machine.StringValue)
-		d := assert.Pair{Key: "reason", Value: string(why)}
+		why, _ := tf.Fact.Field("reason").(actor.StringValue)
+		d := actor.Pair{Key: "reason", Value: string(why)}
 		a.Always(n("batches") <= int64(i.config.MaxSegmentBatches), sealedSegmentWithinBatchCap,
-			d, assert.Pair{Key: "batches", Value: n("batches")}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentBatches})
+			d, actor.Pair{Key: "batches", Value: n("batches")}, actor.Pair{Key: "cap", Value: i.config.MaxSegmentBatches})
 		a.Always(n("parts") <= int64(i.config.MaxSegmentPartitions), sealedSegmentWithinPartitionCap,
-			d, assert.Pair{Key: "parts", Value: n("parts")}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentPartitions})
+			d, actor.Pair{Key: "parts", Value: n("parts")}, actor.Pair{Key: "cap", Value: i.config.MaxSegmentPartitions})
 		a.Always(i.fits(n("parts")), sealedSegmentCommitCostFits,
-			d, assert.Pair{Key: "parts", Value: n("parts")})
+			d, actor.Pair{Key: "parts", Value: n("parts")})
 		a.Always(n("bytes")-n("last") < int64(i.config.MaxSegmentBytes), sealedSegmentOvershootsBytesByLastBatch,
-			d, assert.Pair{Key: "bytes", Value: n("bytes")}, assert.Pair{Key: "last", Value: n("last")}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentBytes})
+			d, actor.Pair{Key: "bytes", Value: n("bytes")}, actor.Pair{Key: "last", Value: n("last")}, actor.Pair{Key: "cap", Value: i.config.MaxSegmentBytes})
 		a.Always(n("age") <= int64(i.config.BatchWindow+timerExtraTime), segmentSealedWithinBatchWindow,
-			d, assert.Pair{Key: "age", Value: n("age")}, assert.Pair{Key: "window", Value: int64(i.config.BatchWindow)})
+			d, actor.Pair{Key: "age", Value: n("age")}, actor.Pair{Key: "window", Value: int64(i.config.BatchWindow)})
 	}
 }

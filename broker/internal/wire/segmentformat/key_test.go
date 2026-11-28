@@ -3,12 +3,10 @@ package segmentformat
 import (
 	"strings"
 	"testing"
-
-	"github.com/manifesterio/mds/dst/machine"
 )
 
 func TestKeyRoundTrip(t *testing.T) {
-	ids := []machine.ID{{}, {0xAB, 0xCD, 15: 9}, {0xFF, 1: 0xFF, 14: 0xFF, 15: 0xFF}}
+	ids := [][16]byte{{}, {0xAB, 0xCD, 15: 9}, {0xFF, 1: 0xFF, 14: 0xFF, 15: 0xFF}}
 	seen := map[string]bool{}
 	for _, id := range ids {
 		k := SegmentKey(id)
@@ -23,14 +21,14 @@ func TestKeyRoundTrip(t *testing.T) {
 		}
 		seen[k] = true
 	}
-	if SegmentKey(machine.ID{0xAB}) != "seg/ab000000000000000000000000000000" {
-		t.Fatalf("frozen spelling: %q", SegmentKey(machine.ID{0xAB}))
+	if SegmentKey([16]byte{0xAB}) != "seg/ab000000000000000000000000000000" {
+		t.Fatalf("frozen spelling: %q", SegmentKey([16]byte{0xAB}))
 	}
 }
 
 func TestParseRejects(t *testing.T) {
 	zero := strings.Repeat("0", 32)
-	good := SegmentKey(machine.ID{})
+	good := SegmentKey([16]byte{})
 	bad := []string{
 		"", "seg/", "seg", "x" + good, good + "/", good + "0", "seg/" + zero[:31], "seg/" + zero + "0",
 		"seg/" + strings.Repeat("A", 32), // upper-case hex is not canonical
@@ -52,7 +50,7 @@ func TestParseRejects(t *testing.T) {
 }
 
 func FuzzParseSegmentKey(f *testing.F) {
-	f.Add(SegmentKey(machine.ID{2}))
+	f.Add(SegmentKey([16]byte{2}))
 	f.Add("seg/n/" + strings.Repeat("0", 32) + "/" + strings.Repeat("0", 32))
 	f.Fuzz(func(t *testing.T, s string) {
 		id, ok := ParseSegmentKey(s)

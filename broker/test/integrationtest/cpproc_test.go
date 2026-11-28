@@ -131,7 +131,7 @@ func (n *cpProc) waitReady(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		st, err := cp.GetStatus(ctx)
 		cancel()
-		if err == nil && st.GetRole() != "" && st.GetRole() != "down" {
+		if err == nil && st.GetRole() == "active" { // a standby answers writes with ErrUnavailable
 			return
 		}
 	}

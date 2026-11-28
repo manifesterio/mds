@@ -15,9 +15,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/live"
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/shared/clock"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -39,14 +38,17 @@ type NodeConfig struct {
 	Lease         LeaseClient
 	LeaseInterval time.Duration // heartbeat interval (1s)
 	FlushGrace    time.Duration // time writers get to flush after a graceful exit (5s)
-	DataInbox     int           // data queue capacity (1024)
 	Net           NetConfig
 	Exec          ExecConfig
-	Facts         func(machine.Fact)
-	// OnIO, if set, sees every I/O action the broker issues, on the broker's
-	// loop goroutine, before it executes (used to pair segment keys with
-	// segment_sealed facts, see SegmentLog).
-	OnIO func(core.IOCall)
+	// Facts, if set, gets every fact the broker records, on the broker
+	// actor's goroutine (tracing and metrics).
+	Facts func(actor.Fact)
+	// OnIO, if set, sees every IO the broker issues, one call at a time, on
+	// a live worker. Socket IO is reported when the executor applies it, so
+	// in Seq order per connection; other IO is reported when a worker takes
+	// it, before it executes, in no fixed order (used to pair segment keys
+	// with segment_sealed facts, see SegmentLog).
+	OnIO func(core.IO)
 	Log  *slog.Logger
 }
 
@@ -62,7 +64,7 @@ type Node struct {
 }
 
 // Start wires the broker to its adapters and runs it until Stop, Kill or a
-// failure. The returned Node's Wait gives live.Run's error.
+// failure. The returned Node's Wait gives the Host's error.
 func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 	if config.Listener == nil || config.Objects == nil || config.ControlPlane == nil {
 		return nil, errors.New("prod.Start: Listener, Objects and ControlPlane are required")
@@ -72,57 +74,73 @@ func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	env, err := NewEnv(config.Log)
-	if err != nil {
-		return nil, err
-	}
+	self := core.BrokerAddr{NodeID: bc.BrokerID, Host: bc.Host, Port: bc.Port}
+	return start(ctx, config, broker.Props(bc), self), nil
+}
+
+// start runs the actor of props on a live Host. The exec function is the
+// Executor over the real connections, object store and control plane; the
+// connections and the heartbeat tell the actor what happens outside. self is
+// the address the heartbeat renews. config has its defaults.
+func start(ctx context.Context, config NodeConfig, props actor.Props[core.EventData, core.IO], self core.BrokerAddr) *Node {
 	rctx, kill := context.WithCancel(ctx)
-	in := live.NewInbox[core.EventData](config.DataInbox)
-	if config.Lease != nil {
-		self := core.BrokerAddr{NodeID: bc.BrokerID, Host: bc.Host, Port: bc.Port}
-		go leaseLoop(rctx, in, config.Lease, self, config.LeaseInterval, config.Log)
-	}
-	nt := NewNet(config.Listener, in, config.Net)
 	stop := make(chan struct{})
-	n := &Node{addr: config.Listener.Addr(), net: nt, stop: stop, stopOnce: sync.OnceFunc(func() { close(stop) }),
+	n := &Node{addr: config.Listener.Addr(), stop: stop, stopOnce: sync.OnceFunc(func() { close(stop) }),
 		done: make(chan struct{}), kill: kill}
-	exec := NewExecutor(rctx, config.Exec, config.Objects, config.ControlPlane, nt,
-		Classifier{Objects: config.ObjClassify, CP: config.CPClassify}, in)
-	var ex system.Executor = exec
-	if config.OnIO != nil {
-		ex = hookedExecutor{exec, config.OnIO}
+	host := live.NewHost(live.HostConfig{
+		Clock:     live.RealClock(),
+		Env:       func(self actor.Incarnation) actor.Env { return NewEnv(self, config.Log) },
+		Shutdown:  stop,
+		StopGrace: actor.Duration(config.StopGrace),
+		Facts:     factsHook(config.Facts),
+		// Each in-flight object store or control plane call holds a worker.
+		ExecWorkers: 100,
+	})
+	// The executor needs the connections, and the connections need the
+	// broker's handle, which Spawn gives. exec is set before the Host runs.
+	var exec func(*live.ExecCtx, core.IO) error
+	ref := live.Spawn(host, props, func(c *live.ExecCtx, io core.IO) error { return exec(c, io) })
+	in := hostInbox{host: host, to: ref}
+	n.net = NewNet(config.Listener, in, config.Net)
+	ex := NewExecutor(rctx, config.Exec, config.Objects, config.ControlPlane, n.net,
+		Classifier{Objects: config.ObjClassify, CP: config.CPClassify})
+	exec = ex.Exec
+	ex.onIO = config.OnIO
+	if config.Lease != nil {
+		go leaseLoop(rctx, in, config.Lease, self, config.LeaseInterval, config.Log)
 	}
 	if config.Shutdown != nil {
 		go n.stopOn(config.Shutdown)
 	}
-	self := machine.NodeInstance{Node: machine.NodeID(config.NodeID), Inc: machine.BootNumber(env.NewID())}
-	cfg := live.Config[core.EventData, core.Action]{
-		Self:      self,
-		New:       core.ContractFactory(broker.New(bc)),
-		Env:       env,
-		Boot:      func(self machine.NodeInstance) core.EventData { return core.NodeStarted{Self: self} },
-		StopMsg:   func(deadline machine.NodeTime) core.EventData { return core.StopRequest{Deadline: deadline} },
-		StopGrace: machine.Duration(config.StopGrace),
-		Clock:     clock.NewReal(),
-		Inbox:     in,
-		Class:     core.InboxKindOf,
-		Route:     system.Route(system.Host{Exec: ex, Connections: nt, Facts: config.Facts}),
-		Shutdown:  n.stop,
-	}
-	go n.run(rctx, cfg, config.FlushGrace)
-	return n, nil
+	go n.run(rctx, host, config.FlushGrace)
+	return n
 }
 
-// withDefaults fills the zero grace periods and inbox size.
+// factsHook adapts NodeConfig.Facts to live.HostConfig.Facts.
+func factsHook(facts func(actor.Fact)) func(actor.Incarnation, actor.Fact) {
+	if facts == nil {
+		return nil
+	}
+	return func(_ actor.Incarnation, f actor.Fact) { facts(f) }
+}
+
+// hostInbox tells the broker actor on its Host.
+type hostInbox struct {
+	host *live.Host
+	to   actor.EntityRef[core.EventData]
+}
+
+var _ system.Inbox = hostInbox{}
+
+func (i hostInbox) Tell(msg core.EventData) error { return live.Tell(i.host, i.to, msg) }
+
+// withDefaults fills the zero grace periods and the heartbeat interval.
 func withDefaults(config NodeConfig) NodeConfig {
 	if config.StopGrace <= 0 {
 		config.StopGrace = 10 * time.Second
 	}
 	if config.FlushGrace <= 0 {
 		config.FlushGrace = 5 * time.Second
-	}
-	if config.DataInbox <= 0 {
-		config.DataInbox = 1024
 	}
 	if config.LeaseInterval <= 0 {
 		config.LeaseInterval = time.Second
@@ -168,9 +186,9 @@ func (n *Node) stopOn(shutdown <-chan struct{}) {
 }
 
 // run drives the broker to its end, then closes the network and marks done.
-func (n *Node) run(ctx context.Context, cfg live.Config[core.EventData, core.Action], flush time.Duration) {
+func (n *Node) run(ctx context.Context, host *live.Host, flush time.Duration) {
 	defer close(n.done)
-	err := live.Run(ctx, cfg)
+	err := host.Run(ctx)
 	grace := time.Duration(0)
 	if err == nil {
 		grace = flush // graceful exit: let the last answers reach the clients
@@ -192,9 +210,10 @@ func (n *Node) Kill() { n.kill() }
 // Done is closed when the broker has fully stopped.
 func (n *Node) Done() <-chan struct{} { return n.done }
 
-// Wait blocks until the broker has stopped and returns live.Run's result: nil
-// after a graceful exit, live.ErrStopped after Kill, live.ErrStoppedForRestart or
-// live.ErrKilled otherwise.
+// Wait blocks until the broker has stopped and returns the Host's result: nil
+// after a graceful exit, live.ErrStopped after Kill, live.ErrTripped when the
+// broker asked for a restart, live.ErrKilled when a graceful stop missed
+// StopGrace, or the error of a crash.
 func (n *Node) Wait() error {
 	<-n.done
 	return n.err
@@ -202,17 +221,6 @@ func (n *Node) Wait() error {
 
 // String names the node for logs.
 func (n *Node) String() string { return fmt.Sprintf("broker(%s)", n.addr) }
-
-// hookedExecutor shows each action to a hook, then executes it.
-type hookedExecutor struct {
-	system.Executor
-	tap func(core.IOCall)
-}
-
-func (t hookedExecutor) Execute(a core.IOCall) {
-	t.tap(a)
-	t.Executor.Execute(a)
-}
 
 // OpenConns is the number of open client connections.
 func (n *Node) OpenConns() int { return n.net.OpenConns() }

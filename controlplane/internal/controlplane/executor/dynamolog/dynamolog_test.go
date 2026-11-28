@@ -17,7 +17,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/dynamolog"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/logtest"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/shared/clock"
+	"github.com/manifesterio/mds/dst/live"
 	"github.com/manifesterio/mds/shared/testinfra"
 )
 
@@ -283,7 +283,7 @@ func TestAppendFloorReadOnlyAfterPut(t *testing.T) {
 func TestDynLog(t *testing.T) {
 	ctx := t.Context()
 	db, table := newDB(t)
-	l := dynamolog.New(db, table, dynamolog.Options{TTL: time.Hour, Clock: clock.NewFake(time.Unix(1_700_000_000, 0))})
+	l := dynamolog.New(db, table, dynamolog.Options{TTL: time.Hour, Clock: live.NewFakeClock(time.Unix(1_700_000_000, 0))})
 	if _, taken, err := l.Append(ctx, 0, []byte("x")); err != nil || taken {
 		t.Fatalf("append: taken=%v err=%v", taken, err)
 	}

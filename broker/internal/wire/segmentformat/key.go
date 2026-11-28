@@ -3,8 +3,6 @@ package segmentformat
 import (
 	"encoding/hex"
 	"strings"
-
-	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Segment keys are "seg/<id hex>", one flat name. The ID is a random 128-bit
@@ -16,24 +14,24 @@ import (
 const keyPrefix = "seg/"
 
 // SegmentKey names the object of one segment upload.
-func SegmentKey(id machine.ID) string {
+func SegmentKey(id [16]byte) string {
 	return keyPrefix + hex.EncodeToString(id[:])
 }
 
 // ParseSegmentKey inverts SegmentKey. ok is false for any string SegmentKey
 // could not have produced, including the old nested "seg/<node>/<inc>/<id>".
-func ParseSegmentKey(key string) (machine.ID, bool) {
-	var id machine.ID
+func ParseSegmentKey(key string) ([16]byte, bool) {
+	var id [16]byte
 	rest, found := strings.CutPrefix(key, keyPrefix)
 	if !found {
 		return id, false
 	}
 	if _, err := hex.Decode(id[:], []byte(rest)); err != nil {
-		return machine.ID{}, false
+		return [16]byte{}, false
 	}
 	// hex.Decode accepts upper case; only the canonical spelling is a key.
 	if SegmentKey(id) != key {
-		return machine.ID{}, false
+		return [16]byte{}, false
 	}
 	return id, true
 }

@@ -3,48 +3,36 @@ package rebalance
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
-
-// CallID names one RPC. The host gives each call its own id, unique in one
-// run of the process. Every call gets one Reply, unless it is abandoned.
-type CallID uint64
 
 // The plain call types of the group protocol (Protocol, Member, Assignment) and
 // the answers JoinAnswer, SyncAnswer, LeaveAnswer, DescribeAnswer and
 // GroupDescription are generated from api/controlplane/v1/controlplane.proto
-// into wire_types_gen.go. The inputs below carry a call id, so they are written
-// by hand.
+// into wire_types_gen.go. The inputs below carry the ReplyTo of their call, so
+// they are written by hand.
 
-// Input is the input of the machine: a sealed sum of the cases below (docs/architecture.md
-// section 3), TimerFired and the private drainLater. Every case has a Tag and a Fold method
-// (fold.go), so a new case without them does not compile.
+// Input is what the machine receives: the group calls, RoleChanged, and the
+// private messages it sends itself (timers, replica answers, gone calls,
+// drainLater). Tag, Fold and the marker method of every case are written by
+// dstgen into zz_dst_gen.go.
 //
 //sumtype:decl
+//dst:sum
 type Input interface {
-	machine.Message
-	// Tag is the trace-hash number of the case.
-	Tag() uint64
+	actor.Payload
 	isInput()
 }
 
-// Output is what the machine returns from a Step: a sealed sum of the cases below. The
-// host turns each case into real work. Every case has a Tag and a Fold method.
+// The calls. Each gets exactly one Reply on its ReplyTo, unless its caller
+// is gone first.
 //
-//sumtype:decl
-type Output interface {
-	machine.Message
-	// Tag is the trace-hash number of the case.
-	Tag() uint64
-	isOutput()
-}
-
-// The inputs (docs/architecture.md section 3).
+//dst:cases Input
 type (
 	// Join is a JoinGroup call. An empty MemberID asks for a new member.
 	// RebalanceTimeoutMs 0 means the session timeout.
 	Join struct {
-		Call               CallID
+		ReplyTo            actor.ReplyTo[Reply]
 		Group              string
 		MemberID           string
 		GroupInstanceID    string
@@ -57,7 +45,7 @@ type (
 	}
 	// Sync is a SyncGroup call. Only the leader's Assignments are used.
 	Sync struct {
-		Call        CallID
+		ReplyTo     actor.ReplyTo[Reply]
 		Group       string
 		MemberID    string
 		Generation  int32
@@ -65,91 +53,45 @@ type (
 	}
 	// Heartbeat is a Heartbeat call.
 	Heartbeat struct {
-		Call       CallID
+		ReplyTo    actor.ReplyTo[Reply]
 		Group      string
 		MemberID   string
 		Generation int32
 	}
 	// Leave is a LeaveGroup call. The answer has one code per member.
 	Leave struct {
-		Call    CallID
+		ReplyTo actor.ReplyTo[Reply]
 		Group   string
 		Members []string
 	}
 	// OffsetCommit is an OffsetCommit call. The machine sets Op.TimeMs.
 	OffsetCommit struct {
-		Call CallID
-		Op   contract.OffsetCommit
+		ReplyTo actor.ReplyTo[Reply]
+		Op      contract.OffsetCommit
 	}
 	// Describe is a DescribeGroups call.
 	Describe struct {
-		Call   CallID
-		Groups []string
+		ReplyTo actor.ReplyTo[Reply]
+		Groups  []string
 	}
 	// List is a ListGroups call.
 	List struct {
-		Call CallID
-	}
-	// CallAbandoned says the RPC context of Call ended. The call gets no reply.
-	CallAbandoned struct {
-		Call CallID
+		ReplyTo actor.ReplyTo[Reply]
 	}
 	// RoleChanged says whether the replica is now the active appender and Ready.
 	RoleChanged struct {
 		Active bool
 	}
-	// ReplicaReply is the replica's answer to a SubmitCommand or a SubmitRead.
-	ReplicaReply struct {
-		Req  machine.RequestID
-		Done runtime.ControlPlaneDone
-	}
-	// TimerFired says that the timer ID fired. The machine ignores it when Gen is not the
-	// current generation of that timer. The host makes it from a SetTimer.
-	TimerFired struct {
-		ID  machine.TimerID
-		Gen machine.TimerVersion
-	}
 )
 
-// The outputs.
-type (
-	// SetTimer asks the host for a TimerFired{ID, Gen} after After. A pending timer with the
-	// same ID is replaced.
-	SetTimer struct {
-		ID    machine.TimerID
-		Gen   machine.TimerVersion
-		After machine.Duration
-	}
-	// CancelTimer removes the pending timer ID. It is only an optimization: the machine
-	// ignores a TimerFired of an old Gen.
-	CancelTimer struct {
-		ID machine.TimerID
-	}
-	// SendSelf asks the host to give Msg back to the machine as a later input.
-	SendSelf struct {
-		Msg Input
-	}
-	// SubmitCommand asks the replica to log Op: GroupInstall, GroupAssign,
-	// GroupRemove or OffsetCommit. The answer comes back as a ReplicaReply.
-	SubmitCommand struct {
-		Req machine.RequestID
-		Op  runtime.ControlPlaneOperation
-	}
-	// SubmitRead asks the replica to read Op: ListGroups or DescribeGroup.
-	// Fresh false is a LocalRead. Fresh true is a read that waits for a fresh
-	// check of the log tail (a ControlPlaneDeliver read).
-	SubmitRead struct {
-		Req   machine.RequestID
-		Op    runtime.ControlPlaneOperation
-		Fresh bool
-	}
-	// Reply answers Call. Body is nil when Err is not OK, and for a heartbeat.
-	Reply struct {
-		Call CallID
-		Err  runtime.ErrCode
-		Body Answer
-	}
-)
+// Reply answers one call. Body is nil when Err is not OK, and for a heartbeat.
+//
+//dst:payload
+//dst:fold manual
+type Reply struct {
+	Err  runtime.ErrCode
+	Body Answer
+}
 
 // Answer is the body of a Reply: JoinAnswer, SyncAnswer, LeaveAnswer,
 // CommitAnswer, DescribeAnswer or ListAnswer.
@@ -174,3 +116,51 @@ func (LeaveAnswer) isAnswer()    {}
 func (CommitAnswer) isAnswer()   {}
 func (DescribeAnswer) isAnswer() {}
 func (ListAnswer) isAnswer()     {}
+
+// The private messages the machine sends itself.
+//
+//dst:cases Input
+type (
+	// drainLater takes the queue of group in a later Receive (SiteLateDrain).
+	drainLater struct{ group string }
+	// callGone says that the caller of call left before its reply. group is
+	// the group the call was for; it is empty for a describe or a commit.
+	callGone struct {
+		group string
+		call  actor.ReplyTo[Reply]
+	}
+	// sessionExpired: the session (or new member) timer of member ended.
+	sessionExpired struct{ group, member string }
+	// roundDue: the round end (Joining) or the sync deadline (Syncing, Stable).
+	roundDue struct{ group string }
+	// delayDone: the initial delay of a new round ended.
+	delayDone struct{ group string }
+	// writeTimedOut: the write of group got no answer in WriteTimeout.
+	writeTimedOut struct{ group string }
+	// commitTimedOut: the write of commit n got no answer in WriteTimeout.
+	commitTimedOut struct{ n uint64 }
+	// loadRetryDue: the refused load reads are sent again.
+	loadRetryDue struct{}
+	// writeDone is the replica's answer to write n of group.
+	writeDone struct {
+		group string
+		n     uint64
+		done  runtime.ControlPlaneDone
+	}
+	// commitDone is the replica's answer to the write of commit n.
+	commitDone struct {
+		n    uint64
+		done runtime.ControlPlaneDone
+	}
+	// describeDone is the replica's answer to read i of describe n.
+	describeDone struct {
+		n    uint64
+		i    int
+		done runtime.ControlPlaneDone
+	}
+	// loadDone is the replica's answer to one read of the load.
+	loadDone struct {
+		read loadRead
+		done runtime.ControlPlaneDone
+	}
+)

@@ -6,9 +6,6 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-
-	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 func lines(t *testing.T, b *bytes.Buffer) []map[string]any {
@@ -31,12 +28,9 @@ func TestSegmentLogLifecycle(t *testing.T) {
 	var buf bytes.Buffer
 	sl := NewSegmentLog(slog.New(slog.NewJSONHandler(&buf, nil)))
 	const ms = 1_000_000
-	// Two segments sealed back to back, then PUT, then answers.
-	sl.Observe(fact("segment_sealed", "reason", "size", "bytes", 1000, "batches", 3, "parts", 2, "age", 50*ms))
-	sl.IO(core.ObjectCall{Call: objectstore.Put{Key: "k1"}})
-	sl.Observe(fact("segment_sealed", "reason", "timer", "bytes", 10, "batches", 1, "parts", 1, "age", 200*ms))
-	sl.IO(core.ObjectCall{Call: objectstore.Put{Key: "k2"}})
-	sl.IO(core.ObjectCall{Call: objectstore.Put{Key: "k1"}}) // a retry must not consume a pending seal
+	// Two segments sealed back to back, then answers.
+	sl.Observe(fact("segment_sealed", "segment", "k1", "reason", "size", "bytes", 1000, "batches", 3, "parts", 2, "age", 50*ms))
+	sl.Observe(fact("segment_sealed", "segment", "k2", "reason", "timer", "bytes", 10, "batches", 1, "parts", 1, "age", 200*ms))
 	sl.Observe(fact("segment_put_done", "segment", "k1", "bytes", 1100, "put_ns", 30*ms, "attempts", 2))
 	sl.Observe(fact("segment_committed", "segment", "k1", "batches", 3, "bytes", 1100, "put_ns", 30*ms,
 		"wait_ns", 5*ms, "commit_ns", 15*ms, "total_ns", 50*ms, "inflight", 1, "buffered", 7))
@@ -60,7 +54,7 @@ func TestSegmentLogLifecycle(t *testing.T) {
 	if f["level"] != "WARN" || f["reason"] != "timer" || f["kafka_error_code"] != float64(7) {
 		t.Errorf("failed line: %v", f)
 	}
-	if len(sl.segs) != 0 || len(sl.pending) != 0 {
-		t.Errorf("leak: %d segs %d pending", len(sl.segs), len(sl.pending))
+	if len(sl.segs) != 0 {
+		t.Errorf("leak: %d segs", len(sl.segs))
 	}
 }

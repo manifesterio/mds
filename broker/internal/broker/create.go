@@ -7,7 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // createTopics answers CreateTopics (Kafka key 19). Each topic is checked here
@@ -19,11 +19,10 @@ import (
 // Replication is ignored: object storage is the replication. Configs are
 // ignored, and one warning fact is logged per request that has any. Topic ids
 // are not kept, so v7 answers the zero id.
-func (b *Broker) createTopics(s *slot, r *kmsg.CreateTopicsRequest) []core.Action {
+func (b *Broker) createTopics(s *slot, r *kmsg.CreateTopicsRequest, outbox *brokerOutbox) {
 	response := kmsg.NewPtrCreateTopicsResponse()
 	response.Topics = make([]kmsg.CreateTopicsResponseTopic, len(r.Topics))
 	s.response = response
-	var acts []core.Action
 	withConfigs := 0
 	var names []string
 	for i, t := range r.Topics {
@@ -41,14 +40,13 @@ func (b *Broker) createTopics(s *slot, r *kmsg.CreateTopicsRequest) []core.Actio
 		}
 		o := &operation{kind: opCreate, s: s, ctopic: rt, validateOnly: r.ValidateOnly,
 			create: contract.CreateTopic{Name: t.Topic, Partitions: partitionsOf(t), FailIfExists: !r.ValidateOnly}}
-		acts = append(acts, b.startOp(o)...)
+		b.startOp(o, outbox)
 	}
 	if withConfigs > 0 {
-		s.facts = append(s.facts, machine.Fact{Name: "create_topics_configs_ignored", Fields: []machine.Field{
-			{Key: "topics", Value: machine.Int64Value(withConfigs)},
+		s.facts = append(s.facts, actor.Fact{Name: "create_topics_configs_ignored", Fields: []actor.Field{
+			{Key: "topics", Value: actor.Int64Value(withConfigs)},
 		}})
 	}
-	return acts
 }
 
 // checkCreate is the local check of one topic. dup is true when the request
@@ -108,34 +106,39 @@ func (o *operation) createCP() contract.Operation {
 
 // onCreateCP handles the answer of a create op's control plane call.
 // Infrastructure errors are retried by retryOp, like the other ops.
-func (b *Broker) onCreateCP(o *operation, e core.ControlPlaneDone) []core.Action {
+func (b *Broker) onCreateCP(o *operation, e core.ControlPlaneDone, outbox *brokerOutbox) {
 	switch {
 	case e.Err == core.ErrInvalid:
-		return b.failOp(o, errInvalidRequest)
+		b.failOp(o, errInvalidRequest, outbox)
+		return
 	case e.Err == core.ErrTopicExists:
 		// A retry after a lost reply can find the topic that the first try
 		// made. Then the topic is ours, so the create succeeded.
 		if o.maybeApplied {
-			return b.createdOK(o)
+			b.createdOK(o)
+			return
 		}
 		setTopicError(o.ctopic, errTopicExists, "topic already exists")
-		return b.endOp(o)
+		b.endOp(o)
+		return
 	case e.Err != core.OK:
 		if e.Outcome == core.MaybeApplied {
 			o.maybeApplied = true
 		}
-		return b.retryOp(o)
+		b.retryOp(o, outbox)
+		return
 	case o.validateOnly:
 		if hasTopic(core.ResponseAs[contract.DescribeTopicsResp](e).Topics, o.create.Name) {
 			setTopicError(o.ctopic, errTopicExists, "topic already exists")
-			return b.endOp(o)
+			b.endOp(o)
+			return
 		}
 	}
-	return b.createdOK(o)
+	b.createdOK(o)
 }
 
 // createdOK ends a create op that passed. The counts are the ones the topic has.
-func (b *Broker) createdOK(o *operation) []core.Action {
+func (b *Broker) createdOK(o *operation) {
 	o.ctopic.NumPartitions, o.ctopic.ReplicationFactor = o.create.Partitions, 1
-	return b.endOp(o)
+	b.endOp(o)
 }

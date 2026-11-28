@@ -8,7 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/memory"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // trackedStore is an in-memory store that remembers whether it was closed.
@@ -39,17 +39,19 @@ func (s *storeSource) open() (engine.Engine, error) {
 
 func tombConfig(src *storeSource) replica.Config {
 	return replica.Config{
-		CatchUpEvery: machine.Millisecond, Writer: "w",
-		CheckpointPrefix: "checkpoint/t/", CheckpointEvery: machine.Second, Rank: 1,
+		CatchUpEvery: actor.Millisecond, Writer: "w",
+		CheckpointPrefix: "checkpoint/t/", CheckpointEvery: actor.Second, Rank: 1,
 		OpenStore: src.open,
 	}
 }
 
 func TestOpenStoreFailureAtBuildStopsOnStart(t *testing.T) {
-	m := newMachine(t, tombConfig(&storeSource{failOn: 1}))
-	acts := step(m, runtime.NodeStarted{})
-	stop, ok := acts[0].(runtime.StopForRestart)
-	if !ok || stop.Cause != "disk is full" {
-		t.Fatalf("acts = %#v, want StopForRestart with the open error", acts)
+	h := newHarness(t, tombConfig(&storeSource{failOn: 1}))
+	effects := h.recv(runtime.NodeStarted{})
+	if len(effects) != 1 || effects[0].Kind != actor.EffectStop || effects[0].How != actor.Trip || effects[0].Cause != "disk is full" {
+		t.Fatalf("effects = %v, want only a Stop (Trip) with the open error", describe(effects))
+	}
+	if again := h.recv(runtime.CatchUpDue{}); len(again) != 0 {
+		t.Fatalf("a stopped replica recorded %v", describe(again))
 	}
 }

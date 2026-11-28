@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/live"
 )
 
 // fakeLease answers the first beats with live and then fails, or always fails.
@@ -27,7 +26,7 @@ func (f *fakeLease) BrokerHeartbeat(context.Context, core.BrokerAddr) ([]core.Br
 }
 
 // nextEvent waits for the next control event in in.
-func nextEvent(t *testing.T, in *live.Inbox[core.EventData]) core.EventData {
+func nextEvent(t *testing.T, in *fakeInbox) core.EventData {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -41,7 +40,7 @@ func nextEvent(t *testing.T, in *live.Inbox[core.EventData]) core.EventData {
 }
 
 func TestLeaseLoopDeliversLiveSet(t *testing.T) {
-	in := live.NewInbox[core.EventData](8)
+	in := &fakeInbox{}
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 	b2 := core.BrokerAddr{NodeID: 2, Host: "h2", Port: 9092}
 	lease := &fakeLease{live: []core.BrokerAddr{b1, b2}, okFor: 1 << 30}
@@ -58,7 +57,7 @@ func TestLeaseLoopDeliversLiveSet(t *testing.T) {
 }
 
 func TestLeaseLoopEmptiesSetWhenStale(t *testing.T) {
-	in := live.NewInbox[core.EventData](8)
+	in := &fakeInbox{}
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 	// One good beat, then the control plane is down for good.
 	lease := &fakeLease{live: []core.BrokerAddr{b1}, okFor: 1}
@@ -81,7 +80,7 @@ func TestLeaseLoopEmptiesSetWhenStale(t *testing.T) {
 }
 
 func TestLeaseLoopStopsWithContext(t *testing.T) {
-	in := live.NewInbox[core.EventData](8)
+	in := &fakeInbox{}
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 	lease := &fakeLease{okFor: 1 << 30}
 	ctx, cancel := context.WithCancel(t.Context())

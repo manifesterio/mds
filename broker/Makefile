@@ -4,7 +4,7 @@
 # Integration tests (make it) need Podman (DynamoDB Local + SeaweedFS via shared/testinfra)
 # and a real mdscontrolplane binary; they are part of build and never skip.
 # The import check for deterministic packages is the determinismcheck tool:
-# go run github.com/manifesterio/mds/dst/cmd/determinismcheck <packages>
+# go run github.com/manifesterio/mds/ops/tools/determinismcheck <packages>
 # Toolchain: `mise install` at the repo root (pins in the root mise.toml). The commit hook is
 # installed by the root Makefile (make install-hooks).
 
@@ -22,7 +22,7 @@ RISK_FLAGS    ?=
 SIM_SEEDS     ?= 300
 
 # Everything except the simulation tree and test/integrationtest (those have their own targets).
-# internal/verify/simulator is the tree on dst/kernel. (The old tree was deleted in T1.12d.)
+# internal/verify/simulator runs the broker on dst/sim.
 UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulator(/|$$)|/test/integrationtest$$')
 
 export RISK_THRESHOLD
@@ -36,7 +36,17 @@ PG_TEST_ARGS  ?=
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
 	e2e-kafka-cli it-postgres
 
-build: fmt-check ascii-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
+# Regenerate sum-type markers, tags and folds (ops/tools/dstgen).
+generate:
+	go run github.com/manifesterio/mds/ops/tools/dstgen ./...
+
+# The code dstgen writes (zz_dst_gen*.go, dst.tags) must match the annotations,
+# and dst.tags must not have lost or renumbered a line since DSTGEN_BASE.
+DSTGEN_BASE ?= mainline
+gen-check:
+	go run github.com/manifesterio/mds/ops/tools/dstgen -check -base $(DSTGEN_BASE) ./...
+
+build: generate fmt-check ascii-check gen-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
 
 compile:
 	go build ./...
@@ -48,14 +58,14 @@ $(COVER_DIR)/.gitignore:
 test: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
 
-# Deterministic simulation packages (the tree on dst/kernel), then a seed campaign
+# Deterministic simulation packages (on dst/sim), then a seed campaign
 # for the broker (scenario kafka). kafka-log lives in mds-controlplane after CP extraction.
 sim: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...
 	@$(MAKE) --no-print-directory sim-campaign
 
-# Seed campaigns through cmd/mdssimulator (the new tree, on dst/campaign). The echo scenario
-# runs with -scenario echo. More seeds: make sim-campaign SIM_SEEDS=2000
+# Seed campaigns through cmd/mdssimulator (the new tree, on dst/campaign).
+# More seeds: make sim-campaign SIM_SEEDS=2000
 sim-campaign:
 	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
 

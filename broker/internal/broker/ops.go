@@ -2,12 +2,13 @@ package broker
 
 import (
 	"slices"
+	"strconv"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -27,22 +28,20 @@ type operationState uint8
 
 const (
 	opControlPlane operationState = iota // a ControlPlaneCall is in flight
-	opGet
-	opBackoff
-	opWait // a Fetch part parked until its next poll (fetch.go)
+	opGet                                // an object store Get is in flight
+	opBackoff                            // waiting for the retry timer
+	opWait                               // a Fetch part parked until its next poll (fetch.go)
 )
 
 // operation is one control-plane / object-store interaction serving a request part.
 // It retries with backoff; a part never fails silently.
 type operation struct {
-	id        uint64
-	kind      operationKind
-	state     operationState
-	retry     operationState // state a backoff returns to
-	requestID machine.RequestID
-	gen       machine.TimerVersion
-	attempts  int
-	s         *slot
+	id       uint64
+	kind     operationKind
+	state    operationState
+	retry    operationState // state a backoff returns to
+	attempts int
+	s        *slot
 
 	names []string // refresh, meta: topics asked
 	creq  core.Request
@@ -67,13 +66,13 @@ type operation struct {
 	held    bool // Fetch part: has its data, waits for the Fetch to fill up (fetch.go)
 
 	gop      contract.Operation          // opGroup: the group call to make
-	gtimeout machine.Duration            // opGroup: the call's deadline (0: the default)
+	gtimeout actor.Duration              // opGroup: the call's deadline (0: the default)
 	gfill    func(core.ControlPlaneDone) // opGroup: writes the answer into the response
 }
 
-func (b *Broker) findOp(r machine.RequestID) *operation {
+func (b *Broker) findOp(id uint64) *operation {
 	for _, o := range b.ops {
-		if o.requestID == r && o.requestID != 0 {
+		if o.id == id {
 			return o
 		}
 	}
@@ -91,59 +90,64 @@ func (b *Broker) dropOp(o *operation) {
 
 func (b *Broker) addOp(o *operation) { b.ops = append(b.ops, o) }
 
-func (b *Broker) opByTimer(id machine.TimerID) *operation {
-	for _, o := range b.ops {
-		if machine.TimerID(o.id) == id {
-			return o
-		}
-	}
-	return nil
+// opTimer is the key of the retry or poll timer of o.
+func opTimer(o *operation) actor.TimerKey {
+	return actor.TimerKey("op/" + strconv.FormatUint(o.id, 10))
 }
 
 // startOp registers o as a pending part of its slot and issues its first call.
-func (b *Broker) startOp(o *operation) []core.Action {
+func (b *Broker) startOp(o *operation, outbox *brokerOutbox) {
 	o.id = b.id()
 	o.state = opControlPlane
 	o.s.pending++
 	b.addOp(o)
-	return b.issue(o)
+	b.issue(o, outbox)
 }
 
-func (b *Broker) issue(o *operation) []core.Action {
-	o.requestID = b.nextRequestID()
+// issue sends the call of o's state: an object store Get or a control plane
+// call. The answer comes back with o's id.
+func (b *Broker) issue(o *operation, outbox *brokerOutbox) {
+	id := o.id
 	if o.state == opGet {
-		return []core.Action{core.ObjectCall{Call: objectstore.Get{Req: o.requestID, Ref: readRef(o.readRanges())}}}
+		actor.Perform(outbox, core.ObjectCall{Call: objectstore.Get{Ref: readRef(o.readRanges())}},
+			func(d core.ObjectDone) core.EventData { return core.OpReadDone{Op: id, Done: d} })
+		return
 	}
-	var cop contract.Operation
+	actor.Perform(outbox, core.ControlPlaneCall{Op: o.controlPlaneOp(), Timeout: o.gtimeout},
+		func(d core.ControlPlaneDone) core.EventData { return core.OpCallDone{Op: id, Done: d} })
+}
+
+// controlPlaneOp is the control plane call of o.
+func (o *operation) controlPlaneOp() contract.Operation {
 	switch o.kind {
 	case opRefresh, opMetadata, opDescribeConfigs:
-		cop = contract.DescribeTopics{Topics: o.names}
+		return contract.DescribeTopics{Topics: o.names}
 	case opList: // only the end offset is wanted: look past the end
-		cop = contract.FindSegments{TopicPartition: o.topicPartition, From: core.Offset(1<<63 - 1), MaxBytes: 1}
+		return contract.FindSegments{TopicPartition: o.topicPartition, From: core.Offset(1<<63 - 1), MaxBytes: 1}
 	case opFetch:
-		cop = contract.FindSegments{TopicPartition: o.topicPartition, From: o.from, MaxBytes: o.maxBytes}
+		return contract.FindSegments{TopicPartition: o.topicPartition, From: o.from, MaxBytes: o.maxBytes}
 	case opCreate:
-		cop = o.createCP()
+		return o.createCP()
 	case opGroup:
-		cop = o.gop
+		return o.gop
 	}
-	return []core.Action{core.ControlPlaneCall{Req: o.requestID, Op: cop, Timeout: o.gtimeout}}
+	return nil
 }
 
 // retryOp backs off and repeats the call, or gives up after MaxAttempts or
 // when the client is gone.
-func (b *Broker) retryOp(o *operation) []core.Action {
+func (b *Broker) retryOp(o *operation, outbox *brokerOutbox) {
 	if o.s.conn.closed {
-		return b.endOp(o)
+		b.endOp(o)
+		return
 	}
 	if o.attempts++; o.attempts >= b.config.MaxAttempts {
 		b.env.Reachable(requestRetriesExhausted)
-		return b.failOp(o, b.exhaustCode(o))
+		b.failOp(o, b.exhaustCode(o), outbox)
+		return
 	}
-	o.retry, o.state, o.requestID = o.state, opBackoff, 0
-	t, g := b.timer(machine.TimerID(o.id), o.attempts)
-	o.gen = g
-	return []core.Action{t}
+	o.retry, o.state = o.state, opBackoff
+	outbox.StartTimer(opTimer(o), b.backoff(o.attempts), core.OpDue{Op: o.id})
 }
 
 func (b *Broker) exhaustCode(o *operation) kafkaErrorCode {
@@ -158,32 +162,31 @@ func (b *Broker) exhaustCode(o *operation) kafkaErrorCode {
 	return errRequestTimedOut
 }
 
-func (b *Broker) opTimer(o *operation, gen machine.TimerVersion) []core.Action {
-	if o.gen != gen {
-		return nil
-	}
+// onOpTimer runs when o's timer fires: a backoff repeats the call, a parked
+// Fetch part polls.
+func (b *Broker) onOpTimer(o *operation, outbox *brokerOutbox) {
 	switch o.state {
 	case opBackoff:
 		o.state = o.retry
-		return b.issue(o)
+		b.issue(o, outbox)
 	case opWait:
-		return b.pollOp(o)
+		b.pollOp(o, outbox)
+	case opControlPlane, opGet:
 	}
-	return nil
 }
 
 // endOp retires o without touching its response.
-func (b *Broker) endOp(o *operation) []core.Action {
+func (b *Broker) endOp(o *operation) {
 	b.dropOp(o)
 	b.finishPart(o.s)
-	return nil
 }
 
 // failOp answers o's part with code and retires it.
-func (b *Broker) failOp(o *operation, code kafkaErrorCode) []core.Action {
+func (b *Broker) failOp(o *operation, code kafkaErrorCode, outbox *brokerOutbox) {
 	switch o.kind {
 	case opRefresh:
-		return b.resume(o)
+		b.resume(o, outbox)
+		return
 	case opMetadata:
 		b.metaResp(o, nil, code)
 	case opList:
@@ -194,101 +197,109 @@ func (b *Broker) failOp(o *operation, code kafkaErrorCode) []core.Action {
 		o.ctopic.ErrorCode = int16(code)
 	case opDescribeConfigs:
 		o.failDescribeConfigs(code)
+	case opGroup:
 	}
-	return b.endOp(o)
+	b.endOp(o)
 }
 
-func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
-	if o.kind == opGroup {
-		return b.onGroupControlPlane(o, e)
-	}
-	if o.kind == opCreate {
-		return b.onCreateCP(o, e)
+func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone, outbox *brokerOutbox) {
+	switch o.kind {
+	case opGroup:
+		b.onGroupControlPlane(o, e)
+		return
+	case opCreate:
+		b.onCreateCP(o, e, outbox)
+		return
+	case opRefresh, opMetadata, opList, opFetch, opDescribeConfigs:
 	}
 	if r, ok := e.Resp.(contract.DescribeTopicsResp); ok && o.kind == opDescribeConfigs && e.Err == core.OK {
-		return b.onDescribeConfigsCP(o, r.Topics)
+		b.onDescribeConfigsCP(o, r.Topics)
+		return
 	}
 	if e.Err == core.ErrInvalid {
-		return b.failOp(o, errUnknownServer)
+		b.failOp(o, errUnknownServer, outbox)
+		return
 	}
 	if e.Err != core.OK {
-		return b.retryOp(o)
+		b.retryOp(o, outbox)
+		return
 	}
 	switch r := e.Resp.(type) {
 	case contract.DescribeTopicsResp:
 		if o.kind == opRefresh || o.kind == opMetadata {
 			b.merge(r.Topics)
 			if o.kind == opRefresh {
-				return b.resume(o)
+				b.resume(o, outbox)
+				return
 			}
 			b.metaResp(o, r.Topics, errNone)
-			return b.endOp(o)
+			b.endOp(o)
+			return
 		}
 	case contract.FindSegmentsResp:
 		switch o.kind {
 		case opList:
 			o.lpart.Offset = int64(r.End)
-			return b.endOp(o)
+			b.endOp(o)
+			return
 		case opFetch:
-			return b.onLookup(o, r)
+			b.onLookup(o, r, outbox)
+			return
 		}
 	}
-	return b.retryOp(o)
+	b.retryOp(o, outbox)
 }
 
 // ---- dispatch ----
 
 // handle runs a fresh request.
-func (b *Broker) handle(s *slot, request core.Request) []core.Action {
-	acts := b.dispatch(s, request)
+func (b *Broker) handle(s *slot, request core.Request, outbox *brokerOutbox) {
+	b.dispatch(s, request, outbox)
 	b.finishPart(s) // release the construction guard
-	return acts
 }
 
 // dispatch runs a request, refreshing the topic cache first when needed.
-func (b *Broker) dispatch(s *slot, request core.Request) []core.Action {
+func (b *Broker) dispatch(s *slot, request core.Request, outbox *brokerOutbox) {
 	if names := b.missing(request); len(names) > 0 {
-		return b.startOp(&operation{kind: opRefresh, s: s, names: names, creq: request})
+		b.startOp(&operation{kind: opRefresh, s: s, names: names, creq: request}, outbox)
+		return
 	}
-	return b.dispatchAfterRefresh(s, request)
+	b.dispatchAfterRefresh(s, request, outbox)
 }
 
 // dispatchAfterRefresh runs a request without trying another topic-cache refresh.
-func (b *Broker) dispatchAfterRefresh(s *slot, request core.Request) []core.Action {
+func (b *Broker) dispatchAfterRefresh(s *slot, request core.Request, outbox *brokerOutbox) {
 	switch r := request.(type) {
 	case *kmsg.MetadataRequest:
-		return b.metadata(s, r)
+		b.metadata(s, r, outbox)
 	case *kmsg.ProduceRequest:
 		if r.Acks == 0 { // unsupported: no response, close
 			s.silent, s.conn.closing = true, true
-			return nil
+			return
 		}
-		return b.produce(s, r)
+		b.produce(s, r, outbox)
 	case *kmsg.FetchRequest:
-		return b.fetch(s, r)
+		b.fetch(s, r, outbox)
 	case *kmsg.ListOffsetsRequest:
-		return b.listOffsets(s, r)
+		b.listOffsets(s, r, outbox)
 	case *kmsg.CreateTopicsRequest:
-		return b.createTopics(s, r)
+		b.createTopics(s, r, outbox)
 	case *kmsg.DescribeConfigsRequest:
-		return b.describeConfigs(s, r)
+		b.describeConfigs(s, r, outbox)
+	default:
+		if !b.dispatchGroup(s, request, outbox) {
+			s.silent, s.conn.closing = true, true
+		}
 	}
-	if acts, ok := b.dispatchGroup(s, request); ok {
-		return acts
-	}
-	s.silent, s.conn.closing = true, true
-	return nil
 }
 
 // resume runs the request a refresh was holding, with whatever the cache now has.
-func (b *Broker) resume(o *operation) []core.Action {
+func (b *Broker) resume(o *operation, outbox *brokerOutbox) {
 	b.dropOp(o)
-	var acts []core.Action
 	if !o.s.conn.closed {
-		acts = b.dispatchAfterRefresh(o.s, o.creq)
+		b.dispatchAfterRefresh(o.s, o.creq, outbox)
 	}
 	b.finishPart(o.s)
-	return acts
 }
 
 // ---- topic cache ----

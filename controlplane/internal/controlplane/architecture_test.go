@@ -90,7 +90,7 @@ var domainEdges = map[string][]string{}
 // package, production or not, imports it. Test files may import both packages.
 // shared/testinfra is for test files and for the integration tests only.
 var (
-	specImporters  = []string{"internal/verify/simulator", "cmd/cpsim", "test/conformance"}
+	specImporters  = []string{"internal/verify/simulator", "cmd/cpsim"}
 	infraImporters = []string{"test/integration"}
 )
 
@@ -269,7 +269,6 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(d) the server imports spec", with(real, cp+"server", spec), cp + "server", spec},
 		{"(d) the binary imports testinfra", with(real, "cmd/mdscontrolplane", infra), "cmd/mdscontrolplane", infra},
 		{"(d) the simulator imports testinfra", with(real, "internal/verify/simulator", infra), "internal/verify/simulator", infra},
-		{"(d) the conformance suite imports testinfra", with(real, "test/conformance", infra), "test/conformance", infra},
 		{"(d) runtime imports spec", with(real, rt, spec), rt, spec},
 		{"(e) contract imports runtime", with(real, contractPkg, rt), contractPkg, rt},
 		{"(e) contract imports an internal package", with(real, contractPkg, cp+"metadb"), contractPkg, cp + "metadb"},

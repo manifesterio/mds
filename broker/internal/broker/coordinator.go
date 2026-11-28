@@ -17,20 +17,19 @@ const (
 )
 
 // findCoordinator answers FindCoordinator. Version 4 asks for many keys at once.
-func (b *Broker) findCoordinator(s *slot, r *kmsg.FindCoordinatorRequest) []core.Action {
+func (b *Broker) findCoordinator(s *slot, r *kmsg.FindCoordinatorRequest) {
 	response := kmsg.NewPtrFindCoordinatorResponse()
 	s.response = response
 	if r.Version < 4 {
 		addr, code := b.answerCoordinator(r.CoordinatorKey, r.CoordinatorType)
 		response.ErrorCode, response.NodeID, response.Host, response.Port = int16(code), addr.NodeID, addr.Host, addr.Port
-		return nil
+		return
 	}
 	for _, key := range r.CoordinatorKeys {
 		addr, code := b.answerCoordinator(key, r.CoordinatorType)
 		response.Coordinators = append(response.Coordinators, kmsg.FindCoordinatorResponseCoordinator{
 			Key: key, NodeID: addr.NodeID, Host: addr.Host, Port: addr.Port, ErrorCode: int16(code)})
 	}
-	return nil
 }
 
 // answerCoordinator is the answer for one key: a broker, or an error with no

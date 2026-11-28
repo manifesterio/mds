@@ -10,36 +10,43 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/actor/actortest"
 )
 
-// Every field of a group request reaches the machine input, with the call id.
+// to is the ReplyTo of the n-th ask of an outside asker.
+func to(n uint64) actor.ReplyTo[rebalance.Reply] {
+	return actortest.ReplyTo[rebalance.Reply]("test", n)
+}
+
+// Every field of a group request reaches the machine input, with the ReplyTo.
 func TestGroupRequestsToMachine(t *testing.T) {
 	join := &cpv1.JoinGroupRequest{
 		Group: "g", MemberId: "m", GroupInstanceId: "i", ClientId: "c", ClientHost: "h",
 		SessionTimeoutMs: 1, RebalanceTimeoutMs: 2, ProtocolType: "consumer",
 		Protocols: []*cpv1.GroupProtocol{{Name: "range", Metadata: []byte{1}}, {Name: "rr", Metadata: []byte{2}}},
 	}
-	sameValue(t, "join", JoinToMachine(7, join), rebalance.Join{
-		Call: 7, Group: "g", MemberID: "m", GroupInstanceID: "i", ClientID: "c", ClientHost: "h",
+	sameValue(t, "join", JoinToMachine(to(7), join), rebalance.Join{
+		ReplyTo: to(7), Group: "g", MemberID: "m", GroupInstanceID: "i", ClientID: "c", ClientHost: "h",
 		SessionTimeoutMs: 1, RebalanceTimeoutMs: 2, ProtocolType: "consumer",
 		Protocols: []rebalance.Protocol{{Name: "range", Metadata: []byte{1}}, {Name: "rr", Metadata: []byte{2}}},
 	})
 	sync := &cpv1.SyncGroupRequest{Group: "g", MemberId: "m", Generation: 3,
 		Assignments: []*cpv1.GroupAssignment{{MemberId: "m", Assignment: []byte{4}}}}
-	sameValue(t, "sync", SyncToMachine(8, sync), rebalance.Sync{Call: 8, Group: "g", MemberID: "m", Generation: 3,
+	sameValue(t, "sync", SyncToMachine(to(8), sync), rebalance.Sync{ReplyTo: to(8), Group: "g", MemberID: "m", Generation: 3,
 		Assignments: []rebalance.Assignment{{Member: "m", Bytes: []byte{4}}}})
-	sameValue(t, "heartbeat", HeartbeatToMachine(9, &cpv1.HeartbeatRequest{Group: "g", MemberId: "m", Generation: 5}),
-		rebalance.Heartbeat{Call: 9, Group: "g", MemberID: "m", Generation: 5})
-	sameValue(t, "leave", LeaveToMachine(10, &cpv1.LeaveGroupRequest{Group: "g", Members: []string{"a", "b"}}),
-		rebalance.Leave{Call: 10, Group: "g", Members: []string{"a", "b"}})
+	sameValue(t, "heartbeat", HeartbeatToMachine(to(9), &cpv1.HeartbeatRequest{Group: "g", MemberId: "m", Generation: 5}),
+		rebalance.Heartbeat{ReplyTo: to(9), Group: "g", MemberID: "m", Generation: 5})
+	sameValue(t, "leave", LeaveToMachine(to(10), &cpv1.LeaveGroupRequest{Group: "g", Members: []string{"a", "b"}}),
+		rebalance.Leave{ReplyTo: to(10), Group: "g", Members: []string{"a", "b"}})
 	commit := &cpv1.OffsetCommitRequest{Group: "g", MemberId: "m", Generation: 6, Offsets: []*cpv1.PartitionOffsetCommit{
 		{Tp: &sharedv1.TopicPartition{Topic: "t", Partition: 1}, Offset: 4, LeaderEpoch: 2, Metadata: "x"}}}
-	sameValue(t, "commit", OffsetCommitToMachine(11, commit), rebalance.OffsetCommit{Call: 11, Op: contract.OffsetCommit{
+	sameValue(t, "commit", OffsetCommitToMachine(to(11), commit), rebalance.OffsetCommit{ReplyTo: to(11), Op: contract.OffsetCommit{
 		Group: "g", Member: "m", Generation: 6, Offsets: []contract.PartitionOffset{
 			{TopicPartition: contract.NewTopicPartition("t", 1), Offset: 4, LeaderEpoch: 2, Metadata: "x"}}}})
-	sameValue(t, "describe", DescribeToMachine(12, &cpv1.DescribeGroupsRequest{Groups: []string{"a", "b"}}),
-		rebalance.Describe{Call: 12, Groups: []string{"a", "b"}})
-	sameValue(t, "list", ListToMachine(13, &cpv1.ListGroupsRequest{}), rebalance.List{Call: 13})
+	sameValue(t, "describe", DescribeToMachine(to(12), &cpv1.DescribeGroupsRequest{Groups: []string{"a", "b"}}),
+		rebalance.Describe{ReplyTo: to(12), Groups: []string{"a", "b"}})
+	sameValue(t, "list", ListToMachine(to(13), &cpv1.ListGroupsRequest{}), rebalance.List{ReplyTo: to(13)})
 }
 
 // Every field of a machine answer reaches the response. The generated
@@ -73,11 +80,11 @@ func TestMachineAnswersToWire(t *testing.T) {
 	sameValue(t, "list", ListGroupsResponseToCore(ListAnswerToWire(rebalance.ListAnswer{Groups: list})).Groups, list)
 }
 
-// Nil requests give the zero input with the call id, never a panic.
+// Nil requests give the zero input with the ReplyTo, never a panic.
 func TestNilGroupRequestsToMachine(t *testing.T) {
-	sameValue(t, "nil join", JoinToMachine(1, nil), rebalance.Join{Call: 1})
-	sameValue(t, "nil sync", SyncToMachine(2, nil), rebalance.Sync{Call: 2})
-	sameValue(t, "nil heartbeat", HeartbeatToMachine(3, nil), rebalance.Heartbeat{Call: 3})
-	sameValue(t, "nil leave", LeaveToMachine(4, nil), rebalance.Leave{Call: 4})
-	sameValue(t, "nil describe", DescribeToMachine(5, nil), rebalance.Describe{Call: 5})
+	sameValue(t, "nil join", JoinToMachine(to(1), nil), rebalance.Join{ReplyTo: to(1)})
+	sameValue(t, "nil sync", SyncToMachine(to(2), nil), rebalance.Sync{ReplyTo: to(2)})
+	sameValue(t, "nil heartbeat", HeartbeatToMachine(to(3), nil), rebalance.Heartbeat{ReplyTo: to(3)})
+	sameValue(t, "nil leave", LeaveToMachine(to(4), nil), rebalance.Leave{ReplyTo: to(4)})
+	sameValue(t, "nil describe", DescribeToMachine(to(5), nil), rebalance.Describe{ReplyTo: to(5)})
 }

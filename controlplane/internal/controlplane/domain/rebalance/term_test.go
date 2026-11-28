@@ -1,11 +1,12 @@
 package rebalance
 
 import (
-	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Tests of log writes, the queue, the term and the load (sections 8 and 9).
@@ -38,7 +39,7 @@ func TestLoadRetry(t *testing.T) {
 	h.check("waits", []any{heldOps(h), h.until(99 * msec)}, []any{"[]", []string(nil)})
 	h.until(100 * msec)
 	h.check("sent again", heldOps(h), "[ListGroups]")
-	h.check("a call while loading", h.step(List{Call: 1}), []string{"1 ErrUnavailable"})
+	h.check("a call while loading", h.step(List{ReplyTo: rt(1)}), []string{"1 ErrUnavailable"})
 	h.answer(0, runtime.OK)
 	h.check("serving", h.phase("g"), stateDead)
 }
@@ -55,7 +56,7 @@ func TestQueueOrder(t *testing.T) {
 		{delay, hb(2, "g", a, 1), nil},
 		{delay, syncReq(3, "g", a, 1, as(a, "x")), nil},
 		{delay, leave(4, "g", "zz"), nil},
-		{delay, List{Call: 5}, []string{"5 OK g:consumer:PreparingRebalance"}},
+		{delay, List{ReplyTo: rt(5)}, []string{"5 OK g:consumer:PreparingRebalance"}},
 		{delay, hb(6, "other", a, 1), []string{"6 ErrUnknownMember"}},
 	})
 	// The install applies, then the queue runs until the sync starts its own write.
@@ -75,16 +76,17 @@ func TestAbandonedQueuedAndWritingCalls(t *testing.T) {
 		{0, h.join(1, "g", ""), nil},
 		{delay, nil, nil},
 		{delay, hb(2, "g", a, 1), nil},
-		{delay, CallAbandoned{Call: 2}, nil},
+		{delay, gone("g", 2), nil},
 	})
 	h.check("install", h.answer(0, runtime.OK), []string{"1 OK gen=1 proto=range leader=m1 id=m1 members=[m1:meta-range]"})
 	h.run([]step{
 		{delay, syncReq(3, "g", a, 1, as(a, "x")), nil},
-		{delay, CallAbandoned{Call: 3}, nil},
+		{delay, gone("g", 3), nil},
 	})
 	h.check("assign", h.answer(0, runtime.OK), []string(nil))
 	h.check("applied", []any{h.phase("g"), h.group("g").phase.(*stable).assign[a]}, []any{stateStable, []byte("x")})
-	h.check("nothing waits", len(h.m.state.(*serving).where), 0)
+	g := h.group("g")
+	h.check("nothing waits", []any{len(g.queue), g.write == nil, h.parked("g"), len(h.watched)}, []any{0, true, []string(nil), 0})
 }
 
 // Rule 34 and 35: losing the role drops the memory; taking it again reads
@@ -97,7 +99,7 @@ func TestTakeoverDropsState(t *testing.T) {
 		{delay, h.join(11, "g", a), nil},
 		{delay, RoleChanged{Active: false}, []string{"10 ErrUnavailable", "11 ErrUnavailable"}},
 		{delay, RoleChanged{Active: true}, nil},
-		{delay, List{Call: 12}, []string{"12 OK g:consumer:Stable"}},
+		{delay, List{ReplyTo: rt(12)}, []string{"12 OK g:consumer:Stable"}},
 	})
 	g := h.group("g")
 	h.check("loaded", []any{h.phase("new"), g.generation, h.members("g"), g.find(a).synced, g.find(b).isNew}, []any{stateDead, 2, []string{"m1", "m2"}, true, false})
@@ -131,58 +133,71 @@ func TestCommitFailedWrite(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.hold = true
 	op := contract.OffsetCommit{Group: "x", Generation: -1}
-	h.step(OffsetCommit{Call: 1, Op: op})
+	h.step(OffsetCommit{ReplyTo: rt(1), Op: op})
 	h.check("failed", []any{h.answer(0, runtime.ErrTimeout), h.phase("x")}, []any{[]string{"1 ErrUnavailable"}, stateDead})
-	h.step(OffsetCommit{Call: 2, Op: op})
+	h.step(OffsetCommit{ReplyTo: rt(2), Op: op})
 	h.check("timeout", h.until(10*sec), []string{"2 ErrUnavailable"})
 	h.check("late answer", h.answer(0, runtime.OK), []string(nil))
-	h.step(OffsetCommit{Call: 3, Op: op})
-	h.check("abandoned", h.step(CallAbandoned{Call: 3}), []string(nil))
+	h.step(OffsetCommit{ReplyTo: rt(3), Op: op})
+	h.check("abandoned", h.step(gone("", 3)), []string(nil))
 	h.check("its answer", h.answer(0, runtime.OK), []string(nil))
 	h.check("still serving", h.phase("x"), stateDead)
 }
 
-// Section 7: a TimerFired of an older arm, and a second copy of a
-// ReplicaReply, are ignored.
-func TestStaleTimerAndDuplicateReply(t *testing.T) {
+// Section 7: a timer started again replaces the old one, so only the new
+// one fires; a second copy of a replica answer is ignored.
+func TestRestartedTimerAndDuplicateAnswer(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.hold = true
 	h.run([]step{{0, h.join(1, "g", ""), nil}, {0, h.join(2, "g", ""), nil}})
-	var delays []TimerFired
-	for _, o := range h.outs {
-		if st, ok := o.(SetTimer); ok && st.ID == h.group("g").delay.id {
-			delays = append(delays, TimerFired{ID: st.ID, Gen: st.Gen})
+	starts := 0
+	for _, e := range h.effects {
+		if e.Kind == actor.EffectStartTimer && e.Key == delayKey("g") {
+			starts++
 		}
 	}
-	h.check("delay set twice", len(delays), 2)
-	h.check("stale delay", h.step(delays[0]), []string(nil))
+	h.check("delay set twice", starts, 2)
+	h.check("one delay timer", len(slices.DeleteFunc(slices.Clone(h.timers), func(a armed) bool { return a.key != delayKey("g") })), 1)
 	h.check("no write yet", heldOps(h), "[]")
 	h.until(delay)
-	install := h.held[0]
-	r := h.apply(install)
-	h.held = nil
+	r := h.answerMsg(0)
 	h.check("answer", len(h.step(r)), 2)
 	h.check("second copy", h.step(r), []string(nil))
 	h.check("phase", h.phase("g"), stateSyncing)
 }
 
-// The machine is deterministic: the same inputs give the same outputs and hash.
+// The machine is deterministic: the same inputs give the same effects and hash.
 func TestSameInputsSameRun(t *testing.T) {
-	run := func() ([]Output, uint64) {
+	run := func() (int, uint64, uint64) {
 		h := newHarness(t, Config{})
 		h.stableTwo("g", 0, 1, 1)
 		h.step(h.join(20, "g", ""))
 		h.until(30 * sec)
-		return h.outs, h.m.StateHash()
+		return len(h.effects), h.effectHash(), h.m.StateHash()
 	}
-	o1, h1 := run()
-	o2, h2 := run()
-	if h1 != h2 || len(o1) != len(o2) {
-		t.Fatalf("runs differ: %x %x, %d %d outputs", h1, h2, len(o1), len(o2))
+	n1, e1, h1 := run()
+	n2, e2, h2 := run()
+	if n1 != n2 || e1 != e2 || h1 != h2 {
+		t.Fatalf("runs differ: %d %d effects, effect hash %x %x, state hash %x %x", n1, n2, e1, e2, h1, h2)
 	}
-	for i := range o1 {
-		if fmt.Sprintf("%#v", o1[i]) != fmt.Sprintf("%#v", o2[i]) {
-			t.Fatalf("output %d differs: %v / %v", i, o1[i], o2[i])
-		}
-	}
+}
+
+// Section 8: a timer that fires while its group waits for a write waits in
+// the queue. Started again before the queue is taken, it does not run: only
+// the new timer counts.
+func TestQueuedTimerStartedAgain(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.session = 5000
+	a, b := h.stableTwo("g", 0, 1, 1) // both sessions end at 8 s
+	h.hold = true
+	h.run([]step{{7 * sec, leave(10, "g", b), nil}})
+	h.check("remove in flight", heldOps(h), "[GroupRemove]")
+	h.until(8 * sec)
+	h.check("both sessions queued", len(h.group("g").queue), 2)
+	// A commit of A starts its session again; its queued timer is dropped.
+	h.step(OffsetCommit{ReplyTo: rt(11), Op: contract.OffsetCommit{Group: "g", Member: a, Generation: 2}})
+	h.check("one session queued", len(h.group("g").queue), 1)
+	h.check("leave", h.answer(0, runtime.OK), []string{"10 OK [OK]"})
+	h.check("commit", h.answer(0, runtime.OK), []string{"11 OK []"})
+	h.check("A stays", []any{h.phase("g"), h.members("g")}, []any{stateJoining, []string{"m1"}})
 }

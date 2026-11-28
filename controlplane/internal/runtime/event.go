@@ -2,113 +2,82 @@ package runtime
 
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
-// EventData is the input of the replica machine: a closed set of plain-data structs.
-// It is a sealed sum. Every case has a Tag and a Fold method (event_fold.go), so a new
-// case without them does not compile.
+// EventData is every message the replica takes: lifecycle, its own timers,
+// the answers of its IO, and the requests of its callers.
 //
 //sumtype:decl
+//dst:sum
 type EventData interface {
-	machine.Message
-	// Tag is the frozen trace-hash number of the case.
-	Tag() uint64
-	isEvent()
-}
-
-// IOResult is the EventData that answers an IOCall, matched by RequestID. A
-// completion with an unknown, already-finished or wrong-kind RequestID is ignored:
-// no state change (StateHash is unchanged).
-type IOResult interface {
-	EventData
-	RequestID() machine.RequestID
+	actor.Payload
+	isEventData()
 }
 
 // ---- lifecycle ----
 
-// NodeStarted is the first event of every boot, and always the first Step of every
-// incarnation. The node rebuilds what it needs from the control plane and
-// object store; nothing in memory survived.
-type NodeStarted struct{ Self machine.NodeInstance }
+// NodeStarted is the first message of every boot. The node rebuilds what it
+// needs from the log and the object store; nothing in memory survived.
+//
+//dst:cases EventData
+type NodeStarted struct{ Self actor.Incarnation }
 
-// StopRequest asks the node to shut down gracefully by Deadline (node-local time):
-// stop admitting, finish or hand off in-flight work, then return sim.Exit. If the
-// deadline passes first the runtime kills the node. InboxKind: Control.
-type StopRequest struct{ Deadline machine.NodeTime }
+// StopRequest asks the node to shut down gracefully by Deadline (node-local
+// time): stop admitting, finish or hand off in-flight work, then Stop with
+// Exit. If the deadline passes first the runtime kills the node. Priority:
+// Control.
+//
+//dst:cases EventData
+type StopRequest struct{ Deadline actor.Mono }
 
 // ---- timers ----
 
-// TimerFired is ignored by the receiver if Gen is not the current generation
-// for ID. Timers are matched by generation, not cancelled.
-type TimerFired struct {
-	ID  machine.TimerID
-	Gen machine.TimerVersion
-}
+//dst:cases EventData
+type (
+	// CatchUpDue says it is time to check the log tail and pull.
+	CatchUpDue struct{}
+	// RoleDue says it is time for the role tick (claim, heartbeat, crash recovery).
+	RoleDue struct{}
+	// CheckpointDue says it is time to consider a checkpoint.
+	CheckpointDue struct{}
+)
 
-// ---- object store completions ----
+// ---- answers of IO ----
 
 // ObjectPutDone reports that an object PUT finished.
+//
+//dst:cases EventData
 type ObjectPutDone struct {
-	Req     machine.RequestID
 	Key     string
 	Err     ErrCode
 	Outcome Outcome
 }
 
 // ObjectGetDone reports that an object GET finished.
+//
+//dst:cases EventData
 type ObjectGetDone struct {
-	Req  machine.RequestID
 	Data []byte
 	Err  ErrCode
 }
 
-// ObjectDeleteDone reports that an object DELETE finished.
-type ObjectDeleteDone struct {
-	Req     machine.RequestID
-	Err     ErrCode
-	Outcome Outcome
-}
-
 // ObjectListDone reports that an object LIST finished.
+//
+//dst:cases EventData
 type ObjectListDone struct {
-	Req  machine.RequestID
 	Keys []string // sorted
 	Err  ErrCode
 }
 
-// ---- control plane completions ----
-
-// ControlPlaneDone reports that a control-plane call finished. Resp is the in-process
-// response (nil unless Err == OK). The gRPC server turns it into the generated
-// API response messages (controlplane/server). Typed *Response fields wait for the gRPC cutover so
-// runtime does not import grpc.
-type ControlPlaneDone struct {
-	Req     machine.RequestID
-	Resp    ControlPlaneResponse
+// ObjectDeleteDone reports that an object DELETE finished. The replica does
+// not wait for it.
+//
+//dst:payload
+type ObjectDeleteDone struct {
 	Err     ErrCode
 	Outcome Outcome
 }
-
-// LocalRead asks a node to answer a read from its own state, now. Unlike a read
-// in ControlPlaneDeliver it does not wait for a fresh check of the log tail, so
-// the answer can be a little behind the log. The gRPC server uses it to keep
-// reads fast. The answer is a ControlPlaneReply to From.
-type LocalRead struct {
-	From machine.NodeInstance
-	Req  machine.RequestID
-	Op   ControlPlaneOperation
-}
-
-// ControlPlaneDeliver delivers one broker ControlPlaneCall to a control-plane replica process. The
-// simulator bridge engine issues this; the machine answers with ControlPlaneReply actions.
-type ControlPlaneDeliver struct {
-	From machine.NodeInstance // broker that issued the ControlPlaneCall
-	Req  machine.RequestID
-	Op   ControlPlaneOperation
-}
-
-// ---- shared command log completions ----
 
 // LogEntry is one slot's payload as returned by LogRead.
 type LogEntry struct {
@@ -118,8 +87,9 @@ type LogEntry struct {
 
 // LogAppendDone reports that a LogAppend finished. Taken means the slot was
 // already held; Existing is the winner's bytes when Taken is true.
+//
+//dst:cases EventData
 type LogAppendDone struct {
-	Req      machine.RequestID
 	Slot     LogPosition
 	Taken    bool
 	Existing []byte
@@ -128,24 +98,27 @@ type LogAppendDone struct {
 }
 
 // LogReadDone reports that a LogRead finished. Entries are in slot order.
+//
+//dst:cases EventData
 type LogReadDone struct {
-	Req     machine.RequestID
 	Entries []LogEntry
 	Err     ErrCode
 	Outcome Outcome
 }
 
 // LogGetEndDone reports the log tail (next slot to write).
+//
+//dst:cases EventData
 type LogGetEndDone struct {
-	Req     machine.RequestID
 	Tail    LogPosition
 	Err     ErrCode
 	Outcome Outcome
 }
 
 // LogDeleteOldDone reports that a LogDeleteOld finished.
+//
+//dst:cases EventData
 type LogDeleteOldDone struct {
-	Req     machine.RequestID
 	Err     ErrCode
 	Outcome Outcome
 }
@@ -154,11 +127,45 @@ type LogDeleteOldDone struct {
 // epoch when Won is true, and the epoch stored now when Won is false. Owner is
 // the owner stored with that epoch, so a node whose claim timed out can see
 // that the claim had landed (same Owner, Epoch == Expect+1).
+//
+//dst:cases EventData
 type LogClaimEpochDone struct {
-	Req     machine.RequestID
 	Epoch   uint64
 	Owner   string
 	Won     bool
+	Err     ErrCode
+	Outcome Outcome
+}
+
+// ---- callers ----
+
+// ControlPlaneDeliver is one control-plane operation from a caller (the gRPC
+// server or rebalance), answered once it is applied.
+//
+//dst:cases EventData
+type ControlPlaneDeliver struct {
+	ReplyTo actor.ReplyTo[ControlPlaneDone]
+	Op      ControlPlaneOperation
+}
+
+// LocalRead asks the node to answer a read from its own state, now. Unlike a
+// read in ControlPlaneDeliver it does not wait for a fresh check of the log
+// tail, so the answer can be a little behind the log.
+//
+//dst:cases EventData
+type LocalRead struct {
+	ReplyTo actor.ReplyTo[ControlPlaneDone]
+	Op      ControlPlaneOperation
+}
+
+// ControlPlaneDone is the answer to a control-plane operation. Resp is the
+// in-process response (nil unless Err == OK). Slot is the log slot the
+// operation was applied at, when metadb reports it.
+//
+//dst:payload
+type ControlPlaneDone struct {
+	Slot    LogPosition
+	Resp    ControlPlaneResponse
 	Err     ErrCode
 	Outcome Outcome
 }
@@ -169,68 +176,8 @@ func ResponseAs[T any](d ControlPlaneDone) T {
 	return r
 }
 
-// Answer returns the answer of the call without the request id: the plain
-// contract.Done that the reference model (package spec) also gives.
+// Answer returns the answer without the slot: the plain contract.Done that
+// the reference model (package spec) also gives.
 func (e ControlPlaneDone) Answer() contract.Done {
 	return contract.Done{Resp: e.Resp, Err: e.Err, Outcome: e.Outcome}
 }
-
-func (NodeStarted) isEvent()         {}
-func (StopRequest) isEvent()         {}
-func (TimerFired) isEvent()          {}
-func (ObjectPutDone) isEvent()       {}
-func (ObjectGetDone) isEvent()       {}
-func (ObjectDeleteDone) isEvent()    {}
-func (ObjectListDone) isEvent()      {}
-func (ControlPlaneDone) isEvent()    {}
-func (ControlPlaneDeliver) isEvent() {}
-func (LocalRead) isEvent()           {}
-func (LogAppendDone) isEvent()       {}
-func (LogReadDone) isEvent()         {}
-func (LogGetEndDone) isEvent()       {}
-func (LogDeleteOldDone) isEvent()    {}
-func (LogClaimEpochDone) isEvent()   {}
-
-// RequestID returns the request this completion answers.
-func (e ObjectPutDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e ObjectGetDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e ObjectDeleteDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e ObjectListDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e ControlPlaneDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e LogAppendDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e LogReadDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e LogGetEndDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e LogDeleteOldDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e LogClaimEpochDone) RequestID() machine.RequestID { return e.Req }
-
-//nolint:dupl // compile-time IOResult assertions; parallel list lives on IOCalls
-var (
-	_ IOResult = ObjectPutDone{}
-	_ IOResult = ObjectGetDone{}
-	_ IOResult = ObjectDeleteDone{}
-	_ IOResult = ObjectListDone{}
-	_ IOResult = ControlPlaneDone{}
-	_ IOResult = LogAppendDone{}
-	_ IOResult = LogReadDone{}
-	_ IOResult = LogGetEndDone{}
-	_ IOResult = LogDeleteOldDone{}
-	_ IOResult = LogClaimEpochDone{}
-)

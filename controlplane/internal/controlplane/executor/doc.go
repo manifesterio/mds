@@ -1,5 +1,5 @@
-// Package executor executes control-plane IOCalls outside Step: log slots and
-// object-store checkpoints. It owns the ports (Log and ObjectStore), the
+// Package executor runs the replica's IO (runtime.IO) outside Receive: log
+// slots and object-store checkpoints. It owns the ports (Log and ObjectStore), the
 // in-memory test versions of them, and the Executor that runs the calls.
 //
 // The real log implementations are separate packages, so that a package that

@@ -87,7 +87,7 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 		base += int64(orig.NumRecords)
 	}
 	for _, r := range []string{"gzip", "snappy", "lz4", "zstd"} {
-		if !slices.Contains(h.env.reach, "broker: "+r+" batch admitted") {
+		if !slices.Contains(h.env.Reach, "broker: "+r+" batch admitted") {
 			t.Errorf("%s admission not declared reachable", r)
 		}
 	}

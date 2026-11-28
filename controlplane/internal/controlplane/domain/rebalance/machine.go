@@ -1,8 +1,9 @@
-// Package rebalance is the consumer group protocol (classic Kafka) as a pure
-// state machine of the dst v2 contract (machine.Machine[Input, Output]). It has no locks,
-// goroutines, channels or clock: time comes with each Step, randomness comes from the
-// machine.Env given to New, log writes and reads are outputs, and their answers are inputs.
-// Rule numbers in comments are the classic-group machine's own; see docs/architecture.md.
+// Package rebalance is the consumer group protocol (classic Kafka) as a dst
+// actor (actor.Actor[Input, actor.NoIO]). It has no locks, goroutines,
+// channels or clock: time comes with each Receive, randomness comes from the
+// actor.Env given to New, log writes and reads are asks to the replica, and
+// their answers come back as the machine's own messages. Rule numbers in
+// comments are the classic-group machine's own; see docs/architecture.md.
 //
 // The machine is Standby (it serves nothing), Loading (it reads every group
 // from the log) or Serving. The log holds decisions only. Phases, parked
@@ -11,35 +12,40 @@
 package rebalance
 
 import (
+	"slices"
+
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // Config holds the machine settings. A zero field takes its default.
 type Config struct {
 	// InitialDelay is how long a new group waits for more members (default 3 s).
-	InitialDelay machine.Duration
+	InitialDelay actor.Duration
 	// NewMemberTimeout is how long a new member may wait for its first round (default 5 min).
-	NewMemberTimeout machine.Duration
+	NewMemberTimeout actor.Duration
 	// WriteTimeout bounds one log write (default 10 s).
-	WriteTimeout machine.Duration
+	WriteTimeout actor.Duration
 	// LoadRetry is the wait before a refused load read is sent again (default 100 ms).
-	LoadRetry machine.Duration
+	LoadRetry actor.Duration
 }
+
+// outbox is the outbox of the machine.
+type outbox = actor.Outbox[Input, actor.NoIO]
 
 // Machine is the group coordinator of one node.
 type Machine struct {
-	cfg       Config
-	env       machine.Env // random numbers and buggify sites; no site fires in production
-	state     any         // *standby, *loading or *serving
-	nextReq   machine.RequestID
-	nextTimer machine.TimerID
+	cfg     Config
+	env     runtime.Environment // random numbers and buggify sites; no site fires in production
+	replica actor.EntityRef[runtime.EventData]
+	state   any    // *standby, *loading or *serving
+	next    uint64 // the number of the last write, commit or describe
 
-	// Set for the length of one Step only.
-	now  machine.NodeTime
-	wall machine.RealTime
-	out  []Output
+	// Set for the length of one Receive only.
+	now  actor.Mono
+	wall actor.Wall
+	o    *outbox
 }
 
 // standby serves nothing.
@@ -49,47 +55,53 @@ type standby struct{}
 type serving struct {
 	groups    map[string]*group
 	names     []string // the group names, sorted
-	reqs      map[machine.RequestID]any
-	owners    map[machine.TimerID]timerRef
-	where     map[CallID]string // the group of each parked, queued or writing group call
 	describes []*describe
 	commits   []*commit
 }
 
-var _ machine.Machine[Input, Output] = (*Machine)(nil)
+var _ actor.Actor[Input, actor.NoIO] = (*Machine)(nil)
+
+// Props runs the machine as the actor "rebalance". replica is the actor that
+// logs and reads its decisions.
+func Props(cfg Config, replica actor.EntityRef[runtime.EventData]) actor.Props[Input, actor.NoIO] {
+	return actor.Props[Input, actor.NoIO]{
+		Name: "rebalance",
+		New: func(env actor.Env) actor.Actor[Input, actor.NoIO] {
+			return New(cfg, env, replica)
+		},
+	}
+}
 
 // New returns a machine in Standby. env gives it random numbers and the buggify sites
 // (sites.go); the env of production never fires a site.
-func New(cfg Config, env machine.Env) *Machine {
+func New(cfg Config, env runtime.Environment, replica actor.EntityRef[runtime.EventData]) *Machine {
 	if cfg.InitialDelay <= 0 {
-		cfg.InitialDelay = 3 * machine.Second
+		cfg.InitialDelay = 3 * actor.Second
 	}
 	if cfg.NewMemberTimeout <= 0 {
-		cfg.NewMemberTimeout = 300 * machine.Second
+		cfg.NewMemberTimeout = 300 * actor.Second
 	}
 	if cfg.WriteTimeout <= 0 {
-		cfg.WriteTimeout = 10 * machine.Second
+		cfg.WriteTimeout = 10 * actor.Second
 	}
 	if cfg.LoadRetry <= 0 {
-		cfg.LoadRetry = 100 * machine.Millisecond
+		cfg.LoadRetry = 100 * actor.Millisecond
 	}
-	return &Machine{cfg: cfg, env: env, state: &standby{}}
+	return &Machine{cfg: cfg, env: env, replica: replica, state: &standby{}}
 }
 
-// Step takes one input and returns the outputs.
-func (m *Machine) Step(now machine.Now, in Input) []Output {
-	m.now, m.wall, m.out = now.Mono, now.Wall, nil
+// Receive takes one message.
+func (m *Machine) Receive(now actor.Now, msg Input, o *outbox) {
+	m.now, m.wall, m.o = now.Mono, now.Wall, o
+	defer func() { m.o = nil }()
 	switch s := m.state.(type) {
 	case *serving:
-		m.serve(s, in)
+		m.serve(s, msg)
 	case *loading:
-		m.loadStep(s, in)
+		m.loadStep(s, msg)
 	default:
-		m.standbyStep(in)
+		m.standbyStep(msg)
 	}
-	out := m.out
-	m.out = nil
-	return out
 }
 
 func (m *Machine) standbyStep(inbox Input) {
@@ -103,7 +115,7 @@ func (m *Machine) standbyStep(inbox Input) {
 // refuse answers a call when the machine does not serve (rules 1 and 2).
 func (m *Machine) refuse(inbox Input) {
 	if j, ok := inbox.(Join); ok && invalidJoin(j) {
-		m.reply(j.Call, runtime.ErrInvalid, nil)
+		m.reply(j.ReplyTo, runtime.ErrInvalid, nil)
 		return
 	}
 	if call, ok := callOf(inbox); ok {
@@ -120,38 +132,63 @@ func (m *Machine) serve(s *serving, inbox Input) {
 		}
 	case Join:
 		if invalidJoin(in) {
-			m.reply(in.Call, runtime.ErrInvalid, nil)
+			m.reply(in.ReplyTo, runtime.ErrInvalid, nil)
 			return
 		}
-		m.groupInput(s, in.Group, in.Call, in)
+		m.groupCall(s, in.Group, in.ReplyTo, in)
 	case Sync:
-		m.groupInput(s, in.Group, in.Call, in)
+		m.groupCall(s, in.Group, in.ReplyTo, in)
 	case Heartbeat:
-		m.groupInput(s, in.Group, in.Call, in)
+		m.groupCall(s, in.Group, in.ReplyTo, in)
 	case Leave:
-		m.groupInput(s, in.Group, in.Call, in)
+		m.groupCall(s, in.Group, in.ReplyTo, in)
 	case OffsetCommit:
 		m.commit(s, in)
 	case Describe:
 		m.describe(s, in)
 	case List:
 		m.list(s, in)
-	case CallAbandoned:
-		m.abandon(s, in.Call)
-	case TimerFired:
-		m.timerFired(s, in)
-	case ReplicaReply:
-		m.replicaReply(s, in)
+	case callGone:
+		m.abandon(s, in)
+	case sessionExpired:
+		m.groupInput(s, in.group, in)
+	case roundDue:
+		m.groupInput(s, in.group, in)
+	case delayDone:
+		m.groupInput(s, in.group, in)
+	case writeTimedOut:
+		m.writeTimedOut(s, in)
+	case commitTimedOut:
+		m.commitTimeout(s, in)
+	case writeDone:
+		m.writeDone(s, in)
+	case commitDone:
+		m.commitDone(s, in)
+	case describeDone:
+		m.describeDone(s, in)
 	case drainLater:
 		m.drainNow(s, in)
+	case loadRetryDue, loadDone:
+		// Answers and timers of a load: the load of this term is over.
 	}
 }
 
-// groupInput handles a call for one group, or queues it while the group
+// groupCall handles a call for one group, and watches its caller when the
+// call is kept past this Receive: parked, queued, or waiting on a write.
+func (m *Machine) groupCall(s *serving, name string, call actor.ReplyTo[Reply], in Input) {
+	m.groupInput(s, name, in)
+	if m.state != s {
+		return
+	}
+	if g := s.groups[name]; g != nil && g.keeps(call) {
+		m.o.Watch(call, callGone{group: name, call: call})
+	}
+}
+
+// groupInput handles an input for one group, or queues it while the group
 // waits for a log write (section 8).
-func (m *Machine) groupInput(s *serving, name string, call CallID, in Input) {
+func (m *Machine) groupInput(s *serving, name string, in Input) {
 	if g := s.groups[name]; g != nil && g.busy() {
-		s.where[call] = name
 		g.queue = append(g.queue, in)
 		return
 	}
@@ -169,11 +206,18 @@ func (m *Machine) handle(s *serving, in Input) {
 		m.heartbeat(s, in)
 	case Leave:
 		m.leave(s, in)
-	case TimerFired:
-		m.groupTimer(s, in)
-	case CallAbandoned:
-		m.abandonParked(s, in.Call)
-	case OffsetCommit, Describe, List, RoleChanged, ReplicaReply, drainLater:
+	case sessionExpired:
+		m.sessionTimer(s, in)
+	case roundDue:
+		if g := s.groups[in.group]; g != nil {
+			m.roundTimer(s, g)
+		}
+	case delayDone:
+		m.delayTimer(s, in)
+	case callGone:
+		m.abandonParked(s, in)
+	case OffsetCommit, Describe, List, RoleChanged, drainLater, writeTimedOut, commitTimedOut,
+		loadRetryDue, writeDone, commitDone, describeDone, loadDone:
 		// Not a group input: groupInput never queues these.
 	}
 }
@@ -182,93 +226,100 @@ func invalidJoin(j Join) bool {
 	return j.Group == "" || j.ProtocolType == "" || len(j.Protocols) == 0 || j.SessionTimeoutMs <= 0
 }
 
-func callOf(inbox Input) (CallID, bool) {
+// callOf returns the ReplyTo of a call.
+func callOf(inbox Input) (actor.ReplyTo[Reply], bool) {
 	switch in := inbox.(type) {
 	case Join:
-		return in.Call, true
+		return in.ReplyTo, true
 	case Sync:
-		return in.Call, true
+		return in.ReplyTo, true
 	case Heartbeat:
-		return in.Call, true
+		return in.ReplyTo, true
 	case Leave:
-		return in.Call, true
+		return in.ReplyTo, true
 	case OffsetCommit:
-		return in.Call, true
+		return in.ReplyTo, true
 	case Describe:
-		return in.Call, true
+		return in.ReplyTo, true
 	case List:
-		return in.Call, true
-	case CallAbandoned, RoleChanged, ReplicaReply, TimerFired, drainLater:
-		return 0, false
+		return in.ReplyTo, true
+	case RoleChanged, drainLater, callGone, sessionExpired, roundDue, delayDone, writeTimedOut,
+		commitTimedOut, loadRetryDue, writeDone, commitDone, describeDone, loadDone:
+		return actor.ReplyTo[Reply]{}, false
 	}
-	return 0, false
+	return actor.ReplyTo[Reply]{}, false
 }
 
-// reply answers call. A call that gets its reply is no longer waiting.
-func (m *Machine) reply(call CallID, err runtime.ErrCode, body Answer) {
-	if s, ok := m.state.(*serving); ok {
-		delete(s.where, call)
+// reply answers call.
+func (m *Machine) reply(call actor.ReplyTo[Reply], err runtime.ErrCode, body Answer) {
+	actor.Reply(m.o, call, Reply{Err: err, Body: body})
+}
+
+// ask sends op to the replica; adapt turns the answer into a message of the
+// machine. A command, and a read with fresh, waits for a fresh check of the
+// log tail (ControlPlaneDeliver); a read without fresh is a LocalRead.
+func (m *Machine) ask(op runtime.ControlPlaneOperation, fresh bool, adapt func(runtime.ControlPlaneDone) Input) {
+	if fresh {
+		actor.Ask(m.o, m.replica, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+			return runtime.ControlPlaneDeliver{ReplyTo: to, Op: op}
+		}, adapt)
+		return
 	}
-	m.out = append(m.out, Reply{Call: call, Err: err, Body: body})
+	actor.Ask(m.o, m.replica, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
+		return runtime.LocalRead{ReplyTo: to, Op: op}
+	}, adapt)
 }
 
-// submit sends a command to the log and returns its request id.
-func (m *Machine) submit(op runtime.ControlPlaneOperation) machine.RequestID {
-	m.nextReq++
-	m.out = append(m.out, SubmitCommand{Req: m.nextReq, Op: op})
-	return m.nextReq
-}
-
-// read sends a read to the log and returns its request id.
-func (m *Machine) read(op runtime.ControlPlaneOperation, fresh bool) machine.RequestID {
-	m.nextReq++
-	m.out = append(m.out, SubmitRead{Req: m.nextReq, Op: op, Fresh: fresh})
-	return m.nextReq
+// number returns a new number for a write, a commit or a describe.
+func (m *Machine) number() uint64 {
+	m.next++
+	return m.next
 }
 
 // wallMs is the wall clock in milliseconds, for TimeMs in logged commands.
-func (m *Machine) wallMs() int64 { return int64(m.wall) / int64(machine.Millisecond) }
-
-// send delivers body to the machine itself, as a later input.
-func (m *Machine) send(body Input) {
-	m.out = append(m.out, SendSelf{Msg: body})
-}
+func (m *Machine) wallMs() int64 { return int64(m.wall) / int64(actor.Millisecond) }
 
 // newServing returns empty memory for a new term.
 func newServing() *serving {
-	return &serving{
-		groups: map[string]*group{},
-		reqs:   map[machine.RequestID]any{},
-		owners: map[machine.TimerID]timerRef{},
-		where:  map[CallID]string{},
-	}
+	return &serving{groups: map[string]*group{}}
 }
 
 // newGroup adds an empty group to the memory.
-func (m *Machine) newGroup(s *serving, name string) *group {
-	g := &group{name: name, phase: empty{}, round: m.newTimer(), delay: m.newTimer()}
-	s.owners[g.round.id] = timerRef{kind: timerRound, group: name}
-	s.owners[g.delay.id] = timerRef{kind: timerDelay, group: name}
+func newGroup(s *serving, name string) *group {
+	g := &group{name: name, phase: empty{}}
 	s.groups[name] = g
 	s.names = insertName(s.names, name)
 	return g
 }
 
-// newMember adds a member to g with its session timer slot.
-func (m *Machine) newMember(s *serving, g *group, id string) *member {
+// newMember adds a member to g.
+func newMember(g *group, id string) *member {
 	g.joinSeq++
-	mm := &member{id: id, order: g.joinSeq, session: m.newTimer()}
-	s.owners[mm.session.id] = timerRef{kind: timerSession, group: g.name, member: id}
+	mm := &member{id: id, order: g.joinSeq}
 	g.insert(mm)
 	return mm
 }
 
+// keeps reports whether call waits in g: parked, queued, or the caller of
+// the write in flight.
+func (g *group) keeps(call actor.ReplyTo[Reply]) bool {
+	if slices.ContainsFunc(g.queue, func(in Input) bool { c, ok := callOf(in); return ok && c == call }) {
+		return true
+	}
+	if g.write != nil {
+		if c, ok := g.write.caller(); ok && c == call {
+			return true
+		}
+	}
+	return g.parkedCall(call) != nil
+}
+
 // ms is a duration of n milliseconds.
-func ms(n int32) machine.Duration { return machine.Duration(n) * machine.Millisecond }
+func ms(n int32) actor.Duration { return actor.Duration(n) * actor.Millisecond }
 
 // after is the time from now until at, never below zero.
-func (m *Machine) after(at machine.NodeTime) machine.Duration {
-	return machine.Duration(max(at-m.now, 0))
+func (m *Machine) after(at actor.Mono) actor.Duration {
+	return actor.Duration(max(at-m.now, 0))
 }
 
 // describeOp is the read of one group.

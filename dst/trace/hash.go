@@ -1,6 +1,7 @@
 package trace
 
-// Hash is a running 64-bit FNV-1a fingerprint.
+// Hash is a running 64-bit FNV-1a fingerprint. Use it for product run state
+// instead of hash/fnv, which is off the determinism allow-list.
 // Integers fold as 8 little-endian bytes. Strings and byte slices are length-prefixed.
 // Invariant: identical fold sequences yield identical Sum.
 type Hash uint64

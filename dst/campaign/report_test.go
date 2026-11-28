@@ -6,23 +6,26 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/internal/catalog"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // These tests are the tests of controlplane/cmd/cpsim/report_test.go, moved to
 // the shared report. The hand-kept lists of the control plane are replaced by a
 // catalog that the test gives.
 
-var testCatalog = catalog{
-	asserts: []assert.Declared{
-		{Name: "t: epoch claimed", Kind: assert.KindReachable},
-		{Name: "t: standby took over", Kind: assert.KindReachable},
-		{Name: "t: replica crashed", Kind: assert.KindReachable},
-		{Name: "t: write dropped", Kind: assert.KindSometimes},
-		{Name: "t: one writer", Kind: assert.KindAlways},
-		{Name: "t: never in code", Kind: assert.KindUnreachable},
-		{Name: "t: maybe never", Kind: assert.KindAlwaysOrUnreachable},
+var testCatalog = catalogSet{
+	asserts: []catalog.Declared{
+		{Name: "t: epoch claimed", Kind: actor.KindReachable},
+		{Name: "t: standby took over", Kind: actor.KindReachable},
+		{Name: "t: replica crashed", Kind: actor.KindReachable},
+		{Name: "t: write dropped", Kind: actor.KindSometimes},
+		{Name: "t: one writer", Kind: actor.KindAlways},
+		{Name: "t: never in code", Kind: actor.KindUnreachable},
+		{Name: "t: maybe never", Kind: actor.KindAlwaysOrUnreachable},
 	},
 	sites: []string{"t: site a", "t: site b", "t: site c"},
 }
@@ -41,9 +44,9 @@ func TestCoverageCurve(t *testing.T) {
 // TestReportNamesLostPath: when a path that the campaign used to reach is no
 // longer reached, the report lists it and the coverage line says so.
 func TestReportNamesLostPath(t *testing.T) {
-	cov := map[string]Coverage{}
+	cov := map[string]sim.Coverage{}
 	for _, d := range testCatalog.asserts {
-		cov[d.Name] = Coverage{Kind: string(d.Kind), Checks: 1, Passes: 1}
+		cov[d.Name] = sim.Coverage{Kind: d.Kind, Checks: 1, Passes: 1}
 	}
 	lost := "t: standby took over"
 	delete(cov, lost)
@@ -57,9 +60,9 @@ func TestReportNamesLostPath(t *testing.T) {
 }
 
 func TestCoverageTextWhenAllPathsWereReached(t *testing.T) {
-	cov := map[string]Coverage{}
+	cov := map[string]sim.Coverage{}
 	for _, d := range testCatalog.asserts {
-		cov[d.Name] = Coverage{Kind: string(d.Kind), Checks: 1, Passes: 1}
+		cov[d.Name] = sim.Coverage{Kind: d.Kind, Checks: 1, Passes: 1}
 	}
 	rep := buildReport(campaignData{first: 1, seen: [][]string{{"x"}}, total: Summary{Coverage: cov}, runs: 1}, testCatalog)
 	// Four declared paths: three Reachable and one Sometimes.
@@ -94,7 +97,7 @@ func TestReportListsSitesThatNeverFired(t *testing.T) {
 
 func TestReportFailedSeedsFirst(t *testing.T) {
 	failed := []FailedRun{{Scenario: "chaos", Seed: 2, Replay: "go run ./cmd/cpsim -scenario chaos -seed 2"}}
-	rep := buildReport(campaignData{first: 1, seen: [][]string{{"x"}, {"x"}}, failed: failed, runs: 2}, catalog{})
+	rep := buildReport(campaignData{first: 1, seen: [][]string{{"x"}, {"x"}}, failed: failed, runs: 2}, catalogSet{})
 	var b bytes.Buffer
 	rep.WriteText(&b)
 	lines := strings.Split(b.String(), "\n")
@@ -108,7 +111,7 @@ func TestReportFailedSeedsFirst(t *testing.T) {
 // Always with zero checks is named as never checked. The kinds that may stay
 // silent (Unreachable, AlwaysOrUnreachable) are not.
 func TestNeverReachedAndNeverCheckedComeFromTheCatalog(t *testing.T) {
-	cov := map[string]Coverage{
+	cov := map[string]sim.Coverage{
 		"t: epoch claimed":     {Kind: "reachable", Checks: 3, Passes: 3},
 		"t: write dropped":     {Kind: "sometimes", Checks: 9, Passes: 0},
 		"t: undeclared maybe":  {Kind: "sometimes", Checks: 4, Passes: 0},
@@ -135,7 +138,7 @@ func TestNeverReachedAndNeverCheckedComeFromTheCatalog(t *testing.T) {
 // TestReportTextFormat pins the text of a small report. It is the format of
 // cpsim: change it only with a reason.
 func TestReportTextFormat(t *testing.T) {
-	cov := map[string]Coverage{
+	cov := map[string]sim.Coverage{
 		"t: one writer":  {Kind: "always", Checks: 7, Passes: 7},
 		"t: epoch claim": {Kind: "reachable", Checks: 2, Passes: 2},
 	}
@@ -146,7 +149,7 @@ func TestReportTextFormat(t *testing.T) {
 		failed: []FailedRun{{Scenario: "chaos", Seed: 6, Replay: "replay-6"}},
 		runs:   2,
 	}
-	rep := buildReport(data, catalog{sites: []string{"t: site a", "t: site z"}})
+	rep := buildReport(data, catalogSet{sites: []string{"t: site a", "t: site z"}})
 	var b bytes.Buffer
 	rep.WriteText(&b)
 	want := `
@@ -171,7 +174,7 @@ stopped growing at seed 6 (last seed run: 6)
 }
 
 func TestReportJSON(t *testing.T) {
-	rep := buildReport(campaignData{first: 1, seen: [][]string{{"x"}}, runs: 1}, catalog{})
+	rep := buildReport(campaignData{first: 1, seen: [][]string{{"x"}}, runs: 1}, catalogSet{})
 	var b bytes.Buffer
 	if err := rep.WriteJSON(&b); err != nil {
 		t.Fatal(err)
@@ -218,16 +221,16 @@ func TestHasFailed(t *testing.T) {
 }
 
 func TestWriteFailure(t *testing.T) {
-	r := Result{
-		Seed: 9, Reproduce: "go run ./cmd/x -scenario s -seed 9",
-		Failures: []Failure{{Kind: "violation", Property: "p", Detail: "d", Step: 12, AtMs: 1500, Repeats: 2}},
-		Tail:     []string{"line one", "line two"},
-	}
+	r := Outcome{Result: sim.Result{
+		Seed:     9,
+		Failures: []sim.Failure{{Kind: sim.FailViolation, Property: "p", Detail: "d", Step: 12, At: sim.Time(1500 * time.Millisecond), Repeats: 2}},
+		Tail:     []sim.LogEntry{{Step: 1, At: 5, Text: "line one"}, {Step: 2, At: 2000000, Text: "line two"}},
+	}}
 	var b bytes.Buffer
-	writeFailure(&b, "s", r)
+	writeFailure(&b, "s", "go run ./cmd/x -scenario s -seed 9", r)
 	want := "FAIL s seed 9: violation (p) step=12 at=1.5s: d (and 2 more times)\n" +
 		"  repro: go run ./cmd/x -scenario s -seed 9\n" +
-		"  last steps:\n    line one\n    line two\n"
+		"  last steps:\n         1          5ns  line one\n         2          2ms  line two\n"
 	if b.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", b.String(), want)
 	}
@@ -237,13 +240,13 @@ func TestWriteFailure(t *testing.T) {
 // checked", and a Reachable that is not expected is not "never reached" and is
 // not counted as expected.
 func TestCatalogFlags(t *testing.T) {
-	cat := catalog{asserts: []assert.Declared{
-		{Name: "t: reached", Kind: assert.KindReachable},
-		{Name: "t: optional", Kind: assert.KindReachable, NotExpected: true},
-		{Name: "t: violation", Kind: assert.KindAlways, FailureOnly: true},
-		{Name: "t: checked always", Kind: assert.KindAlways},
+	cat := catalogSet{asserts: []catalog.Declared{
+		{Name: "t: reached", Kind: actor.KindReachable},
+		{Name: "t: optional", Kind: actor.KindReachable, NotExpected: true},
+		{Name: "t: violation", Kind: actor.KindAlways, FailureOnly: true},
+		{Name: "t: checked always", Kind: actor.KindAlways},
 	}}
-	cov := map[string]Coverage{
+	cov := map[string]sim.Coverage{
 		"t: reached":        {Kind: "reachable", Checks: 1, Passes: 1},
 		"t: checked always": {Kind: "always", Checks: 2, Passes: 2},
 	}

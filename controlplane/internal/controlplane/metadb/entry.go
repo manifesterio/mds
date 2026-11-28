@@ -11,7 +11,6 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/memory"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
 )
 
 // A log entry is the protobuf message logv1.Entry: an id and at most one
@@ -127,14 +126,14 @@ func NewMem() *DB { return New(memory.New()) }
 // A store failure panics (fail-stop).
 func (a *DB) Apply(slot int64, e Entry) runtime.ControlPlaneDone {
 	if e.Kind == KindNoop {
-		return runtime.ControlPlaneDone{Req: machine.RequestID(slot), Outcome: runtime.Applied}
+		return runtime.ControlPlaneDone{Slot: runtime.LogPosition(slot), Outcome: runtime.Applied}
 	}
 	if e.Op == nil {
-		return runtime.ControlPlaneDone{Req: machine.RequestID(slot), Err: runtime.ErrInvalid}
+		return runtime.ControlPlaneDone{Slot: runtime.LogPosition(slot), Err: runtime.ErrInvalid}
 	}
 	d, err := a.Write(slot, e.Op)
 	mustStore(err)
-	d.Req = machine.RequestID(slot)
+	d.Slot = runtime.LogPosition(slot)
 	return d
 }
 

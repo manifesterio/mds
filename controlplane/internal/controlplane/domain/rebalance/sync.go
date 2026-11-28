@@ -28,7 +28,7 @@ func check(s *serving, group, id string, generation int32) (*group, *member, run
 func (m *Machine) syncGroup(s *serving, in Sync) {
 	g, mm, code := check(s, in.Group, in.MemberID, in.Generation)
 	if code != runtime.OK {
-		m.reply(in.Call, code, nil)
+		m.reply(in.ReplyTo, code, nil)
 		return
 	}
 	switch p := g.phase.(type) {
@@ -36,7 +36,7 @@ func (m *Machine) syncGroup(s *serving, in Sync) {
 		// The stored assignment, at once. The session does not start again (rule 23).
 		mm.synced = true
 		m.allSynced(g)
-		m.reply(in.Call, runtime.OK, SyncAnswer{Assignment: clone(p.assign[mm.id])})
+		m.reply(in.ReplyTo, runtime.OK, SyncAnswer{Assignment: clone(p.assign[mm.id])})
 	case *syncing:
 		if mm.id == g.leader {
 			m.leaderSync(s, g, in)
@@ -46,12 +46,11 @@ func (m *Machine) syncGroup(s *serving, in Sync) {
 		if old, waits := p.syncs[mm.id]; waits {
 			delete(p.syncs, mm.id)
 			m.reply(old, runtime.ErrRebalanceInProgress, nil)
-			m.touch(mm)
+			m.touch(g, mm)
 		}
-		p.syncs[mm.id] = in.Call
-		s.where[in.Call] = g.name
+		p.syncs[mm.id] = in.ReplyTo
 	default:
-		m.reply(in.Call, runtime.ErrRebalanceInProgress, nil) // rule 19
+		m.reply(in.ReplyTo, runtime.ErrRebalanceInProgress, nil) // rule 19
 	}
 }
 
@@ -60,17 +59,17 @@ func (m *Machine) leaderSync(s *serving, g *group, in Sync) {
 	list := make([]contract.GroupAssignment, 0, len(in.Assignments))
 	for i, a := range in.Assignments {
 		if g.find(a.Member) == nil {
-			m.reply(in.Call, runtime.ErrUnknownMember, nil)
+			m.reply(in.ReplyTo, runtime.ErrUnknownMember, nil)
 			return
 		}
 		if slices.ContainsFunc(in.Assignments[:i], func(b Assignment) bool { return b.Member == a.Member }) {
-			m.reply(in.Call, runtime.ErrInvalid, nil)
+			m.reply(in.ReplyTo, runtime.ErrInvalid, nil)
 			return
 		}
 		list = append(list, contract.GroupAssignment{Member: a.Member, Bytes: clone(a.Bytes)})
 	}
 	op := contract.GroupAssign{Group: g.name, Generation: g.generation, Leader: g.leader, TimeMs: m.wallMs(), Assignments: list}
-	m.startWrite(s, g, op, assignWrite{call: in.Call, op: op})
+	m.startWrite(g, op, assignWrite{call: in.ReplyTo, op: op})
 }
 
 // assigned applies a logged assignment: the group is Stable, and the leader
@@ -89,10 +88,10 @@ func (m *Machine) assigned(g *group, k assignWrite, dropped bool) {
 	for _, mm := range g.members {
 		if call, ok := sy.syncs[mm.id]; ok {
 			m.reply(call, runtime.OK, SyncAnswer{Assignment: clone(st.assign[mm.id])})
-			m.touch(mm)
+			m.touch(g, mm)
 		}
 	}
-	m.touch(leader)
+	m.touch(g, leader)
 	m.allSynced(g)
 	if !dropped {
 		m.reply(k.call, runtime.OK, SyncAnswer{Assignment: clone(st.assign[leader.id])})
@@ -102,7 +101,7 @@ func (m *Machine) assigned(g *group, k assignWrite, dropped bool) {
 // allSynced stops the sync deadline when every member has synced (rule 24).
 func (m *Machine) allSynced(g *group) {
 	if !slices.ContainsFunc(g.members, func(mm *member) bool { return !mm.synced }) {
-		m.stop(&g.round)
+		m.stop(g, roundKey(g.name))
 	}
 }
 
@@ -110,62 +109,56 @@ func (m *Machine) allSynced(g *group) {
 func (m *Machine) heartbeat(s *serving, in Heartbeat) {
 	g, mm, code := check(s, in.Group, in.MemberID, in.Generation)
 	if code != runtime.OK {
-		m.reply(in.Call, code, nil)
+		m.reply(in.ReplyTo, code, nil)
 		return
 	}
-	m.touch(mm)
+	m.touch(g, mm)
 	if _, ok := g.phase.(*joining); ok {
-		m.reply(in.Call, runtime.ErrRebalanceInProgress, nil)
+		m.reply(in.ReplyTo, runtime.ErrRebalanceInProgress, nil)
 		return
 	}
-	m.reply(in.Call, runtime.OK, nil)
+	m.reply(in.ReplyTo, runtime.OK, nil)
 }
 
-// abandon forgets a call whose RPC context ended (rule 33). A queued call is
+// abandon forgets a call whose caller is gone (rule 33). A queued call is
 // taken out; a call whose write is in flight gets no reply, but the write is
 // applied; a parked call is forgotten in order with the other inputs.
-func (m *Machine) abandon(s *serving, call CallID) {
-	if m.abandonRead(s, call) || m.abandonCommit(s, call) {
+func (m *Machine) abandon(s *serving, gone callGone) {
+	if m.abandonRead(s, gone.call) || m.abandonCommit(s, gone.call) {
 		return
 	}
-	name, ok := s.where[call]
-	if !ok {
+	g := s.groups[gone.group]
+	if g == nil {
 		return
 	}
-	g := s.groups[name]
 	if !g.busy() {
-		m.abandonParked(s, call)
+		m.abandonParked(s, gone)
 		return
 	}
-	if i := slices.IndexFunc(g.queue, func(in Input) bool { c, ok := callOf(in); return ok && c == call }); i >= 0 {
+	if i := slices.IndexFunc(g.queue, func(in Input) bool { c, ok := callOf(in); return ok && c == gone.call }); i >= 0 {
 		g.queue = slices.Delete(g.queue, i, i+1)
-		delete(s.where, call)
 		return
 	}
 	if w := g.write; w != nil {
-		if c, ok := w.caller(); ok && c == call {
+		if c, ok := w.caller(); ok && c == gone.call {
 			w.dropped = true
-			delete(s.where, call)
 			return
 		}
 	}
-	g.queue = append(g.queue, CallAbandoned{Call: call})
+	if g.parkedCall(gone.call) != nil {
+		g.queue = append(g.queue, gone)
+	}
 }
 
 // abandonParked forgets a parked join or sync. The member stays, but no
 // longer counts as joined, and its session starts again.
-func (m *Machine) abandonParked(s *serving, call CallID) {
-	name, ok := s.where[call]
-	if !ok {
+func (m *Machine) abandonParked(s *serving, gone callGone) {
+	g := s.groups[gone.group]
+	if g == nil {
 		return
 	}
-	delete(s.where, call)
-	g := s.groups[name]
-	for _, mm := range g.members {
-		if c, ok := g.parked(mm); ok && c == call {
-			g.unpark(mm)
-			m.touch(mm)
-			return
-		}
+	if mm := g.parkedCall(gone.call); mm != nil {
+		g.unpark(mm)
+		m.touch(g, mm)
 	}
 }

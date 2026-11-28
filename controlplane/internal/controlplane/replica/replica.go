@@ -5,21 +5,29 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
+// outbox is the Outbox the replica records its effects on.
+type outbox = actor.Outbox[runtime.EventData, runtime.IO]
+
+// Timer keys. The catch-up timer lives in the work scope (see work), so
+// ForgetPending on work drops it; the role and checkpoint timers live at the
+// actor level and survive it.
 const (
-	timerCatchUp = machine.TimerID(1)
+	timerCatchUp    actor.TimerKey = "catchup"
+	timerRole       actor.TimerKey = "role"
+	timerCheckpoint actor.TimerKey = "checkpoint"
 )
 
-// Replica is the control-plane DSM. Build it with New.
+// Replica is the control-plane actor. Build it with New or Props.
 type Replica struct {
-	env    machine.Env
-	self   machine.NodeInstance
+	env    runtime.Environment
+	self   actor.Incarnation
 	config Config
 
-	openErr error // the first store could not open; NodeStarted stops the machine
+	openErr error // the first store could not open; NodeStarted stops the actor
 
 	started  bool
 	stopping bool
@@ -30,49 +38,44 @@ type Replica struct {
 
 	meta *metadb.DB
 
-	now           machine.NodeTime
-	timerGen      machine.TimerVersion
-	roleGen       machine.TimerVersion
-	checkpointGen machine.TimerVersion
-	nextReq       machine.RequestID
-	seq           uint64
-	applied       runtime.LogPosition // next slot to apply
-	goalTail      runtime.LogPosition // CheckTail answer for the current round
-	high          runtime.LogPosition // next slot to allocate for commit appends
-	buf           map[runtime.LogPosition][]byte
-	pending       machine.RequestID
-	epoch         uint64            // writer epoch this node holds; zero when it is not the writer
-	claimReq      machine.RequestID // in-flight LogClaimEpoch; 0 means none
-	claimExpect   uint64            // epoch that claim expected to find
-	fencedFlag    bool              // a newer epoch was seen while applying; step down after the drain
-	stepDowns     uint64            // times this node stopped being the writer because of a newer epoch
-	tailChecked   bool              // a tail check finished since the last restore
-	maxEpochSeen  uint64            // highest writer epoch seen in applied log entries
-	restoreKey    string            // checkpoint object being read
-	pendingKind   pendingKind
+	now          actor.Mono
+	seq          uint64
+	applied      runtime.LogPosition // next slot to apply
+	goalTail     runtime.LogPosition // CheckTail answer for the current round
+	high         runtime.LogPosition // next slot to allocate for commit appends
+	buf          map[runtime.LogPosition][]byte
+	epoch        uint64 // writer epoch this node holds; zero when it is not the writer
+	claiming     bool   // a LogClaimEpoch is in flight
+	claimExpect  uint64 // epoch that claim expected to find
+	fencedFlag   bool   // a newer epoch was seen while applying; step down after the drain
+	stepDowns    uint64 // times this node stopped being the writer because of a newer epoch
+	tailChecked  bool   // a tail check finished since the last restore
+	maxEpochSeen uint64 // highest writer epoch seen in applied log entries
+	restoreKey   string // checkpoint object being read
+	// pendingKind is the catch-up or restore request in flight (one at a
+	// time, in the pull scope); pendingNone when idle.
+	pendingKind pendingKind
 
-	lastPullOK  machine.NodeTime
-	lastOtherAt machine.NodeTime
-	lastOwnAt   machine.NodeTime
+	lastPullOK  actor.Mono
+	lastOtherAt actor.Mono
+	lastOwnAt   actor.Mono
 
 	checkpointSlot    runtime.LogPosition // newest checkpoint slot (written or restored)
-	checkpointAt      machine.NodeTime
+	checkpointAt      actor.Mono
 	checkpointPending runtime.LogPosition // slot of in-flight ObjectPut snapshot
 	checkpointData    []byte
-	// The checkpoint lane: the snapshot upload, then the log trim, one request at
-	// a time, on its own request id. It never uses pending, so a slow upload
-	// cannot block catch-up and catch-up cannot block the checkpoint.
-	checkpointRequest machine.RequestID // in-flight request of the lane; 0 means idle
-	checkpointStage   checkpointStage
-	trimThrough       runtime.LogPosition // Through of the in-flight trim
+	// The checkpoint lane: the snapshot upload, then the log trim, one request
+	// at a time. It never uses pendingKind, so a slow upload cannot block
+	// catch-up and catch-up cannot block the checkpoint. Zero when idle.
+	checkpointStage checkpointStage
+	trimThrough     runtime.LogPosition // Through of the in-flight trim
 
-	queue           []waitingCommand                      // client ops waiting for a commit slot
-	inFlightAppends map[machine.RequestID]*inFlightAppend // in-flight commit LogAppends (at most one)
+	queue           []waitingCommand // client ops waiting for a commit slot
+	inFlight        *inFlightAppend  // the commit or heartbeat LogAppend in flight; nil when none
 	waiters         map[string][]waitingCommand
-	answers         []ReplyToClient
 	trimFloor       runtime.LogPosition // slots below are trimmed
-	stallUntil      machine.NodeTime
-	downUntil       machine.NodeTime
+	stallUntil      actor.Mono
+	downUntil       actor.Mono
 	crashed         bool
 	needsCheckpoint bool // fell behind a trim; must restore before catch-up from zero
 	checkpointRetry bool // the last checkpoint read failed; read again before catch-up
@@ -107,25 +110,51 @@ const (
 )
 
 // Factory builds a replica for one incarnation of a node.
-type Factory func(env machine.Env, self machine.NodeInstance) *Replica
+type Factory func(env runtime.Environment) *Replica
 
-// New returns the Factory of the control-plane machine. A factory
-// cannot return an error, so a store that cannot open (Config.OpenStore) is
-// remembered and the machine stops with StopForRestart on NodeStarted: the
-// process cannot serve without its state.
+// New returns the Factory of the control-plane actor. A factory cannot return
+// an error, so a store that cannot open (Config.OpenStore) is remembered and
+// the actor stops with Trip on NodeStarted: the process cannot serve without
+// its state.
 func New(config Config) Factory {
-	return func(env machine.Env, self machine.NodeInstance) *Replica {
+	return func(env runtime.Environment) *Replica {
 		meta, err := config.openMetadata()
 		if err != nil {
-			meta = metadb.NewMem() // placeholder; NodeStarted stops the machine
+			meta = metadb.NewMem() // placeholder; NodeStarted stops the actor
 		}
 		return &Replica{
-			env: env, self: self, config: config, openErr: err,
-			meta:            meta,
-			buf:             map[runtime.LogPosition][]byte{},
-			inFlightAppends: map[machine.RequestID]*inFlightAppend{},
-			waiters:         map[string][]waitingCommand{},
+			env: env, self: env.Self(), config: config, openErr: err,
+			meta:    meta,
+			buf:     map[runtime.LogPosition][]byte{},
+			waiters: map[string][]waitingCommand{},
 		}
+	}
+}
+
+// Props says how to run the replica. Every boot builds a new Replica and,
+// when keep is not nil, hands it to keep, so the caller can read it (Ready,
+// Metadata, ...). A graceful stop is a StopRequest, received before data.
+func Props(config Config, keep func(*Replica)) actor.Props[runtime.EventData, runtime.IO] {
+	factory := New(config)
+	return actor.Props[runtime.EventData, runtime.IO]{
+		Name: "replica",
+		New: func(env actor.Env) actor.Actor[runtime.EventData, runtime.IO] {
+			m := factory(env)
+			if keep != nil {
+				keep(m)
+			}
+			return m
+		},
+		Boot: func(self actor.Incarnation) runtime.EventData { return runtime.NodeStarted{Self: self} },
+		StopMsg: func(deadline actor.Mono) runtime.EventData {
+			return runtime.StopRequest{Deadline: deadline}
+		},
+		Priority: func(msg runtime.EventData) actor.Priority {
+			if _, ok := msg.(runtime.StopRequest); ok {
+				return actor.Control
+			}
+			return actor.Data
+		},
 	}
 }
 
@@ -151,136 +180,150 @@ func (m *Replica) reseedTopics() {
 	}
 }
 
-// Replica is a machine of the dst v2 contract.
-var _ machine.Machine[runtime.EventData, runtime.Action] = (*Replica)(nil)
+// Replica is an actor.
+var _ actor.Actor[runtime.EventData, runtime.IO] = (*Replica)(nil)
 
-// Step takes one input and returns what the machine wants done, in order: timers,
-// the end of the incarnation (StopForRestart, ShutdownDone) and IO calls. Unknown
-// completions and unhandled values leave the state unchanged. After
-// StopForRestart or ShutdownDone, every input is a no-op.
-func (m *Replica) Step(now machine.Now, in runtime.EventData) []runtime.Action {
+// Scopes. Every log and object request and the catch-up timer are recorded
+// in work, so ForgetPending on work drops all of them at once (a soft crash,
+// a trimmed slot). Commit and heartbeat appends are in work/commit and the
+// claim in work/role, so a step-down drops just those. The catch-up and
+// restore requests are in work/pull: one of them is in flight at a time, and
+// starting a new one while another is out forgets the old one.
+
+func identity(e runtime.EventData) runtime.EventData { return e }
+
+func work(o *outbox) *outbox { return actor.Sub(o, "work", identity) }
+
+func commitScope(o *outbox) *outbox { return actor.Sub(work(o), "commit", identity) }
+
+func roleScope(o *outbox) *outbox { return actor.Sub(work(o), "role", identity) }
+
+func pullScope(o *outbox) *outbox { return actor.Sub(work(o), "pull", identity) }
+
+// Receive takes one message and records what the replica wants done, in
+// order. Answers that nothing waits for any more leave the state unchanged.
+// After a Stop every message is a no-op.
+func (m *Replica) Receive(now actor.Now, msg runtime.EventData, o *outbox) {
 	if m.exited {
-		return nil
+		return
 	}
 	m.now = now.Mono
-	var acts []runtime.Action
-	switch body := in.(type) {
+	switch body := msg.(type) {
 	case runtime.NodeStarted:
-		acts = m.onStarted()
+		m.onStarted(o)
 	case runtime.StopRequest:
-		acts = m.stop()
-	case runtime.TimerFired:
-		acts = m.onTimer(body)
+		m.stop(o)
+	case runtime.CatchUpDue:
+		m.onCatchUpDue(o)
+	case runtime.RoleDue:
+		m.onRoleTimer(o)
+	case runtime.CheckpointDue:
+		m.onCheckpointTimer(o)
 	case runtime.LogGetEndDone:
-		acts = m.onCheckTailDone(body)
+		m.onCheckTailDone(body, o)
 	case runtime.LogReadDone:
-		acts = m.onReadDone(body)
+		m.onReadDone(body, o)
 	case runtime.LogAppendDone:
-		acts = m.onAppendDone(body)
+		m.onAppendDone(body, o)
 	case runtime.LogClaimEpochDone:
-		acts = m.onClaimDone(body)
+		m.onClaimDone(body, o)
 	case runtime.ObjectListDone:
-		acts = m.onObjListDone(body)
+		m.onObjListDone(body, o)
 	case runtime.ObjectGetDone:
-		acts = m.onObjGetDone(body)
+		m.onObjGetDone(body, o)
 	case runtime.ObjectPutDone:
-		acts = m.onObjPutDone(body)
+		m.onObjPutDone(body, o)
 	case runtime.LogDeleteOldDone:
-		acts = m.onTrimDone(body)
+		m.onTrimDone(body)
 	case runtime.ControlPlaneDeliver:
-		return m.onControlPlaneDeliver(body) // already withReplies
+		m.onControlPlaneDeliver(body, o)
+		return
 	case runtime.LocalRead:
-		return m.onLocalRead(body)
-	case runtime.ObjectDeleteDone, runtime.ControlPlaneDone:
-		return nil // the replica never starts these calls
+		m.onLocalRead(body, o)
+		return
 	}
-	acts = append(acts, m.serveReads()...)
-	return m.withReplies(acts)
+	m.serveReads(o)
 }
 
-func (m *Replica) onStarted() []runtime.Action {
+func (m *Replica) onStarted(o *outbox) {
 	m.started = true
 	if m.openErr != nil {
-		return m.trip(m.openErr)
+		m.trip(o, m.openErr)
+		return
 	}
 	if m.checkpointEnabled() {
 		m.booting = true
 		m.ready = false
-		return m.emitCheckpointList()
+		m.emitCheckpointList(o)
+		return
 	}
-	return m.afterRestore()
+	m.afterRestore(o)
 }
 
-func (m *Replica) afterRestore() []runtime.Action {
+func (m *Replica) afterRestore(o *outbox) {
 	if m.config.CatchUpEvery > 0 {
 		m.booting = true
 		m.ready = false
-		return m.armCatchUp()
+		m.armCatchUp(o)
+		return
 	}
-	return m.finishBoot()
+	m.finishBoot(o)
 }
 
-func (m *Replica) finishBoot() []runtime.Action {
+func (m *Replica) finishBoot(o *outbox) {
 	m.booting = false
 	m.ready = true
 	m.lastOtherAt, m.lastPullOK, m.lastOwnAt = m.now, m.now, m.now
-	var acts []runtime.Action
-	acts = append(acts, m.claimNow()...)
-	acts = append(acts, m.armRole()...)
-	acts = append(acts, m.armCheckpoint()...)
-	return acts
+	m.claimNow(o)
+	m.armRole(o)
+	m.armCheckpoint(o)
 }
 
-func (m *Replica) maybeBecomeReady() []runtime.Action {
-	if !m.booting || m.pending != 0 || m.applied < m.goalTail {
-		return nil
+// maybeBecomeReady finishes the boot when the restore and the first catch-up
+// round are done.
+func (m *Replica) maybeBecomeReady(o *outbox) {
+	if !m.booting || m.pendingKind != pendingNone || m.applied < m.goalTail {
+		return
 	}
 	// A restore is not over until the checkpoint is read and a tail check
 	// finished after it. An append completion alone must never make the node ready.
 	if m.checkpointRetry || m.needsCheckpoint || (m.config.CatchUpEvery > 0 && !m.tailChecked) {
-		return nil
+		return
 	}
-	return m.finishBoot()
+	m.finishBoot(o)
 }
 
-func (m *Replica) onTimer(e runtime.TimerFired) []runtime.Action {
-	switch e.ID {
-	case timerCatchUp:
-		if e.Gen != m.timerGen || m.pending != 0 || m.config.CatchUpEvery <= 0 {
-			return nil
-		}
-		return m.emitCheckTail()
-	case timerRole:
-		return m.onRoleTimer(e)
-	case timerCheckpoint:
-		return m.onCheckpointTimer(e)
-	default:
-		return nil
+func (m *Replica) onCatchUpDue(o *outbox) {
+	if m.pendingKind != pendingNone || m.config.CatchUpEvery <= 0 {
+		return
 	}
+	m.emitCheckTail(o)
 }
 
-func (m *Replica) onCheckTailDone(d runtime.LogGetEndDone) []runtime.Action {
-	if d.Req != m.pending || m.pendingKind != pendingTail {
-		return nil
+func (m *Replica) onCheckTailDone(d runtime.LogGetEndDone, o *outbox) {
+	if m.pendingKind != pendingTail {
+		return
 	}
-	m.pending, m.pendingKind = 0, pendingNone
+	m.pendingKind = pendingNone
 	if d.Err != runtime.OK || d.Outcome != runtime.Applied {
-		return m.armCatchUp()
+		m.armCatchUp(o)
+		return
 	}
 	m.notePullOK()
 	m.tailChecked = true
 	m.goalTail = d.Tail
 	m.noteTail(m.tailRound, d.Tail)
-	return m.progress()
+	m.progress(o)
 }
 
-func (m *Replica) onReadDone(d runtime.LogReadDone) []runtime.Action {
-	if d.Req != m.pending || m.pendingKind != pendingRead {
-		return nil
+func (m *Replica) onReadDone(d runtime.LogReadDone, o *outbox) {
+	if m.pendingKind != pendingRead {
+		return
 	}
-	m.pending, m.pendingKind = 0, pendingNone
+	m.pendingKind = pendingNone
 	if d.Err != runtime.OK || d.Outcome != runtime.Applied {
-		return m.armCatchUp()
+		m.armCatchUp(o)
+		return
 	}
 	m.notePullOK()
 	for _, e := range d.Entries {
@@ -295,54 +338,54 @@ func (m *Replica) onReadDone(d runtime.LogReadDone) []runtime.Action {
 	// m.applied and returns only slots that exist: if the next slot is missing but a
 	// later one exists, this node fell behind a trim.
 	if len(d.Entries) > 0 && m.nextSlotMissing() {
-		return m.hitTrimmed()
+		m.hitTrimmed(o)
+		return
 	}
-	if err := m.drain(); err != nil {
-		return m.trip(err)
+	if err := m.drain(o); err != nil {
+		m.trip(o, err)
+		return
 	}
-	var acts []runtime.Action
 	if m.fencedFlag {
-		acts = m.stepDown()
+		m.stepDown(o)
 	}
-	acts = append(acts, m.progress()...)
-	return append(acts, m.flushCommits()...)
+	m.progress(o)
+	m.flushCommits(o)
 }
 
-func (m *Replica) onAppendDone(d runtime.LogAppendDone) []runtime.Action {
-	if f, ok := m.inFlightAppends[d.Req]; ok {
-		return m.onCommitAppendDone(d, f)
+// onAppendDone handles the answer to the commit or heartbeat append in
+// flight. The slot must match: an answer for an append that was replaced is
+// not this one's.
+func (m *Replica) onAppendDone(d runtime.LogAppendDone, o *outbox) {
+	if m.inFlight == nil || d.Slot != m.inFlight.slot {
+		return
 	}
-	return nil
+	m.onCommitAppendDone(d, m.inFlight, o)
 }
 
-func (m *Replica) drain() error {
+func (m *Replica) drain(o *outbox) error {
 	for {
 		data, ok := m.buf[m.applied]
 		if !ok {
 			return nil
 		}
 		delete(m.buf, m.applied)
-		if err := m.applySlot(m.applied, data); err != nil {
+		if err := m.applySlot(m.applied, data, o); err != nil {
 			return err
 		}
 		m.applied++
 	}
 }
 
-func (m *Replica) progress() []runtime.Action {
-	if m.pending != 0 {
-		return nil
+func (m *Replica) progress(o *outbox) {
+	if m.pendingKind != pendingNone {
+		return
 	}
 	if m.applied < m.goalTail || m.nextSlotMissing() {
-		return m.emitRead()
+		m.emitRead(o)
+		return
 	}
-	if acts := m.maybeBecomeReady(); acts != nil {
-		var out []runtime.Action
-		out = append(out, acts...)
-		out = append(out, m.armCatchUp()...)
-		return out
-	}
-	return m.armCatchUp()
+	m.maybeBecomeReady(o)
+	m.armCatchUp(o)
 }
 
 // nextSlotMissing reports that a later slot is buffered (one of our own
@@ -355,54 +398,58 @@ func (m *Replica) nextSlotMissing() bool {
 	return !ok
 }
 
-func (m *Replica) emitCheckTail() []runtime.Action {
-	m.nextReq++
-	m.pending = m.nextReq
-	m.pendingKind = pendingTail
+// pull returns the scope of the catch-up and restore requests, with any
+// request still out in it forgotten: only the newest one is answered.
+func (m *Replica) pull(o *outbox, kind pendingKind) *outbox {
+	p := pullScope(o)
+	if m.pendingKind != pendingNone {
+		p.ForgetPending()
+	}
+	m.pendingKind = kind
+	return p
+}
+
+func (m *Replica) emitCheckTail(o *outbox) {
+	p := m.pull(o, pendingTail)
 	m.tailsStarted++
 	m.tailRound = m.tailsStarted
-	return []runtime.Action{runtime.LogGetEnd{Req: m.pending}}
+	actor.Perform(p, runtime.LogGetEnd{}, func(d runtime.LogGetEndDone) runtime.EventData { return d })
 }
 
-func (m *Replica) emitRead() []runtime.Action {
-	m.nextReq++
-	m.pending = m.nextReq
-	m.pendingKind = pendingRead
-	return []runtime.Action{runtime.LogRead{Req: m.pending, From: m.applied, Limit: m.config.readLimit()}}
+func (m *Replica) emitRead(o *outbox) {
+	p := m.pull(o, pendingRead)
+	actor.Perform(p, runtime.LogRead{From: m.applied, Limit: m.config.readLimit()},
+		func(d runtime.LogReadDone) runtime.EventData { return d })
 }
 
-func (m *Replica) armCatchUp() []runtime.Action {
-	if m.config.CatchUpEvery <= 0 {
-		return nil
+func (m *Replica) armCatchUp(o *outbox) {
+	if m.config.CatchUpEvery <= 0 || m.exited {
+		return
 	}
-	m.timerGen++
-	return []runtime.Action{arm(timerCatchUp, m.timerGen, m.config.CatchUpEvery)}
+	work(o).StartTimer(timerCatchUp, m.config.CatchUpEvery, runtime.CatchUpDue{})
 }
 
-// arm returns the action that starts timer id. The generation goes back to
-// the machine inside the TimerFired value, so a stale timer is ignored.
-func arm(id machine.TimerID, gen machine.TimerVersion, after machine.Duration) runtime.SetTimer {
-	return runtime.SetTimer{ID: id, Gen: gen, After: after}
-}
-
-// trip ends the machine: its memory can not be trusted any more, so the
-// runner must start a new incarnation.
-func (m *Replica) trip(err error) []runtime.Action {
+// trip ends the actor: its memory can not be trusted any more, so the
+// runtime must start a new incarnation. Stop is the last effect of the
+// Receive: once exited, nothing else is recorded.
+func (m *Replica) trip(o *outbox, err error) {
 	m.exited = true
-	return []runtime.Action{runtime.StopForRestart{Cause: err.Error()}}
+	o.Stop(actor.Trip, err.Error())
 }
 
-func (m *Replica) stop() []runtime.Action {
+// stop marks the actor shutting down and ends it. With no in-flight work
+// yet that must drain, the end is immediate.
+func (m *Replica) stop(o *outbox) {
 	if m.stopping {
-		return nil
+		return
 	}
 	m.stopping = true
 	m.exited = true
-	return []runtime.Action{runtime.ShutdownDone{}}
+	o.Stop(actor.Exit, "")
 }
 
 // StateHash folds every field that influences behaviour, including the applied
-// metadb digest (comparable across machines that folded the same prefix).
+// metadb digest (comparable across replicas that folded the same prefix).
 func (m *Replica) StateHash() uint64 {
 	h := trace.New()
 	h.Bool(m.started)
@@ -411,28 +458,23 @@ func (m *Replica) StateHash() uint64 {
 	h.Bool(m.booting)
 	h.Bool(m.ready)
 	h.Bool(m.active)
-	h.Uint64(uint64(m.timerGen))
-	h.Uint64(uint64(m.roleGen))
-	h.Uint64(uint64(m.checkpointGen))
-	h.Uint64(uint64(m.nextReq))
-	h.Uint64(uint64(m.seq))
+	h.Uint64(m.seq)
 	h.Uint64(uint64(m.applied))
 	h.Uint64(uint64(m.goalTail))
 	h.Uint64(uint64(m.high))
-	h.Uint64(uint64(m.pending))
 	h.Uint64(uint64(m.pendingKind))
 	h.String(m.restoreKey)
 	h.Bool(m.checkpointRetry)
 	h.Uint64(m.epoch)
 	h.Uint64(m.maxEpochSeen)
-	h.Uint64(uint64(m.claimReq))
+	h.Bool(m.claiming)
 	h.Bool(m.fencedFlag)
 	h.Uint64(m.stepDowns)
 	h.Bool(m.tailChecked)
 	h.Uint64(uint64(m.checkpointSlot))
-	h.Uint64(uint64(m.checkpointRequest))
+	h.Uint64(uint64(m.checkpointStage))
 	h.Uint64(uint64(len(m.queue)))
-	h.Uint64(uint64(len(m.inFlightAppends)))
+	h.Bool(m.inFlight != nil)
 	h.Uint64(uint64(len(m.waiters)))
 	h.Uint64(uint64(len(m.readWaiters)))
 	h.Uint64(m.tailsStarted)

@@ -2,12 +2,12 @@ package campaign
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/manifesterio/mds/dst/internal/seedenv"
 )
 
 // Options say what one campaign does.
@@ -102,7 +102,7 @@ func ParseOptions(c Config, args []string, getenv func(string) string, stderr io
 	d := withBuiltInDefaults(c.Defaults)
 	seedDefault := int64(-1)
 	if c.EnvPrefix != "" {
-		e, err := ReadEnv(c.EnvPrefix, getenv)
+		e, err := seedenv.Read(c.EnvPrefix, getenv)
 		if err != nil {
 			return Options{}, err
 		}
@@ -185,106 +185,3 @@ func splitNames(s string) []string {
 	}
 	return out
 }
-
-// EnvSettings are the values of the three variables <prefix>_SEEDS,
-// <prefix>_SEED and <prefix>_CAMPAIGN. A variable that is not set (or is
-// empty) leaves its field at the zero value.
-type EnvSettings struct {
-	// Seeds is the value of <prefix>_SEEDS: the number of seeds (1 or more).
-	// 0: not set.
-	Seeds int
-	// HasSeed is true when <prefix>_SEED is set. Seed is its value (0 or more).
-	HasSeed bool
-	Seed    uint64
-	// Duration is the value of <prefix>_CAMPAIGN, for example 30s. 0: not set.
-	Duration time.Duration
-}
-
-// ReadEnv reads the variables of prefix with getenv. A bad value is an error,
-// because a silent fallback would hide a typing mistake. An empty value counts
-// as not set, so that "VAR=" in a shell is not a bad value. This is the one
-// place that parses these variables: ParseOptions uses it, and so does the
-// spec toolkit (dst/check/spectest) for its tests.
-func ReadEnv(prefix string, getenv func(string) string) (EnvSettings, error) {
-	e := envReader{prefix: prefix, getenv: getenv}
-	var out EnvSettings
-	var err error
-	if out.Seeds, err = e.seeds(0); err != nil {
-		return EnvSettings{}, err
-	}
-	if out.Duration, err = e.campaign(0); err != nil {
-		return EnvSettings{}, err
-	}
-	seed, err := e.seed(-1)
-	if err != nil {
-		return EnvSettings{}, err
-	}
-	if seed >= 0 {
-		out.HasSeed, out.Seed = true, uint64(seed)
-	}
-	return out, nil
-}
-
-// envReader reads one variable of a prefix.
-type envReader struct {
-	prefix string
-	getenv func(string) string
-}
-
-func (e envReader) value(suffix string) (string, string) {
-	name := e.prefix + "_" + suffix
-	if e.getenv == nil {
-		return name, ""
-	}
-	return name, e.getenv(name)
-}
-
-func (e envReader) seeds(def int) (int, error) {
-	name, v := e.value("SEEDS")
-	if v == "" {
-		return def, nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 {
-		return 0, envError{fmt.Sprintf("%s has the value %q: it must be a whole number of 1 or more, for example 200", name, v)}
-	}
-	return n, nil
-}
-
-func (e envReader) seed(def int64) (int64, error) {
-	name, v := e.value("SEED")
-	if v == "" {
-		return def, nil
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 0 {
-		return 0, envError{fmt.Sprintf("%s has the value %q: it must be a whole number of 0 or more, for example 17", name, v)}
-	}
-	return n, nil
-}
-
-func (e envReader) campaign(def time.Duration) (time.Duration, error) {
-	name, v := e.value("CAMPAIGN")
-	if v == "" {
-		return def, nil
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		return 0, envError{fmt.Sprintf("%s has the value %q: it must be a duration longer than zero, for example 30s or 5m", name, v)}
-	}
-	return d, nil
-}
-
-// DescribeSettings returns a short help text for the three variables of
-// prefix. Docs can use it, so the text and the code do not drift apart.
-func DescribeSettings(prefix string) string {
-	return prefix + "_SEED=<n>        run only seed n (n is 0 or more); the strongest setting\n" +
-		prefix + "_CAMPAIGN=<time> run seeds until the time ends, for example 30s\n" +
-		prefix + "_SEEDS=<n>       run seeds 1 to n (n is 1 or more)\n"
-}
-
-// envError is a bad value in an environment variable. The flag package prints
-// its own errors; this one is printed by Main.
-type envError struct{ msg string }
-
-func (e envError) Error() string { return e.msg }

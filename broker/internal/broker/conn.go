@@ -8,7 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // connection is one client connection. Kafka answers a connection's requests in
@@ -24,6 +24,13 @@ type connection struct {
 	abort   bool   // close with RST
 	closed  bool   // CloseConn issued or peer gone; answers are dropped
 	host    string // client host, from the peer address (JoinGroup's ClientHost)
+	seq     uint64 // Seq of the last socket IO recorded for this connection
+}
+
+// nextSeq is the Seq of the next socket IO of c (core.IO).
+func (c *connection) nextSeq() uint64 {
+	c.seq++
+	return c.seq
 }
 
 // slot is one request awaiting its response.
@@ -34,13 +41,13 @@ type slot struct {
 	pending  int  // parts still outstanding, plus 1 while the handler runs
 	ready    bool // resp is complete
 	silent   bool // no response is sent (acks=0)
-	facts    []machine.Fact
+	facts    []actor.Fact
 	// fetchMax is the Fetch request's total byte limit (<= 0: none).
 	fetchMax int32
 	// Fetch long poll (fetch.go): the Fetch waits for fetchMin bytes until
 	// fetchUntil. fetchGot counts the bytes its ended parts returned.
 	fetchMin   int32
-	fetchUntil machine.NodeTime
+	fetchUntil actor.Mono
 	fetchGot   int
 }
 
@@ -65,46 +72,53 @@ func (b *Broker) dropConn(c *connection) {
 
 func (b *Broker) addConn(c *connection) { b.conns = append(b.conns, c) }
 
-func (b *Broker) onOpen(e core.ConnOpened) []core.Action {
+func (b *Broker) onOpen(e core.ConnOpened, outbox *brokerOutbox) {
 	if b.stopping || b.findConn(e.Conn) != nil {
-		return []core.Action{core.CloseConn{Conn: e.Conn, Abort: true}}
+		// A repeated open of a known connection closes it in its own Seq
+		// order. Otherwise the broker has no state for the connection and
+		// this close is the only socket IO it ever records for it: Seq 1.
+		seq := uint64(1)
+		if c := b.findConn(e.Conn); c != nil {
+			// The broker forgets the connection: this close is its last IO.
+			seq = c.nextSeq()
+			b.dropConn(c)
+			b.endParked(func(o *operation) bool { return o.s.conn == c })
+		}
+		outbox.Do(core.CloseConn{Conn: e.Conn, Abort: true, Seq: seq})
+		return
 	}
 	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.config.MaxFrame), host: peerHost(e.Peer)})
-	return nil
 }
 
-func (b *Broker) onClosed(e core.ConnClosed) []core.Action {
+func (b *Broker) onClosed(e core.ConnClosed, outbox *brokerOutbox) {
 	c := b.findConn(e.Conn)
 	if c == nil {
-		return nil
+		return
 	}
 	b.dropConn(c)
 	b.endParked(func(o *operation) bool { return o.s.conn == c })
-	if !e.Abort {
-		return []core.Action{core.CloseConn{Conn: c.id}}
-	}
-	return nil
+	// The close is recorded even when the peer reset: it is the last IO of
+	// the connection and lets the executor forget it.
+	outbox.Do(core.CloseConn{Conn: c.id, Abort: e.Abort, Seq: c.nextSeq()})
 }
 
-func (b *Broker) onBytes(e core.BytesReceived) []core.Action {
+func (b *Broker) onBytes(e core.BytesReceived, outbox *brokerOutbox) {
 	c := b.findConn(e.Conn)
 	if c == nil || c.closing {
-		return nil
+		return
 	}
-	c.rx.bytes(e.Data)
+	c.rx.Bytes(e.Data)
 	frames, err := c.fr.Push(e.Data)
-	var acts []core.Action
 	for _, f := range frames {
 		if c.closing {
 			break
 		}
-		acts = append(acts, b.request(c, f)...)
+		b.request(c, f, outbox)
 	}
 	if err != nil {
 		c.closing = true
 	}
 	b.dirty = append(b.dirty, c)
-	return acts
 }
 
 // peerHost is the host part of a peer address "host:port". Kafka shows a
@@ -117,20 +131,20 @@ func peerHost(peer string) string {
 }
 
 // request decodes one frame and routes it.
-func (b *Broker) request(c *connection, frame []byte) []core.Action {
+func (b *Broker) request(c *connection, frame []byte, outbox *brokerOutbox) {
 	h, request, err := b.codec.DecodeRequest(frame)
 	if response, ok := apiVersionsReply(h, request, err); ok {
 		s := b.newSlot(c, h)
 		s.response = response
 		b.finishPart(s)
-		return nil
+		return
 	}
 	if err != nil || b.stopping {
 		c.closing = true
-		return nil
+		return
 	}
 	s := b.newSlot(c, h)
-	return b.handle(s, request)
+	b.handle(s, request, outbox)
 }
 
 // apiVersionsReply is the one ApiVersions answer. An unsupported version of
@@ -190,15 +204,14 @@ func (b *Broker) finalize(s *slot) {
 
 // drainDirty sends every ready head slot, in order per connection, and closes
 // connections that are done.
-func (b *Broker) drainDirty(acts []core.Action) []core.Action {
+func (b *Broker) drainDirty(outbox *brokerOutbox) {
 	for i := range len(b.dirty) {
-		acts = b.drain(b.dirty[i], acts)
+		b.drain(b.dirty[i], outbox)
 	}
 	b.dirty = b.dirty[:0]
-	return acts
 }
 
-func (b *Broker) drain(c *connection, acts []core.Action) []core.Action {
+func (b *Broker) drain(c *connection, outbox *brokerOutbox) {
 	for len(c.q) > 0 && c.q[0].ready {
 		s := c.q[0]
 		c.q = c.q[1:]
@@ -211,13 +224,12 @@ func (b *Broker) drain(c *connection, acts []core.Action) []core.Action {
 			continue
 		}
 		for _, f := range s.facts {
-			acts = append(acts, core.RecordFact{Fact: f})
+			outbox.Fact(f)
 		}
-		acts = append(acts, core.Send{Req: b.nextRequestID(), Conn: c.id, Data: data})
+		outbox.Do(core.Send{Conn: c.id, Data: data, Seq: c.nextSeq()})
 	}
 	if c.closing && !c.closed && (len(c.q) == 0 || c.abort) {
 		b.dropConn(c)
-		acts = append(acts, core.CloseConn{Conn: c.id, Abort: c.abort})
+		outbox.Do(core.CloseConn{Conn: c.id, Abort: c.abort, Seq: c.nextSeq()})
 	}
-	return acts
 }

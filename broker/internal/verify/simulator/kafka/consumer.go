@@ -3,10 +3,9 @@ package kafka
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -15,8 +14,8 @@ import (
 type consumer struct {
 	pos       []int64
 	listed    bool
-	operation machine.ID // outstanding ReadOp, zero when none
-	drain     bool       // PhaseDrain began: stop once a fetch finds the end of every partition
+	operation actor.ID // outstanding ReadOp, zero when none
+	drain     bool     // PhaseDrain began: stop once a fetch finds the end of every partition
 	done      bool
 }
 
@@ -30,10 +29,10 @@ func (c *consumer) hash(h *trace.Hash) {
 	h.Bool(c.done)
 }
 
-func (w *Workload) listReq() *kmsg.ListOffsetsRequest {
+func (c *client) listReq() *kmsg.ListOffsetsRequest {
 	r := kmsg.NewPtrListOffsetsRequest()
 	r.ReplicaID = -1
-	for _, topicPartition := range w.tps {
+	for _, topicPartition := range c.tps {
 		part := kmsg.ListOffsetsRequestTopicPartition{Partition: topicPartition.Partition, CurrentLeaderEpoch: -1, Timestamp: -2}
 		added := false
 		for i := range r.Topics {
@@ -50,10 +49,10 @@ func (w *Workload) listReq() *kmsg.ListOffsetsRequest {
 }
 
 // onList starts each partition at its earliest offset.
-func (w *Workload) onList(c *client, r *kmsg.ListOffsetsResponse) []core.Action {
+func (c *client) onList(r *kmsg.ListOffsetsResponse, o *outbox) {
 	n := 0
-	pos := make([]int64, len(w.tps))
-	for i, topicPartition := range w.tps {
+	pos := make([]int64, len(c.tps))
+	for i, topicPartition := range c.tps {
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
 				if t.Topic == topicPartition.Topic && p.Partition == topicPartition.Partition && p.ErrorCode == 0 && p.Offset >= 0 {
@@ -63,23 +62,24 @@ func (w *Workload) onList(c *client, r *kmsg.ListOffsetsResponse) []core.Action 
 			}
 		}
 	}
-	if n != len(w.tps) {
-		return w.retryStage(c)
+	if n != len(c.tps) {
+		c.retryStage(o)
+		return
 	}
-	c.c.pos, c.c.listed, c.stage, c.Fails = pos, true, stateRunning, 0
-	return w.advance(c)
+	c.c.pos, c.c.listed, c.stage, c.sess.Fails = pos, true, stateRunning, 0
+	c.advance(o)
 }
 
-func (w *Workload) fetchNext(c *client) []core.Action {
+func (c *client) fetchNext(o *outbox) {
 	cs := &c.c
 	if cs.done {
-		return nil
+		return
 	}
 	r := kmsg.NewPtrFetchRequest()
 	r.MaxWaitMillis, r.MinBytes, r.MaxBytes, r.SessionEpoch = 100, 1, 1<<20, -1
-	operation := ReadOp{Client: c.ID}
-	perPart := int32(1024) << w.env.Intn(6)
-	for i, topicPartition := range w.tps {
+	operation := ReadOp{Client: c.id}
+	perPart := int32(1024) << c.env.Intn(6)
+	for i, topicPartition := range c.tps {
 		operation.Parts = append(operation.Parts, ReadFrom{TopicPartition: topicPartition, Off: cs.pos[i]})
 		part := kmsg.FetchRequestTopicPartition{Partition: topicPartition.Partition, CurrentLeaderEpoch: -1, FetchOffset: cs.pos[i],
 			LastFetchedEpoch: -1, LogStartOffset: -1, PartitionMaxBytes: perPart}
@@ -94,26 +94,26 @@ func (w *Workload) fetchNext(c *client) []core.Action {
 			r.Topics = append(r.Topics, kmsg.FetchRequestTopic{Topic: topicPartition.Topic, Partitions: []kmsg.FetchRequestTopicPartition{part}})
 		}
 	}
-	cs.operation = w.env.NewID()
-	if w.history != nil {
-		w.history.Invoke(w.self, cs.operation, cs.operation, operation)
+	cs.operation = c.env.NewID()
+	if c.history != nil {
+		c.history.Invoke(c.env.Self(), cs.operation, cs.operation, operation)
 	}
-	return w.send(c, requestFetch, r)
+	c.send(requestFetch, r, o)
 }
 
 // onFetch parses the answer of each partition (CRC-verified, whole batches,
 // records below the fetch offset dropped) and advances the positions.
-func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
+func (c *client) onFetch(r *kmsg.FetchResponse, o *outbox) {
 	cs := &c.c
-	res := ReadRes{Parts: make([]ReadPart, len(w.tps))}
+	res := ReadRes{Parts: make([]ReadPart, len(c.tps))}
 	got, atEnd := false, true
-	for i, topicPartition := range w.tps {
+	for i, topicPartition := range c.tps {
 		part := &res.Parts[i]
 		part.Code = codeUnknown
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
 				if t.Topic == topicPartition.Topic && p.Partition == topicPartition.Partition {
-					*part = w.readPart(p, cs.pos[i])
+					*part = readPart(p, cs.pos[i])
 				}
 			}
 		}
@@ -124,23 +124,23 @@ func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
 		atEnd = atEnd && part.Code == 0 && !part.Corrupt && cs.pos[i] >= part.HWM
 	}
 	operation := cs.operation
-	cs.operation = machine.ID{}
-	if w.history != nil {
-		w.history.Return(operation, res, history.ResultKnown)
+	cs.operation = actor.ID{}
+	if c.history != nil {
+		c.history.Return(operation, res, history.ResultKnown)
 	}
-	d := 100 + w.env.Intn(200)
+	d := 100 + c.env.Intn(200)
 	if got {
 		d = 30
 	}
-	c.Fails = 0
+	c.sess.Fails = 0
 	if cs.drain && atEnd {
 		cs.done = true
-		return nil
+		return
 	}
-	return []core.Action{c.Wake(machine.Duration(d) * machine.Millisecond)}
+	c.sess.Wake(o, actor.Duration(d)*actor.Millisecond)
 }
 
-func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadPart {
+func readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadPart {
 	out := ReadPart{Code: p.ErrorCode, HWM: p.HighWatermark}
 	if p.ErrorCode != 0 {
 		return out
@@ -169,9 +169,9 @@ func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadP
 }
 
 // abandonFetch closes the outstanding read: it had no effect.
-func (w *Workload) abandonFetch(c *client, why string) {
-	if c.c.operation != (machine.ID{}) && w.history != nil {
-		w.history.Return(c.c.operation, ReadRes{Why: why}, history.GivenUp)
+func (c *client) abandonFetch(why string) {
+	if c.c.operation != (actor.ID{}) && c.history != nil {
+		c.history.Return(c.c.operation, ReadRes{Why: why}, history.GivenUp)
 	}
-	c.c.operation = machine.ID{}
+	c.c.operation = actor.ID{}
 }

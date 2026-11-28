@@ -6,20 +6,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
-func fact(name string, keyValue ...any) machine.Fact {
-	f := machine.Fact{Name: name}
+func fact(name string, keyValue ...any) actor.Fact {
+	f := actor.Fact{Name: name}
 	for i := 0; i+1 < len(keyValue); i += 2 {
-		var v machine.FieldValue
+		var v actor.FieldValue
 		switch x := keyValue[i+1].(type) {
 		case string:
-			v = machine.StringValue(x)
+			v = actor.StringValue(x)
 		case int:
-			v = machine.Int64Value(x)
+			v = actor.Int64Value(x)
 		}
-		f.Fields = append(f.Fields, machine.Field{Key: keyValue[i].(string), Value: v})
+		f.Fields = append(f.Fields, actor.Field{Key: keyValue[i].(string), Value: v})
 	}
 	return f
 }

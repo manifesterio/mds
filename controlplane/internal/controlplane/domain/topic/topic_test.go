@@ -27,9 +27,6 @@ var backends = map[string]func(testing.TB) engine.Engine{
 	},
 }
 
-// The topics rules are compared with the model by the conformance tests in
-// test/conformance (metadata over memory and Pebble).
-
 func TestTrimForgetsKeysNotOffsets(t *testing.T) {
 	a := metadb.New(memory.New())
 	mustCommit(t, a, 0, commit("old", pb("a", 0, 5)))

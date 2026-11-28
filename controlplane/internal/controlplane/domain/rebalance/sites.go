@@ -1,8 +1,7 @@
 package rebalance
 
 import (
-	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The buggify sites of the machine. Each takes a path that is valid but rare
@@ -10,27 +9,32 @@ import (
 // valid machine fail: it only does what a slow host, a late timer or a
 // replayed message could do anyway. The names are stable plain strings, and each site is declared once here.
 var (
-	// SiteTimerLate: a timer fires up to 50 ms late, as a busy host can make it.
-	SiteTimerLate = fault.NewSite("rebalance.timer.late") //determinismcheck:ok catalog handle, set once at start
-	// SiteStaleTimer: when a timer is set again, its old arm fires anyway (as
-	// in live, when it fired just before it was replaced). The old Gen is ignored.
-	SiteStaleTimer = fault.NewSite("rebalance.timer.stale") //determinismcheck:ok catalog handle, set once at start
-	// SiteDuplicateReply: a ReplicaReply comes twice. The second copy has an
-	// unknown request id and is ignored.
-	SiteDuplicateReply = fault.NewSite("rebalance.reply.duplicate") //determinismcheck:ok catalog handle, set once at start
-	// SiteLateDrain: after a write, the queue of the group is taken in a later
+	// SiteTimerLate a timer fires up to 50 ms late, as a busy host can make it.
+	SiteTimerLate = actor.NewSite("rebalance.timer.late") //determinismcheck:ok catalog handle, set once at start
+	// SiteDuplicateReply an answer of the replica comes twice. The second
+	// copy is for a write, commit or read that is over, and is ignored.
+	SiteDuplicateReply = actor.NewSite("rebalance.reply.duplicate") //determinismcheck:ok catalog handle, set once at start
+	// SiteLateDrain after a write, the queue of the group is taken in a later
 	// step. The group stays busy until then, so the order of its inputs is kept;
 	// inputs of other groups may go first.
-	SiteLateDrain = fault.NewSite("rebalance.queue.late-drain") //determinismcheck:ok catalog handle, set once at start
-	// SiteLoadRetry: a load read that came back OK is treated as refused and
+	SiteLateDrain = actor.NewSite("rebalance.queue.late-drain") //determinismcheck:ok catalog handle, set once at start
+	// SiteLoadRetry a load read that came back OK is treated as refused and
 	// sent again after LoadRetry (rule 39).
-	SiteLoadRetry = fault.NewSite("rebalance.load.retry") //determinismcheck:ok catalog handle, set once at start
+	SiteLoadRetry = actor.NewSite("rebalance.load.retry") //determinismcheck:ok catalog handle, set once at start
 )
 
 // lateMax is the most a SiteTimerLate delay adds.
-const lateMax = 50 * machine.Millisecond
+const lateMax = 50 * actor.Millisecond
 
 // maybe reports whether site fires now. The env of production never fires a site.
-func (m *Machine) maybe(site fault.Site) bool {
+func (m *Machine) maybe(site actor.Site) bool {
 	return m.env.Maybe(site)
+}
+
+// duplicate sends msg, an answer of the replica, to the machine again when
+// SiteDuplicateReply fires.
+func (m *Machine) duplicate(msg Input) {
+	if m.maybe(SiteDuplicateReply) {
+		m.o.TellSelf(msg)
+	}
 }

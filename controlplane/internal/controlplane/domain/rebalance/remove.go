@@ -5,7 +5,6 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
 )
 
 // leave handles a LeaveGroup call (rule 26): one code per listed member, and
@@ -23,10 +22,10 @@ func (m *Machine) leave(s *serving, in Leave) {
 		}
 	}
 	if len(gone) == 0 {
-		m.reply(in.Call, runtime.OK, LeaveAnswer{Errs: codes})
+		m.reply(in.ReplyTo, runtime.OK, LeaveAnswer{Errs: codes})
 		return
 	}
-	m.remove(s, g, gone, removeWrite{cause: causeLeave, call: in.Call, codes: codes})
+	m.remove(s, g, gone, removeWrite{cause: causeLeave, call: in.ReplyTo, codes: codes})
 }
 
 // remove removes the members ids of g. The removal is logged first, unless
@@ -43,14 +42,14 @@ func (m *Machine) remove(s *serving, g *group, ids []string, k removeWrite) {
 	if k.cause == causeLeave {
 		reason = reasonLeave
 	}
-	m.startWrite(s, g, contract.GroupRemove{Group: g.name, Members: ids, TimeMs: m.wallMs(), Reason: reason}, k)
+	m.startWrite(g, contract.GroupRemove{Group: g.name, Members: ids, TimeMs: m.wallMs(), Reason: reason}, k)
 }
 
 // removed drops the members from memory after the removal is logged, then
 // goes on (rule 27): at the round end the round ends with the rest.
 func (m *Machine) removed(s *serving, g *group, k removeWrite, dropped bool) {
 	for _, id := range k.ids {
-		m.dropMember(s, g, id)
+		m.dropMember(g, id)
 	}
 	switch {
 	case len(g.members) == 0:
@@ -60,12 +59,8 @@ func (m *Machine) removed(s *serving, g *group, k removeWrite, dropped bool) {
 	default:
 		m.afterRemove(s, g)
 	}
-	if k.cause == causeLeave {
-		if dropped {
-			delete(s.where, k.call)
-		} else {
-			m.reply(k.call, runtime.OK, LeaveAnswer{Errs: k.codes})
-		}
+	if k.cause == causeLeave && !dropped {
+		m.reply(k.call, runtime.OK, LeaveAnswer{Errs: k.codes})
 	}
 }
 
@@ -81,7 +76,7 @@ func (m *Machine) afterRemove(s *serving, g *group) {
 
 // removeRefused handles a GroupRemove the log refused with ErrTooLarge or
 // ErrInvalid: nothing was written and the members stay.
-func (m *Machine) removeRefused(s *serving, g *group, w *write, k removeWrite, code runtime.ErrCode) {
+func (m *Machine) removeRefused(g *group, w *write, k removeWrite, code runtime.ErrCode) {
 	switch k.cause {
 	case causeLeave:
 		for i := range k.codes {
@@ -89,20 +84,20 @@ func (m *Machine) removeRefused(s *serving, g *group, w *write, k removeWrite, c
 				k.codes[i] = code
 			}
 		}
-		m.answerCaller(s, w, k.call, runtime.OK, LeaveAnswer{Errs: k.codes})
+		m.answerCaller(w, k.call, runtime.OK, LeaveAnswer{Errs: k.codes})
 	case causeRoundEnd:
 		m.answerParked(g, g.phase.(*joining).joins, code, nil)
 	case causeSession:
 		if mm := g.find(k.ids[0]); mm != nil {
-			m.touch(mm)
+			m.touch(g, mm)
 		}
 	case causeSyncDeadline:
-		m.arm(&g.round, machine.Duration(g.longest()))
+		m.startRound(g, g.longest())
 	}
 }
 
 // dropMember removes a member from memory. Its parked call gets ErrUnknownMember.
-func (m *Machine) dropMember(s *serving, g *group, id string) {
+func (m *Machine) dropMember(g *group, id string) {
 	mm := g.find(id)
 	if mm == nil {
 		return
@@ -114,8 +109,7 @@ func (m *Machine) dropMember(s *serving, g *group, id string) {
 	if st, ok := g.phase.(*stable); ok {
 		delete(st.assign, id)
 	}
-	m.stop(&mm.session)
-	delete(s.owners, mm.session.id)
+	m.stop(g, sessionKey(g.name, id))
 	g.delete(id)
 }
 
@@ -123,6 +117,6 @@ func (m *Machine) dropMember(s *serving, g *group, id string) {
 func (m *Machine) toEmpty(g *group) {
 	g.phase = empty{}
 	g.leader = ""
-	m.stop(&g.round)
-	m.stop(&g.delay)
+	m.stop(g, roundKey(g.name))
+	m.stop(g, delayKey(g.name))
 }

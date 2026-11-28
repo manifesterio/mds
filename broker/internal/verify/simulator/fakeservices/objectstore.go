@@ -2,8 +2,8 @@ package fakeservices
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/dst/check/faulty"
-	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/faulty"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/service"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -20,14 +20,14 @@ type ObjectStoreFaults struct {
 // with the faults of faulty around it. ErrNotFound and ErrInvalid come only
 // from the spec.
 //
-// It is a kernel.Service. A broker node hands it a core.ObjectCall, and the
-// service answers with core.ObjectDone.
+// It is a service.Service. A broker performs a core.ObjectCall, its executor
+// forwards the call here, and the service answers with core.ObjectDone.
 type ObjectStore struct {
-	*faulty.Service[core.ObjectCall, core.EventData, objectstore.Call, objectstore.Result]
+	*faulty.Service[core.ObjectCall, core.ObjectDone, objectstore.Call, objectstore.Result]
 	spec *objectstore.Spec
 }
 
-var _ kernel.Service[core.ObjectCall, core.EventData] = (*ObjectStore)(nil)
+var _ service.Service[core.ObjectCall, core.ObjectDone] = (*ObjectStore)(nil)
 
 // objectSpec gives objectstore.Spec the Apply method of faulty.Spec.
 type objectSpec struct{ *objectstore.Spec }
@@ -35,32 +35,28 @@ type objectSpec struct{ *objectstore.Spec }
 // Apply runs one call on the spec.
 func (s objectSpec) Apply(call objectstore.Call) objectstore.Result { return s.Exec(call) }
 
-// NewObjectStore returns an empty object store with the given faults. The world
-// gives it its lanes.
-func NewObjectStore(w *kernel.World, f ObjectStoreFaults) *ObjectStore {
+// NewObjectStore returns an empty object store with the given faults. Add it to
+// a System with service.Add.
+func NewObjectStore(f ObjectStoreFaults) *ObjectStore {
 	spec := objectstore.NewSpec()
-	shape := faulty.Shape[core.ObjectCall, core.EventData, objectstore.Call, objectstore.Result]{
-		Name:      "fakeobjectstore",
-		Prefix:    "obj",
-		Asserts:   objectAsserts,
-		Op:        func(c core.ObjectCall) objectstore.Call { return c.Call },
-		RequestID: core.ObjectCall.RequestID,
-		Mutating:  objectMutating,
-		Changed:   objectChanged,
-		Reply:     func(_ core.ObjectCall, r objectstore.Result) core.EventData { return core.ObjectDone{Result: r} },
-		Fail:      objectFail,
-		Corrupt: &faulty.Corruption[objectstore.Call, objectstore.Result]{
-			Prob: f.GetCorruptProb,
-			Targets: func(c objectstore.Call) bool {
-				_, isGet := c.(objectstore.Get)
-				return isGet
-			},
-			Flip:    flipGetBit,
-			Kind:    "obj_get_corrupt",
-			Reached: objectGetCorrupted,
+	shape := faulty.ShapeOf[core.ObjectCall, core.ObjectDone, objectstore.Call, objectstore.Result](
+		"fakeobjectstore", "obj", objectAsserts)
+	shape.Op = func(c core.ObjectCall) objectstore.Call { return c.Call }
+	shape.Mutating = objectMutating
+	shape.Changed = objectChanged
+	shape.Reply = func(_ core.ObjectCall, r objectstore.Result) core.ObjectDone { return core.ObjectDone{Result: r} }
+	shape.Fail = objectFail
+	shape.Corrupt = &faulty.Corruption[objectstore.Call, objectstore.Result]{
+		Prob: f.GetCorruptProb,
+		Targets: func(c objectstore.Call) bool {
+			_, isGet := c.(objectstore.Get)
+			return isGet
 		},
+		Flip:    flipGetBit,
+		Kind:    "obj_get_corrupt",
+		Reached: objectGetCorrupted,
 	}
-	return &ObjectStore{Service: faulty.New(w, faulty.Spec[objectstore.Call, objectstore.Result](objectSpec{spec}), f.Faults, shape), spec: spec}
+	return &ObjectStore{Service: faulty.New(faulty.Spec[objectstore.Call, objectstore.Result](objectSpec{spec}), f.Faults, shape), spec: spec}
 }
 
 // objectMutating reports whether a call may change the stored objects.
@@ -88,20 +84,20 @@ func objectChanged(r objectstore.Result) bool {
 }
 
 // objectFail builds the answer of a failed call. A read has no outcome.
-func objectFail(req core.ObjectCall, f faulty.Failure) core.EventData {
+func objectFail(req core.ObjectCall, f faulty.Failure) core.ObjectDone {
 	err, outcome := core.ErrUnavailable, core.NotApplied
 	if f == faulty.TimedOut {
 		err, outcome = core.ErrTimeout, core.MaybeApplied
 	}
 	switch c := req.Call.(type) {
 	case objectstore.Put:
-		return core.ObjectDone{Result: objectstore.PutDone{Req: c.Req, Key: c.Key, Err: err, Outcome: outcome}}
+		return core.ObjectDone{Result: objectstore.PutDone{Key: c.Key, Err: err, Outcome: outcome}}
 	case objectstore.Get:
-		return core.ObjectDone{Result: objectstore.GetDone{Req: c.Req, Err: err}}
+		return core.ObjectDone{Result: objectstore.GetDone{Err: err}}
 	case objectstore.Delete:
-		return core.ObjectDone{Result: objectstore.DeleteDone{Req: c.Req, Err: err, Outcome: outcome}}
+		return core.ObjectDone{Result: objectstore.DeleteDone{Err: err, Outcome: outcome}}
 	case objectstore.List:
-		return core.ObjectDone{Result: objectstore.ListDone{Req: c.Req, Err: err}}
+		return core.ObjectDone{Result: objectstore.ListDone{Err: err}}
 	}
 	panic("fakeservices: not an object store call")
 }

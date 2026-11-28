@@ -5,16 +5,15 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // write is the one log write a group has in flight. The group is busy until
-// its ReplicaReply, or until its write timer ends the term (section 8).
+// its answer, or until its write timer ends the term (section 8).
 type write struct {
-	req     machine.RequestID
-	timer   timer
-	kind    any  // installWrite, assignWrite or removeWrite: what to do with the answer
-	dropped bool // the caller abandoned the call: apply the answer, but send no reply
+	n       uint64 // its number: an answer to another write of the group is not its own
+	kind    any    // installWrite, assignWrite or removeWrite: what to do with the answer
+	dropped bool   // the caller abandoned the call: apply the answer, but send no reply
 }
 
 type (
@@ -24,7 +23,7 @@ type (
 	}
 	// assignWrite stores the leader's assignment (rule 22).
 	assignWrite struct {
-		call CallID
+		call actor.ReplyTo[Reply]
 		op   contract.GroupAssign
 	}
 	// removeWrite removes members (rules 12, 24, 26, 28). call and codes are
@@ -32,7 +31,7 @@ type (
 	removeWrite struct {
 		cause cause
 		ids   []string
-		call  CallID
+		call  actor.ReplyTo[Reply]
 		codes []runtime.ErrCode
 	}
 )
@@ -47,59 +46,53 @@ const (
 	causeSyncDeadline                  // the sync deadline
 )
 
-// groupReq marks a request id as the write of a group.
-type groupReq struct{ group string }
-
 // caller returns the call that waits for w, if any.
-func (w *write) caller() (CallID, bool) {
+func (w *write) caller() (actor.ReplyTo[Reply], bool) {
 	switch k := w.kind.(type) {
 	case assignWrite:
 		return k.call, true
 	case removeWrite:
 		return k.call, k.cause == causeLeave
 	}
-	return 0, false
+	return actor.ReplyTo[Reply]{}, false
 }
 
 // startWrite logs op for g. g is busy until the answer.
-func (m *Machine) startWrite(s *serving, g *group, op runtime.ControlPlaneOperation, kind any) {
-	w := &write{req: m.submit(op), timer: m.newTimer(), kind: kind}
-	s.reqs[w.req] = groupReq{group: g.name}
-	s.owners[w.timer.id] = timerRef{kind: timerWrite, group: g.name}
-	m.arm(&w.timer, m.cfg.WriteTimeout)
-	if call, ok := w.caller(); ok {
-		s.where[call] = g.name
-	}
+func (m *Machine) startWrite(g *group, op runtime.ControlPlaneOperation, kind any) {
+	w := &write{n: m.number(), kind: kind}
+	name, n := g.name, w.n
+	m.ask(op, true, func(done runtime.ControlPlaneDone) Input { return writeDone{group: name, n: n, done: done} })
+	m.start(nil, writeKey(name), m.cfg.WriteTimeout, writeTimedOut{group: name})
 	g.write = w
 }
 
-// replicaReply takes the answer of a write or a read. An unknown request id
-// (a late answer from an older term, or a second copy) is ignored.
-func (m *Machine) replicaReply(s *serving, r ReplicaReply) {
-	p, ok := s.reqs[r.Req]
-	if !ok {
+// writeDone takes the answer of a write. An answer that is not for the write
+// in flight (a second copy) is ignored.
+func (m *Machine) writeDone(s *serving, in writeDone) {
+	g := s.groups[in.group]
+	if g == nil || g.write == nil || g.write.n != in.n {
 		return
 	}
-	delete(s.reqs, r.Req)
-	if m.maybe(SiteDuplicateReply) {
-		m.send(r) // a second copy comes later; its request id is unknown then
+	m.duplicate(in)
+	w := g.write
+	g.write = nil
+	m.stop(nil, writeKey(g.name))
+	m.settle(s, g, w, in.done)
+	if m.state == s {
+		m.drain(s, g)
 	}
-	switch p := p.(type) {
-	case groupReq:
-		g := s.groups[p.group]
-		w := g.write
-		g.write = nil
-		m.stop(&w.timer)
-		delete(s.owners, w.timer.id)
-		m.settle(s, g, w, r.Done)
-		if m.state == s {
-			m.drain(s, g)
-		}
-	case *commit:
-		m.commitDone(s, p, r.Done)
-	case describeRead:
-		m.describeDone(s, p, r.Done)
+}
+
+// writeTimedOut ends the term when a write got no answer in time: the write
+// may still change the log (rules 36, 38).
+func (m *Machine) writeTimedOut(s *serving, in writeTimedOut) {
+	g := s.groups[in.group]
+	if g == nil || g.write == nil {
+		return
 	}
+	w := g.write
+	g.write = nil
+	m.breakTerm(s, w)
 }
 
 // settle applies the answer of a write. OK: apply. ErrTooLarge or
@@ -133,26 +126,24 @@ func (m *Machine) refused(s *serving, g *group, w *write, code runtime.ErrCode) 
 	case installWrite:
 		m.answerParked(g, g.phase.(*joining).joins, code, nil)
 	case assignWrite:
-		m.answerCaller(s, w, k.call, code, nil)
+		m.answerCaller(w, k.call, code, nil)
 	case removeWrite:
-		m.removeRefused(s, g, w, k, code)
+		m.removeRefused(g, w, k, code)
 	}
 }
 
 // answerCaller replies to the caller of w, unless it was abandoned.
-func (m *Machine) answerCaller(s *serving, w *write, call CallID, code runtime.ErrCode, body Answer) {
-	if w.dropped {
-		delete(s.where, call)
-		return
+func (m *Machine) answerCaller(w *write, call actor.ReplyTo[Reply], code runtime.ErrCode, body Answer) {
+	if !w.dropped {
+		m.reply(call, code, body)
 	}
-	m.reply(call, code, body)
 }
 
 // drain takes the queued inputs of g in order, until one starts a write.
 func (m *Machine) drain(s *serving, g *group) {
 	if len(g.queue) > 0 && m.maybe(SiteLateDrain) {
 		g.draining = true
-		m.send(drainLater{group: g.name})
+		m.o.TellSelf(drainLater{group: g.name})
 		return
 	}
 	for m.state == s && !g.busy() && len(g.queue) > 0 {
@@ -162,10 +153,8 @@ func (m *Machine) drain(s *serving, g *group) {
 	}
 }
 
-// drainLater is sent by the machine to itself when the late drain site fires.
-// Until it comes, the group stays busy, so the order of its inputs is kept.
-type drainLater struct{ group string }
-
+// drainNow takes the queue of a group whose drain was moved to a later
+// Receive. Until then the group stays busy, so the order of its inputs is kept.
 func (m *Machine) drainNow(s *serving, d drainLater) {
 	if g := s.groups[d.group]; g != nil && g.draining {
 		g.draining = false
@@ -175,40 +164,40 @@ func (m *Machine) drainNow(s *serving, d drainLater) {
 
 // breakTerm ends the term after a write that may have changed the log (rule
 // 36). w is the write that failed, already taken off its group. Every call
-// gets ErrUnavailable, every timer stops, memory is dropped, and every group
-// is read again from a fresh tail.
+// gets ErrUnavailable, every timer and replica answer of the term is
+// forgotten, memory is dropped, and every group is read again from a fresh tail.
 func (m *Machine) breakTerm(s *serving, w *write) {
 	m.dropMemory(s, w)
 	m.startLoad(true)
 }
 
-// dropMemory answers every waiting call with ErrUnavailable and stops every
-// timer (rule 34). extra is a write that was already taken off its group.
+// dropMemory forgets every timer and replica answer of the term and answers
+// every waiting call with ErrUnavailable (rule 34). extra is a write that was
+// already taken off its group. The watches of the callers stay: a reply
+// removes them.
 func (m *Machine) dropMemory(s *serving, extra *write) {
+	m.o.ForgetPending()
 	if extra != nil {
-		m.stop(&extra.timer)
 		if call, ok := extra.caller(); ok {
-			m.answerCaller(s, extra, call, runtime.ErrUnavailable, nil)
+			m.answerCaller(extra, call, runtime.ErrUnavailable, nil)
 		}
 	}
 	for _, name := range s.names {
-		m.dropGroup(s, s.groups[name])
+		m.dropGroup(s.groups[name])
 	}
 	for _, d := range s.describes {
 		m.reply(d.call, runtime.ErrUnavailable, nil)
 	}
 	for _, c := range s.commits {
-		m.stop(&c.timer)
 		m.reply(c.call, runtime.ErrUnavailable, nil)
 	}
 	s.describes, s.commits = nil, nil
 }
 
-func (m *Machine) dropGroup(s *serving, g *group) {
-	m.stopAll(g)
+func (m *Machine) dropGroup(g *group) {
 	if w := g.write; w != nil {
 		if call, ok := w.caller(); ok {
-			m.answerCaller(s, w, call, runtime.ErrUnavailable, nil)
+			m.answerCaller(w, call, runtime.ErrUnavailable, nil)
 		}
 	}
 	for _, mm := range g.members {

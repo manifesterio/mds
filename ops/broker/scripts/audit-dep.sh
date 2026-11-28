@@ -38,7 +38,7 @@ need_go=$(go_version "$work")
 repo_go=$(go_version "$repo")
 toolchain=$(printf '%s\n%s\n' "$need_go" "$repo_go" | sort -V | tail -1)
 export GOTOOLCHAIN="go$toolchain+auto"
-(cd "$repo" && go build -o "$work/determinismcheck" github.com/manifesterio/mds/dst/cmd/determinismcheck)
+(cd "$repo" && go build -o "$work/determinismcheck" github.com/manifesterio/mds/ops/tools/determinismcheck)
 dir=$(go list -m -f '{{.Dir}}' "$mod")
 
 section() { printf '\n== %s\n' "$1"; }

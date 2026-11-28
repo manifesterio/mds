@@ -3,24 +3,19 @@ package core
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/shared/objectstore"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
-func TestClassOfCoversEveryEvent(t *testing.T) {
-	control := []EventData{
-		NodeStarted{}, StopRequest{}, TimerFired{}, SendDone{}, ConnectDone{},
-		ObjectDone{Result: objectstore.PutDone{}}, ObjectDone{Result: objectstore.GetDone{}}, ObjectDone{Result: objectstore.DeleteDone{}}, ObjectDone{Result: objectstore.ListDone{}}, ControlPlaneDone{},
-	}
-	data := []EventData{ConnOpened{}, BytesReceived{}, ConnClosed{}}
-	for _, b := range control {
-		if InboxKindOf(b) != machine.Control {
-			t.Errorf("%T: want Control", b)
+// Connection events are Data; everything the node caused itself is Control.
+func TestPriorityOfCoversEveryEvent(t *testing.T) {
+	data := map[string]bool{"ConnOpened": true, "BytesReceived": true, "ConnClosed": true}
+	for name, msg := range sampleEvents() {
+		want := actor.Control
+		if data[name] {
+			want = actor.Data
 		}
-	}
-	for _, b := range data {
-		if InboxKindOf(b) != machine.Data {
-			t.Errorf("%T: want Data", b)
+		if got := PriorityOf(msg); got != want {
+			t.Errorf("%s: priority %d, want %d", name, got, want)
 		}
 	}
 }

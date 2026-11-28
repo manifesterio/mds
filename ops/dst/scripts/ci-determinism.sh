@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
 # CI gate for the deterministic packages of dst: no goroutines, channels, map
 # ranges, package-level state, or imports outside ../ops/dst/determinism-allow.txt.
-# Not in the gate (they use goroutines, wall time or files on purpose):
-#   campaign (parallel seeds), live (the production loop: real time, goroutines,
-#   channels), syncclock, realclock, golden (files), mutant (testing),
-#   examples.
-# The dst v2 packages machine and kernel are in the gate.
+#
+# Opt-out rule: every package under ./actor/..., ./trace/..., ./internal/... and ./sim/... is in the gate by
+# default, so a new package is checked without editing this script. A package
+# that must stay out (it uses goroutines, wall time or files on purpose) is listed
+# by import path in ../ops/dst/determinism-exclude.txt, with a reason.
+# The script prints the final package list before it runs the check.
 set -euo pipefail
 cd "$(dirname "$0")/../../../dst"
 
-pkgs=(
-  ./rng
-  ./sched
-  ./trace
-  ./assert
-  ./fault
-  ./clock
-  ./check
-  ./check/faulty
-  ./machine
-  ./kernel
-)
+module_prefix="github.com/manifesterio/mds/dst/"
+exclude_file="../ops/dst/determinism-exclude.txt"
+
+# Entries of the exclude file: drop trailing # comments, whitespace and blank lines.
+excluded="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' -e '/^$/d' "$exclude_file")"
+
+pkgs=()
+imports="$(go list ./actor/... ./trace/... ./internal/... ./sim/...)"
+while IFS= read -r imp; do
+  if printf '%s\n' "$excluded" | grep -qxF "$imp"; then
+    continue
+  fi
+  pkgs+=("./${imp#"$module_prefix"}")
+done <<< "$imports"
+
+echo "== determinism packages (${#pkgs[@]}), excluded: $(printf '%s\n' "$excluded" | wc -l | tr -d ' ') listed in ${exclude_file}"
+printf '  %s\n' "${pkgs[@]}"
 
 echo "== determinismcheck"
-go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ../ops/dst/determinism-allow.txt "${pkgs[@]}"
+go run github.com/manifesterio/mds/ops/tools/determinismcheck -allow ../ops/dst/determinism-allow.txt "${pkgs[@]}"
 echo "determinism gate passed"

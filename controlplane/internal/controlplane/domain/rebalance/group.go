@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // The Kafka names of the group states (Dead is a group the machine does not have).
@@ -29,8 +29,6 @@ type group struct {
 	members    []*member // sorted by id
 	joinSeq    uint64    // join order of the last member that joined
 	phase      phase
-	round      timer // the round end in Joining, the sync deadline in Syncing and Stable
-	delay      timer // the initial delay
 	write      *write
 	draining   bool    // a buggify site moved the drain of the queue to a later step
 	queue      []Input // inputs that wait for the write, in order
@@ -46,9 +44,8 @@ type member struct {
 	rebalanceMs int32
 	order       uint64     // join order
 	protocols   []Protocol // from its last join
-	session     timer
-	isNew       bool // joined with MemberID "" and has not been in a done round yet
-	synced      bool // synced since the last install
+	isNew       bool       // joined with MemberID "" and has not been in a done round yet
+	synced      bool       // synced since the last install
 }
 
 // phase is what a group holds in one Kafka state. Each value holds only what
@@ -61,15 +58,15 @@ type (
 	// joining is a join round (PreparingRebalance). joins holds the parked
 	// join of each member by id.
 	joining struct {
-		start, end machine.NodeTime
+		start, end actor.Mono
 		ended      bool // the round end passed: the round waits for its members with no end
 		delay      bool // the initial delay still runs
-		joins      map[string]CallID
+		joins      map[string]actor.ReplyTo[Reply]
 	}
 	// syncing waits for the leader's assignment (CompletingRebalance). syncs
 	// holds the parked sync of each follower by id.
 	syncing struct {
-		syncs map[string]CallID
+		syncs map[string]actor.ReplyTo[Reply]
 	}
 	// stable holds the logged assignment of each member by id.
 	stable struct {
@@ -109,16 +106,16 @@ func (g *group) delete(id string) {
 func (g *group) busy() bool { return g.write != nil || g.draining }
 
 // longest is the largest rebalance timeout of the members.
-func (g *group) longest() machine.NodeTime {
+func (g *group) longest() actor.Duration {
 	var ms int32
 	for _, m := range g.members {
 		ms = max(ms, m.rebalanceMs)
 	}
-	return machine.NodeTime(ms) * machine.NodeTime(machine.Millisecond)
+	return actor.Duration(ms) * actor.Millisecond
 }
 
 // parked returns the parked join or sync of m, if any.
-func (g *group) parked(m *member) (CallID, bool) {
+func (g *group) parked(m *member) (actor.ReplyTo[Reply], bool) {
 	switch p := g.phase.(type) {
 	case *joining:
 		c, ok := p.joins[m.id]
@@ -127,7 +124,17 @@ func (g *group) parked(m *member) (CallID, bool) {
 		c, ok := p.syncs[m.id]
 		return c, ok
 	}
-	return 0, false
+	return actor.ReplyTo[Reply]{}, false
+}
+
+// parkedCall returns the member whose parked join or sync is call, or nil.
+func (g *group) parkedCall(call actor.ReplyTo[Reply]) *member {
+	for _, mm := range g.members {
+		if c, ok := g.parked(mm); ok && c == call {
+			return mm
+		}
+	}
+	return nil
 }
 
 // unpark forgets the parked call of m.

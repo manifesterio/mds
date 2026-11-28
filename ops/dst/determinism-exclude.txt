@@ -1,0 +1,5 @@
+# Import paths of dst packages that are NOT in the determinism gate, one per line.
+# Every other package under dst/actor/..., dst/trace/..., dst/internal/... and dst/sim/... is checked by
+# ops/dst/scripts/ci-determinism.sh. Blank lines and # comments are ignored; a
+# trailing # comment gives the reason.
+github.com/manifesterio/mds/dst/internal/seedenv # parses environment variables with strconv and time

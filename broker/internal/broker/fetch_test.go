@@ -7,7 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
 )
 
 // longFetch is a Fetch of offset 0 on topic t, for the partitions given.
@@ -107,7 +107,7 @@ func TestFetchMaxWaitExpiresEmpty(t *testing.T) {
 	fireUntilAnswer(t, h, c)
 	// The answer comes at MaxWait, not a poll interval later: the last poll
 	// waits only until the deadline.
-	if elapsed := h.now - start; elapsed < machine.NodeTime(300*machine.Millisecond) || elapsed > machine.NodeTime(310*machine.Millisecond) {
+	if elapsed := h.now - start; elapsed < actor.Mono(300*actor.Millisecond) || elapsed > actor.Mono(310*actor.Millisecond) {
 		t.Fatalf("answered after %d ns, want about 300 ms", elapsed)
 	}
 	if p := fetched(h.next(c)); len(p.RecordBatches) != 0 || p.ErrorCode != 0 {
@@ -149,7 +149,7 @@ func TestFetchPollsOnlyShortPartition(t *testing.T) {
 	h.produceOne(w, e("t", 1, plain(t, "b")))
 	start := h.now
 	fireUntilAnswer(t, h, c)
-	if elapsed := h.now - start; elapsed < machine.NodeTime(300*machine.Millisecond) {
+	if elapsed := h.now - start; elapsed < actor.Mono(300*actor.Millisecond) {
 		t.Fatalf("answered before MaxWait with %d ns to go, MinBytes not met", elapsed)
 	}
 	if lookups(h, tp0) != 1 {
@@ -190,7 +190,7 @@ func TestFetchParkedAnswersOnStop(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 500, 0))
-	h.do(core.StopRequest{Deadline: h.now + machine.NodeTime(machine.Second)})
+	h.do(core.StopRequest{Deadline: h.now + actor.Mono(actor.Second)})
 	if !h.exited {
 		t.Fatal("a parked fetch held up the stop")
 	}

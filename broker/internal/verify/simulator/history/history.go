@@ -5,11 +5,13 @@
 // The record is generic over the operation type and the result type of the
 // scenario, so a rule reads a typed value and not an empty interface. A scenario
 // uses a sealed sum for each of them.
+//
+// It is owned by the broker Kafka scenario.
 package history
 
 import (
-	"github.com/manifesterio/mds/dst/kernel"
-	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/actor"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // Outcome is what is known about one operation.
@@ -32,12 +34,12 @@ const (
 // identity of a write and is shared by its retries (two requests of an
 // at-least-once producer have one Value).
 type Operation[Op, Res any] struct {
-	ID             machine.ID
-	Value          machine.ID
-	Client         machine.NodeInstance
+	ID             actor.ID
+	Value          actor.ID
+	Client         actor.Incarnation
 	Op             Op
 	InvSeq, RetSeq uint64 // order of events; virtual time can be equal
-	Invoke, Return kernel.Time
+	Invoke, Return sim.Time
 	Outcome        Outcome
 	Result         Res
 }
@@ -52,9 +54,9 @@ type Reader[Op, Res any] interface {
 // they were invoked. Each event gets a sequence number and the virtual time.
 type History[Op, Res any] struct {
 	ops []Operation[Op, Res]
-	idx map[machine.ID]int
+	idx map[actor.ID]int
 	seq uint64
-	now func() kernel.Time
+	now func() sim.Time
 	bad func(msg string)
 }
 
@@ -62,12 +64,12 @@ var _ Reader[int, int] = (*History[int, int])(nil)
 
 // New returns an empty history. now gives the virtual time. bad is called with a
 // message when the workload breaks the rules of the record (the same id twice).
-func New[Op, Res any](now func() kernel.Time, bad func(msg string)) *History[Op, Res] {
-	return &History[Op, Res]{idx: map[machine.ID]int{}, now: now, bad: bad}
+func New[Op, Res any](now func() sim.Time, bad func(msg string)) *History[Op, Res] {
+	return &History[Op, Res]{idx: map[actor.ID]int{}, now: now, bad: bad}
 }
 
 // Invoke records the start of an operation.
-func (h *History[Op, Res]) Invoke(client machine.NodeInstance, id, value machine.ID, op Op) {
+func (h *History[Op, Res]) Invoke(client actor.Incarnation, id, value actor.ID, op Op) {
 	if _, dup := h.idx[id]; dup {
 		h.bad("history: duplicate invoke of an op id")
 		return
@@ -79,7 +81,7 @@ func (h *History[Op, Res]) Invoke(client machine.NodeInstance, id, value machine
 
 // Return completes the operation id. It reports false for an unknown or already
 // completed id, and that is a protocol failure.
-func (h *History[Op, Res]) Return(id machine.ID, result Res, o Outcome) bool {
+func (h *History[Op, Res]) Return(id actor.ID, result Res, o Outcome) bool {
 	i, ok := h.idx[id]
 	if !ok || h.ops[i].Outcome != Pending {
 		h.bad("history: return of an unknown or already completed op id")

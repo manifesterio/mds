@@ -83,19 +83,16 @@ func TestFnvMatchesBytewise(t *testing.T) {
 	}
 }
 
-func TestRingTail(t *testing.T) {
-	r := trace.NewRing[int](3)
-	for i := 1; i <= 5; i++ {
-		r.Add(i)
+func TestStringMapIgnoresOrder(t *testing.T) {
+	a := map[string]string{"x": "1", "y": "2"}
+	b := map[string]string{"y": "2", "x": "1"}
+	if trace.StringMap(a) != trace.StringMap(b) {
+		t.Fatal("same map, different hash")
 	}
-	got := r.Tail()
-	want := []int{3, 4, 5}
-	if len(got) != len(want) {
-		t.Fatalf("len %d want %d", len(got), len(want))
+	if trace.StringMap(a) == trace.StringMap(map[string]string{"x": "1", "y": "3"}) {
+		t.Fatal("a value change did not move the hash")
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v want %v", got, want)
-		}
+	if trace.StringMap(nil) == trace.StringMap(map[string]string{"": ""}) {
+		t.Fatal("empty and one empty entry hash alike")
 	}
 }

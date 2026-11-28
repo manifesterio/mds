@@ -8,13 +8,14 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
-// countGets counts the object GETs among acts.
-func countGets(acts []core.Action) int {
+// countGets counts the object GETs among effects.
+func countGets(effects []actor.Effect) int {
 	n := 0
-	for _, a := range acts {
+	for _, a := range performs(effects) {
 		if oc, ok := a.(core.ObjectCall); ok {
 			if _, isGet := oc.Call.(objectstore.Get); isGet {
 				n++
@@ -38,7 +39,7 @@ func TestSealSortsPartitionsContiguous(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, e("t", 0, b1), e("t", 1, b2), e("t", 0, b3)))
 	h.flush()
 	var objects [][]byte
-	for _, a := range h.all {
+	for _, a := range performs(h.all) {
 		if oc, ok := a.(core.ObjectCall); ok {
 			if put, isPut := oc.Call.(objectstore.Put); isPut {
 				objects = append(objects, put.Data)
@@ -111,7 +112,7 @@ func TestCorruptMergedReadRetried(t *testing.T) {
 	before := len(h.all)
 	merged := int64(len(b1) + len(b3))
 	corrupt := true
-	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
+	h.objHook = func(a core.ObjectCall, run func() core.ObjectDone) core.ObjectDone {
 		d := run()
 		if g, ok := getDone(d); ok && corrupt {
 			corrupt = false
@@ -133,7 +134,7 @@ func TestCorruptMergedReadRetried(t *testing.T) {
 	if gets := countGets(h.all[before:]); gets != 2 {
 		t.Fatalf("%d GETs: want the merged read twice (corrupt, then retry)", gets)
 	}
-	for _, a := range h.all[before:] {
+	for _, a := range performs(h.all[before:]) {
 		if oc, ok := a.(core.ObjectCall); ok {
 			if g, isGet := oc.Call.(objectstore.Get); isGet && g.Ref.Len != merged {
 				t.Fatalf("GET of %d bytes, want the merged %d", g.Ref.Len, merged)
