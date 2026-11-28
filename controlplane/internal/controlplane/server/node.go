@@ -12,10 +12,10 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/broker"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/actor"
 	"github.com/manifesterio/mds/dst/live"
@@ -23,7 +23,7 @@ import (
 
 // Config wires a Node.
 type Config struct {
-	Machine replica.Config
+	Machine core.Config
 	Clock   live.Clock
 	Log     executor.Log
 	// Objects is the checkpoint store. Nil: in memory.
@@ -48,7 +48,7 @@ type Node struct {
 	host    *live.Host
 	replica actor.EntityRef[runtime.EventData]
 	groups  actor.EntityRef[rebalance.Input]
-	m       atomic.Pointer[replica.Replica]
+	m       atomic.Pointer[core.Replica]
 	health  *health.Server
 	leases  *broker.Leases // replica goroutine only (OnLoop); empty until brokers heartbeat
 
@@ -107,7 +107,7 @@ func (n *Node) Start(ctx context.Context) error {
 		Clock: n.config.Clock, Shutdown: n.shutdown, StopGrace: n.config.StopGrace,
 		ExecWorkers: 100,
 	})
-	n.replica = live.Spawn(n.host, replica.Props(n.config.Machine, n.m.Store), func(ctx *live.ExecCtx, io runtime.IO) error {
+	n.replica = live.Spawn(n.host, core.Props(n.config.Machine, n.m.Store), func(ctx *live.ExecCtx, io runtime.IO) error {
 		return runIO(ex, ctx, io)
 	},
 		live.AfterReceive(n.afterReplica))
@@ -173,7 +173,7 @@ func (n *Node) waitReady(ctx context.Context, cancel context.CancelFunc) error {
 	defer deadline.Stop()
 	for {
 		var ready bool
-		err := n.onLoop(ctx, func(m *replica.Replica) { ready = m.Ready() })
+		err := n.onLoop(ctx, func(m *core.Replica) { ready = m.Ready() })
 		switch {
 		case err == nil && ready:
 			n.health.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
@@ -231,7 +231,7 @@ func (n *Node) Close() error {
 
 // onLoop runs fn with the replica on the replica's goroutine, between two
 // Receives, and waits for it.
-func (n *Node) onLoop(ctx context.Context, fn func(m *replica.Replica)) error {
+func (n *Node) onLoop(ctx context.Context, fn func(m *core.Replica)) error {
 	if n.host == nil {
 		return errors.New("controlplane/server: machine not started")
 	}

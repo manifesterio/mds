@@ -7,8 +7,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/contract"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
 
@@ -17,7 +16,7 @@ func TestMachineConfigSetsTheIdempotencyWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := machineConfig(f)
+	c := machineConfig(f).Build()
 	if c.WindowSlots != 4096 {
 		t.Errorf("WindowSlots = %d, want 4096 from -window-slots", c.WindowSlots)
 	}
@@ -30,9 +29,9 @@ func TestMachineConfigSetsTheIdempotencyWindow(t *testing.T) {
 }
 
 // topicCount asks a store how many topics it holds.
-func topicCount(t *testing.T, keyValue engine.Engine) int {
+func topicCount(t *testing.T, keyValue core.Engine) int {
 	t.Helper()
-	d, err := metadb.New(keyValue).Read(contract.DescribeTopics{})
+	d, err := core.NewDB(keyValue).Read(contract.DescribeTopics{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +48,7 @@ func TestPebbleStateReopensEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := metadb.New(first).CreateTopic("orders", 2); code != runtime.OK {
+	if code := core.NewDB(first).CreateTopic("orders", 2); code != runtime.OK {
 		t.Fatalf("CreateTopic code = %v", code)
 	}
 	if n := topicCount(t, first); n != 1 {

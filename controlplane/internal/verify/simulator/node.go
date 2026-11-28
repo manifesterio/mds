@@ -3,14 +3,14 @@ package simulator
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/actor"
 	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
 // simNode is one replica of the simulation. It lives for the whole run. It is
-// the actor "cp-<idx>" of the System, built from replica.Props as production
+// the actor "cp-<idx>" of the System, built from core.Props as production
 // builds it: each boot gives it a new Replica and a new boot number, so
 // nothing of the old boot reaches the new one. Its IO goes to the storage
 // executor (services.go). It can crash, pause and restart.
@@ -18,7 +18,7 @@ type simNode struct {
 	s   *sim
 	idx int
 	ref actor.EntityRef[runtime.EventData]
-	m   *replica.Replica // the replica of the last boot (see replica)
+	m   *core.Replica // the replica of the last boot (see core)
 
 	paused bool // the host paused the node (the System holds its inbox)
 	cut    bool // cut off from the log and the object store
@@ -40,9 +40,9 @@ const (
 )
 
 // newNode spawns the node in the System of s. The node is down until boot.
-func newNode(s *sim, idx int, cfg replica.Config) *simNode {
+func newNode(s *sim, idx int, cfg core.Config) *simNode {
 	n := &simNode{s: s, idx: idx}
-	p := replica.Props(cfg, n.started)
+	p := core.Props(cfg, n.started)
 	p.Name = nodeName(idx)
 	p.Restart = restartAfterTrip
 	n.ref = dstsim.Spawn(s.w, p,
@@ -68,7 +68,7 @@ func (n *simNode) name() string { return nodeName(n.idx) }
 func (n *simNode) up() bool { return n.s.w.Up(n.ref) }
 
 // replica is the replica, or nil while the node is down.
-func (n *simNode) replica() *replica.Replica {
+func (n *simNode) replica() *core.Replica {
 	if !n.up() {
 		return nil
 	}
@@ -77,7 +77,7 @@ func (n *simNode) replica() *replica.Replica {
 
 // started runs at each boot with the new Replica. The rebalance actor boots
 // with it.
-func (n *simNode) started(m *replica.Replica) {
+func (n *simNode) started(m *core.Replica) {
 	n.boots++
 	n.paused = false
 	n.m = m

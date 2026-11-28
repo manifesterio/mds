@@ -111,6 +111,10 @@ Smoke check with `ops/broker/scripts/e2e-kafka-cli.sh`.
 
 Plain one-liners. Code map at `controlplane/internal/controlplane/doc.go`.
 
+Layering is API -> Core -> Loglet: API is server + wire + api/; Core is package
+`core` (SMR entrypoint; metadb materializes logged state); Loglet is executor.
+See `controlplane/internal/controlplane/doc.go`.
+
 - command / event. Client change stored in the log vs fact `Decide` makes at
   apply time (never stored).
 - log / slot / entry. Ordered shared commands. Numbered place written once.

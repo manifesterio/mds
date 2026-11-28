@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/actor"
@@ -19,7 +19,7 @@ import (
 // isCommand reports whether operation is written to the log. Any other
 // operation is a read, answered by the fold.
 func isCommand(operation runtime.ControlPlaneOperation) bool {
-	_, logged := metadb.EntryOf(operation)
+	_, logged := core.EntryOf(operation)
 	return logged
 }
 
@@ -31,7 +31,7 @@ func isCommand(operation runtime.ControlPlaneOperation) bool {
 // loop and the context. Node is the log and read side of every topics RPC and
 // of OffsetFetch.
 func (n *Node) Exec(ctx context.Context, operation runtime.ControlPlaneOperation) (runtime.ControlPlaneDone, error) {
-	if _, logged := metadb.EntryOf(operation); logged {
+	if _, logged := core.EntryOf(operation); logged {
 		return n.ask(ctx, true, func(to actor.ReplyTo[runtime.ControlPlaneDone]) runtime.EventData {
 			return runtime.ControlPlaneDeliver{ReplyTo: to, Op: operation}
 		})

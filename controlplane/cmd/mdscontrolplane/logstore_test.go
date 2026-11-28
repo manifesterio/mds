@@ -41,7 +41,7 @@ func TestLogFlags(t *testing.T) {
 			if f.log.takeoverRankStep != 250*time.Millisecond {
 				t.Fatalf("flag value: %v", f.log.takeoverRankStep)
 			}
-			if got := machineConfig(f).TakeoverRankStep; got != actor.Duration(250*time.Millisecond) {
+			if got := machineConfig(f).Build().TakeoverRankStep; got != actor.Duration(250*time.Millisecond) {
 				t.Fatalf("machine config: %v", got)
 			}
 		}},

@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/dst/actor"
 )
 
@@ -19,7 +19,7 @@ func hb(id int32, host string, port int32) *cpv1.BrokerHeartbeatRequest {
 // TestBrokerHeartbeatActiveReturnsLiveSet: the active node renews each
 // caller and answers with every live broker, sorted by node id.
 func TestBrokerHeartbeatActiveReturnsLiveSet(t *testing.T) {
-	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: actor.Duration(time.Second)})
+	cli, _, stop := startNode(t, activeNode())
 	defer stop()
 	ctx := t.Context()
 
@@ -46,7 +46,7 @@ func TestBrokerHeartbeatActiveReturnsLiveSet(t *testing.T) {
 // TestBrokerHeartbeatInvalidBroker: a broker with no node id, no host or no
 // port is rejected as InvalidArgument before it reaches the run loop.
 func TestBrokerHeartbeatInvalidBroker(t *testing.T) {
-	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: actor.Duration(time.Second)})
+	cli, _, stop := startNode(t, activeNode())
 	defer stop()
 	ctx := t.Context()
 	cases := []struct {
@@ -71,9 +71,8 @@ func TestBrokerHeartbeatInvalidBroker(t *testing.T) {
 // TestBrokerHeartbeatStandbyUnavailable: only the active node keeps the live
 // set, so a standby answers Unavailable and the broker tries another address.
 func TestBrokerHeartbeatStandbyUnavailable(t *testing.T) {
-	cli, _, stop := startNode(t, replica.Config{
-		Rank: 1, Heartbeat: actor.Duration(time.Second), TakeoverAfter: actor.Duration(time.Hour),
-	})
+	cli, _, stop := startNode(t, core.NewConfig().
+		WithRank(1).WithHeartbeat(actor.Duration(time.Second)).WithTakeoverAfter(actor.Duration(time.Hour)))
 	defer stop()
 	_, err := cli.BrokerHeartbeat(t.Context(), hb(1, "b1", 9092))
 	st, ok := status.FromError(err)
@@ -86,7 +85,7 @@ func TestBrokerHeartbeatStandbyUnavailable(t *testing.T) {
 // of the live set after the lease TTL. The node uses the real clock here.
 func TestBrokerHeartbeatLeaseExpires(t *testing.T) {
 	const ttl = 150 * time.Millisecond
-	cli, _, stop := startNodeWithLease(t, replica.Config{Rank: 0, Heartbeat: actor.Duration(time.Second)}, ttl)
+	cli, _, stop := startNodeWithLease(t, activeNode(), ttl)
 	defer stop()
 	ctx := t.Context()
 
@@ -99,6 +98,6 @@ func TestBrokerHeartbeatLeaseExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(response.Brokers) != 1 || response.Brokers[0].NodeId != 2 {
-		t.Fatalf("after expiry brokers = %+v, want only broker 2", response.Brokers)
+		t.Fatalf("after lease expiry brokers = %+v, want only node 2", response.Brokers)
 	}
 }

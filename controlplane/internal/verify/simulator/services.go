@@ -5,9 +5,8 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/verify/check"
 	"github.com/manifesterio/mds/dst/actor"
@@ -307,10 +306,10 @@ func (st *storage) committed(slot runtime.LogPosition, data []byte) {
 	for _, ok := st.history[st.end]; ok; _, ok = st.history[st.end] {
 		st.end++
 	}
-	if cmds, err := replica.EntryCommands(data); err == nil {
-		st.changes[slot] = slices.ContainsFunc(cmds, func(c metadb.Entry) bool { return c.Op != nil })
+	if cmds, err := core.EntryCommands(data); err == nil {
+		st.changes[slot] = slices.ContainsFunc(cmds, func(c core.Entry) bool { return c.Op != nil })
 	}
-	epoch, writer, ok := replica.EntryWriter(data)
+	epoch, writer, ok := core.EntryWriter(data)
 	if !ok {
 		return
 	}

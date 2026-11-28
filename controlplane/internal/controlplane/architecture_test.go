@@ -134,11 +134,21 @@ func check(pkgs map[string]pkg) problems {
 		spec:                 {contractPkg}, // so is the reference model, and it takes nothing else of the module
 		cp + "metadb/engine": {contractPkg, rt},
 		cp + "replica":       {contractPkg, cp + "metadb/engine", cp + "metadb", rt},
-		cp + "executor":      {rt},
+		cp + "core": {
+			cp + "replica",
+			cp + "metadb",
+			rt,
+		},
+		cp + "localstore": {cp + "metadb/engine", cp + "metadb/engine/pebble"},
+		cp + "executor":   {rt},
 	}
 	for dir, allowed := range layers {
 		p.onlyImports(pkgs, dir, allowed, true)
 	}
+
+	// Outer packages reach Core through package core; they do not import the
+	// materialization packages (metadb, its engines, or the topic/group schemas).
+	p = append(p, coreMaterializationImports(pkgs)...)
 
 	// (b) metadb wires the topic and group contexts together and owns the log entry format,
 	// which is protobuf (the log and shared messages). Its only third-party packages are two of
@@ -209,6 +219,45 @@ func check(pkgs map[string]pkg) problems {
 			}
 		}
 	}
+
+	return p
+}
+
+// coreImporters are the packages that talk to Core from outside it.
+var coreImporters = []string{
+	cp + "server",
+	"cmd/mdscontrolplane",
+	"cmd/cpsim",
+	"internal/verify/simulator",
+}
+
+// coreMaterialization is what stays behind package core.
+var coreMaterialization = []string{
+	cp + "metadb",
+	cp + "metadb/engine",
+	cp + "domain/topic",
+	cp + "domain/group",
+}
+
+// coreMaterializationImports reports every import (production or test) of a
+// coreImporter that names a materialization package or one of its subpackages.
+func coreMaterializationImports(pkgs map[string]pkg) problems {
+	var p problems
+	for _, dir := range coreImporters {
+		pk, ok := pkgs[dir]
+		if !ok {
+			continue
+		}
+		for _, imp := range append(slices.Clone(pk.imports), pk.tests...) {
+			rel := local(imp)
+			for _, forbid := range coreMaterialization {
+				if rel == forbid || strings.HasPrefix(rel, forbid+"/") {
+					p.add("%s imports %s: import core instead of Core materialization packages", dir, rel)
+					break
+				}
+			}
+		}
+	}
 	return p
 }
 
@@ -274,6 +323,10 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(e) contract imports an internal package", with(real, contractPkg, cp+"metadb"), contractPkg, cp + "metadb"},
 		{"(e) client imports runtime", with(real, "client", rt), "client", rt},
 		{"(e) spec imports runtime", with(real, spec, rt), spec, rt},
+		{"(f) server imports metadb", with(real, cp+"server", cp+"metadb"), cp + "server", cp + "metadb"},
+		{"(f) binary imports the engine", with(real, "cmd/mdscontrolplane", cp+"metadb/engine"), "cmd/mdscontrolplane", cp + "metadb/engine"},
+		{"(f) simulator imports topic", with(real, "internal/verify/simulator", cp+"domain/topic"), "internal/verify/simulator", cp + "domain/topic"},
+		{"(f) cpsim imports group", with(real, "cmd/cpsim", cp+"domain/group"), "cmd/cpsim", cp + "domain/group"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

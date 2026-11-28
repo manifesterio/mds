@@ -4,7 +4,7 @@ import (
 	"context"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
+	"github.com/manifesterio/mds/controlplane/internal/controlplane/core"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
@@ -18,7 +18,7 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 		ready            bool
 	}
 	ch := make(chan st, 1)
-	err := n.onLoop(ctx, func(m *replica.Replica) {
+	err := n.onLoop(ctx, func(m *core.Replica) {
 		role := "standby"
 		if m.IsActive() {
 			role = "active"
